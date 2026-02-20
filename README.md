@@ -50,6 +50,8 @@ DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI 
                                • Diff Tools (compare/approve)
                                • Single SQL Processing
                                • Pipeline Control
+
+See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크플로우) for detailed workflow.
 ```
 
 <details>
@@ -86,6 +88,8 @@ DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI 
                                • Diff Tools (비교/승인)
                                • 단일 SQL 처리
                                • 파이프라인 제어
+
+더 상세한 워크플로우를 확인하기 위해서 [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크플로우)를 참조하세요.
 ```
 
 </details>
