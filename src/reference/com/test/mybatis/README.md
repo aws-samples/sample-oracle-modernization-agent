@@ -125,8 +125,8 @@ This framework helps modernize Oracle applications by automatically testing MyBa
 
 #### Oracle Database
 ```bash
-export ORACLE_SVC_USER="username"
-export ORACLE_SVC_PASSWORD="password"
+export ORACLE_SVC_USER="<your-oracle-username>"
+export ORACLE_SVC_PASSWORD="<your-oracle-password>"
 export ORACLE_SVC_CONNECT_STRING="host:port:sid"
 export ORACLE_HOME="/path/to/oracle/home"
 export TNS_ADMIN="$ORACLE_HOME/network/admin"
@@ -137,8 +137,8 @@ export TNS_ADMIN="$ORACLE_HOME/network/admin"
 export MYSQL_HOST="hostname"
 export MYSQL_TCP_PORT="3306"
 export MYSQL_DATABASE="database_name"
-export MYSQL_USER="username"
-export MYSQL_PASSWORD="password"
+export MYSQL_USER="<your-mysql-username>"
+export MYSQL_PASSWORD="<your-mysql-password>"
 ```
 
 #### PostgreSQL Database
@@ -146,8 +146,8 @@ export MYSQL_PASSWORD="password"
 export PGHOST="hostname"
 export PGPORT="5432"
 export PGDATABASE="database_name"
-export PGUSER="username"
-export PGPASSWORD="password"
+export PGUSER="<your-pg-username>"
+export PGPASSWORD="<your-pg-password>"
 ```
 
 #### Comparison Testing
