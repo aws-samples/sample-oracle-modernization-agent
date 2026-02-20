@@ -85,7 +85,8 @@ def generate_project_strategy() -> str:
     for line in reversed(lines):
         if line.startswith('📋 결과:'):
             try:
-                result_dict = eval(line.replace('📋 결과:', '').strip())
+                import ast
+                result_dict = ast.literal_eval(line.replace('📋 결과:', '').strip())
                 return json.dumps(result_dict, ensure_ascii=False)
             except:
                 pass

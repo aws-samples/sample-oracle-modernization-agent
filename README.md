@@ -1,5 +1,13 @@
 # OMA - Application SQL Transform Assistant
 
+## ⚠️ Important Disclaimer
+
+This code is provided as a sample for educational and demonstration purposes only.
+
+- **NOT FOR PRODUCTION USE**: Do not deploy without additional security testing.
+- **AI-Generated Output**: SQL transformations must be reviewed before execution.
+- **No Warranty**: Provided "AS IS" without warranty of any kind.
+
 ## What is OMA?
 
 OMA is an AI-powered Multi-Agent system that automatically transforms Oracle SQL to PostgreSQL.
