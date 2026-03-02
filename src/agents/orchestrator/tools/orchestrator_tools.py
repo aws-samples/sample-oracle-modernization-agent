@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH, REPORTS_DIR, LOGS_DIR, OUTPUT_DIR, STRATEGY_DIR
+from utils.project_paths import PROJECT_ROOT, DB_PATH, OUTPUT_DIR, STRATEGY_DIR
 from core.state_manager import StateManager
 from agents.orchestrator.schemas import (
     SetupCheckResult, StepStatusResult, RunStepResult, ResetStepResult,
@@ -301,15 +301,26 @@ def reset_step(step_name: str) -> ResetStepResult:
 
 
 @tool
-def run_step(step_name: str) -> dict:
-    """Execute a pipeline step.
+def run_step(step_name: str) -> RunStepResult:
+    """Execute a pipeline step via direct Agent invocation (importlib).
+
+    Uses importlib.import_module() to directly invoke pipeline step modules
+    instead of subprocess.run(). This provides better performance and enables
+    future callback support for real-time progress updates.
 
     Args:
-        step_name: 'analyze', 'transform', 'validate', 'test', 'merge'
-    
+        step_name: Pipeline step to execute
+            - 'analyze': Source analysis and strategy generation
+            - 'transform': SQL transformation (Oracle → PostgreSQL)
+            - 'review': Rule compliance check
+            - 'validate': Functional equivalence validation
+            - 'test': Database execution testing
+            - 'merge': XML reassembly
+
     Returns:
-        Dict with status, step, output, and needs_merge flag (for test step)
+        RunStepResult with status, details, and needs_merge flag
     """
+    # Module mapping: step_name → (module_name, function_name)
     modules = {
         'analyze':   ('run_source_analyzer', 'run'),
         'transform': ('run_sql_transform',   'run'),
@@ -320,7 +331,12 @@ def run_step(step_name: str) -> dict:
     }
 
     if step_name not in modules:
-        return {'status': 'error', 'error': f'Unknown step: {step_name}. Valid: {list(modules.keys())}'}
+        result: RunStepResult = {
+            'status': 'error',
+            'details': f'Unknown step: {step_name}. Valid: {list(modules.keys())}',
+            'needs_merge': False
+        }
+        return result
 
     module_name, func_name = modules[step_name]
     print(f"\n🚀 Running: {step_name} ({module_name})...\n", flush=True)
@@ -341,76 +357,101 @@ def run_step(step_name: str) -> dict:
             return len(s)
 
     try:
-        import importlib
+        # Direct Agent invocation via importlib
         mod = importlib.import_module(module_name)
         func = getattr(mod, func_name)
+
+        # Capture output while displaying in real-time
         tee = TeeStream(sys.stdout)
         with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
             func()
 
+        # Keep last 100 lines if output is large
         output = ''.join(output_lines[-100:]) if len(output_lines) > 100 else ''.join(output_lines)
+
         print(f"\n✅ {step_name} 완료\n", flush=True)
+
+        # Show helpful tips
         if step_name == 'transform':
             print("💡 Tip: 변환 결과를 확인하려면 → 'diff 리포트 생성' 또는 '[SQL ID] 비교해줘'", flush=True)
-        result = {'status': 'success', 'step': step_name, 'output': output}
+
+        # Check if merge is needed (test step may modify SQL files)
+        needs_merge = False
+        details = f'{step_name} step completed successfully'
 
         if step_name == 'test' and 'Phase 2:' in output and '건 실패 SQL 수정' in output:
-            result['needs_merge'] = True
-            result['details'] = 'Test Agent modified SQL files. Run merge to apply changes to final XML.'
+            needs_merge = True
+            details = 'Test Agent modified SQL files. Run merge step to apply changes to final XML.'
 
+        result: RunStepResult = {
+            'status': 'success',
+            'details': details,
+            'needs_merge': needs_merge
+        }
         return result
 
     except Exception as e:
         output = ''.join(output_lines)
         print(f"\n❌ {step_name} 실패: {e}\n", flush=True)
-        return {'status': 'error', 'step': step_name, 'output': output, 'error': str(e)}
+
+        result: RunStepResult = {
+            'status': 'error',
+            'details': f'{step_name} failed: {str(e)}',
+            'needs_merge': False
+        }
+        return result
 
 
 @tool
-def get_summary() -> dict:
-    """Get full pipeline summary.
+def get_summary() -> SummaryResult:
+    """Get full pipeline summary with counts, output files, and completion status.
 
     Returns:
-        Dict with all counts, output files, and completion status
+        SummaryResult with complete pipeline information
     """
     status = check_step_status()
 
-    # Output files
+    # Output files count
     output_dir = OUTPUT_DIR
     files = {}
     for sub in ['origin', 'extract', 'transform', 'merge']:
         d = output_dir / sub
-        files[sub] = len(list(d.rglob("*.xml"))) if d.exists() else 0
+        count = len(list(d.rglob("*.xml"))) if d.exists() else 0
+        files[sub] = str(count)
 
-    # Reports
-    reports = list(REPORTS_DIR.glob("*.md")) if REPORTS_DIR.exists() else []
-
-    # Logs
-    log_dirs = ['transform', 'review', 'validate', 'test']
-    logs = {}
-    for ld in log_dirs:
-        d = LOGS_DIR / ld
-        logs[ld] = len(list(d.glob("*.log"))) if d.exists() else 0
-
-    summary = {
-        'pipeline_status': status,
-        'output_files': files,
-        'reports': [str(r.name) for r in reports],
-        'logs': logs,
-        'complete': status.get('next_step') == 'complete'
+    # Completion status
+    completion = {
+        'transform_complete': status['transform_complete'],
+        'review_complete': status['review_complete'],
+        'validate_complete': status['validate_complete'],
+        'test_complete': status['test_complete'],
+        'merge_complete': status['merge_complete']
     }
 
+    # Build summary
+    result: SummaryResult = {
+        'total_sqls': status['extracted'],
+        'transformed': status['transformed'],
+        'reviewed': status['reviewed'],
+        'validated': status['validated'],
+        'tested': status['tested'],
+        'merged': int(files.get('merge', '0')),
+        'output_files': files,
+        'completion_status': completion
+    }
+
+    # Print formatted summary
     print(f"\n{'='*60}")
     print(f"📊 OMA Pipeline Summary")
     print(f"{'='*60}")
     print(f"  Source Analyzed: {'✅' if status['source_analyzed'] else '❌'}")
-    print(f"  Transformed:    {status['transformed']}/{status['transform_total']}")
-    print(f"  Reviewed:       {status['reviewed']}/{status['review_total']}")
-    print(f"  Validated:      {status['validated']}/{status['validate_total']}")
-    print(f"  Tested:         {status['tested']}/{status['test_total']}")
-    print(f"  Merged:         {files.get('merge', 0)} files")
+    print(f"  Transformed:    {status['transformed']}/{status['extracted']}")
+    print(f"  Reviewed:       {status['reviewed']}/{status['extracted']}")
+    print(f"  Validated:      {status['validated']}/{status['extracted']}")
+    print(f"  Tested:         {status['tested']}/{status['extracted']}")
+    print(f"  Merged:         {files.get('merge', '0')} files")
     print(f"  Output:         {files}")
-    print(f"  Complete:       {'✅' if summary['complete'] else '❌ Next: ' + str(status.get('next_step'))}")
+    print(f"  Complete:       {'✅ All steps complete' if all(completion.values()) else '❌ Pipeline in progress'}")
     print(f"{'='*60}")
 
-    return summary
+    return result
