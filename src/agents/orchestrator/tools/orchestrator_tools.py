@@ -4,6 +4,11 @@ import sqlite3
 from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH, CONFIG_DIR, REPORTS_DIR, LOGS_DIR, OUTPUT_DIR, MERGE_DIR, STRATEGY_DIR
+from core.state_manager import StateManager
+from agents.orchestrator.schemas import (
+    SetupCheckResult, StepStatusResult, RunStepResult, ResetStepResult,
+    SummaryResult, SearchSqlResult
+)
 
 
 @tool
@@ -188,12 +193,36 @@ def compact_strategy() -> str:
 
 
 @tool
-def check_step_status() -> dict:
+def check_step_status() -> StepStatusResult:
     """Check current pipeline status from DB.
 
     Returns:
-        Dict with step completion counts
+        StepStatusResult with step completion counts and flags
     """
+    state = StateManager(DB_PATH)
+    counts = state.get_step_counts()
+
+    result: StepStatusResult = {
+        'source_analyzed': counts['source_analyzed'],
+        'extracted': counts['extracted'],
+        'transformed': counts['transformed'],
+        'reviewed': counts['reviewed'],
+        'validated': counts['validated'],
+        'tested': counts['tested'],
+        'merged': counts['merged'],
+        'transform_complete': counts['transform_complete'],
+        'review_complete': counts['review_complete'],
+        'validate_complete': counts['validate_complete'],
+        'test_complete': counts['test_complete'],
+        'merge_complete': counts['merge_complete']
+    }
+
+    return result
+
+
+@tool
+def _check_step_status_legacy() -> dict:
+    """Legacy version - kept for compatibility during migration"""
     result = {
         'source_analyzed': False,
         'extracted': 0, 'extract_total': 0,
@@ -340,49 +369,48 @@ def search_sql_ids(keyword: str = "") -> dict:
 
 
 @tool
-def reset_step(step_name: str) -> dict:
+def reset_step(step_name: str) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
-    
+
     Args:
-        step_name: 'transform', 'validate', or 'test'
-    
+        step_name: 'transform', 'review', 'validate', or 'test'
+
     Returns:
-        dict with status and reset count
+        ResetStepResult with status and reset count
     """
     import shutil
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    if step_name == 'transform':
-        cursor.execute("UPDATE transform_target_list SET transformed='N'")
-        count = cursor.rowcount
+
+    state = StateManager(DB_PATH)
+
+    try:
+        # Reset status in DB
+        count = state.reset_step_status(step_name)
+
         # Delete output files
-        for d in ['extract', 'transform', 'origin']:
-            dir_path = PROJECT_ROOT / "output" / d
-            if dir_path.exists():
-                shutil.rmtree(dir_path)
-    elif step_name == 'review':
-        cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE transformed='Y'")
-        count = cursor.rowcount
-    elif step_name == 'validate':
-        cursor.execute("UPDATE transform_target_list SET validated='N'")
-        count = cursor.rowcount
-    elif step_name == 'test':
-        cursor.execute("UPDATE transform_target_list SET tested='N'")
-        count = cursor.rowcount
-        # Delete test output
-        test_dir = PROJECT_ROOT / "output" / "test"
-        if test_dir.exists():
-            shutil.rmtree(test_dir)
-    else:
-        conn.close()
-        return {'status': 'error', 'message': f'Unknown step: {step_name}'}
-    
-    conn.commit()
-    conn.close()
-    
-    return {'status': 'success', 'step': step_name, 'reset_count': count}
+        if step_name == 'transform':
+            for d in ['extract', 'transform', 'origin']:
+                dir_path = PROJECT_ROOT / "output" / d
+                if dir_path.exists():
+                    shutil.rmtree(dir_path)
+        elif step_name == 'test':
+            test_dir = PROJECT_ROOT / "output" / "test"
+            if test_dir.exists():
+                shutil.rmtree(test_dir)
+
+        result: ResetStepResult = {
+            'status': 'success',
+            'step': step_name,
+            'reset_count': count
+        }
+        return result
+
+    except ValueError as e:
+        result: ResetStepResult = {
+            'status': 'error',
+            'step': step_name,
+            'reset_count': 0
+        }
+        return result
 
 
 @tool
