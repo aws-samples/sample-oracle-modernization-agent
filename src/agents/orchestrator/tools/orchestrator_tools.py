@@ -1,9 +1,8 @@
 """Orchestrator tools - pipeline status check and step execution"""
 import sys
-import sqlite3
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH, CONFIG_DIR, REPORTS_DIR, LOGS_DIR, OUTPUT_DIR, MERGE_DIR, STRATEGY_DIR
+from utils.project_paths import PROJECT_ROOT, DB_PATH, REPORTS_DIR, LOGS_DIR, OUTPUT_DIR, STRATEGY_DIR
 from core.state_manager import StateManager
 from agents.orchestrator.schemas import (
     SetupCheckResult, StepStatusResult, RunStepResult, ResetStepResult,
@@ -12,47 +11,68 @@ from agents.orchestrator.schemas import (
 
 
 @tool
-def check_setup() -> dict:
+def check_setup() -> SetupCheckResult:
     """Check if oma_control.db exists and has required properties.
 
     Returns:
-        Dict with ready status and missing items
+        SetupCheckResult with ready status and missing items
     """
     if not DB_PATH.exists():
-        return {'ready': False, 'missing': ['oma_control.db not found. Run: python3 src/run_setup.py']}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': ['oma_control.db not found. Run: python3 src/run_setup.py'],
+            'values': None
+        }
+        return result
 
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
+    state = StateManager(DB_PATH)
 
     # Check properties table
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='properties'")
-    if not cursor.fetchone():
-        conn.close()
-        return {'ready': False, 'missing': ['properties table not found. Run: python3 src/run_setup.py']}
+    if not state.table_exists('properties'):
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': ['properties table not found. Run: python3 src/run_setup.py'],
+            'values': None
+        }
+        return result
 
+    # Check required properties
     required = ['JAVA_SOURCE_FOLDER', 'SOURCE_DBMS_TYPE', 'TARGET_DBMS_TYPE']
     missing = []
     values = {}
+
     for key in required:
-        cursor.execute("SELECT value FROM properties WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        if not row:
+        value = state.get_property(key)
+        if not value:
             missing.append(key)
         else:
-            values[key] = row[0]
-
-    conn.close()
+            values[key] = value
 
     if missing:
-        return {'ready': False, 'missing': missing, 'values': values}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': missing,
+            'values': values if values else None
+        }
+        return result
 
     # Check source folder exists
     src = Path(values['JAVA_SOURCE_FOLDER'])
     if not src.exists():
-        return {'ready': False, 'missing': [f"JAVA_SOURCE_FOLDER path not found: {src}"], 'values': values}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': [f"JAVA_SOURCE_FOLDER path not found: {src}"],
+            'values': values
+        }
+        return result
 
     print(f"✅ Setup OK: {values}")
-    return {'ready': True, 'values': values}
+    result: SetupCheckResult = {
+        'ready': True,
+        'missing': None,
+        'values': values
+    }
+    return result
 
 
 @tool
@@ -106,59 +126,43 @@ def generate_project_strategy() -> str:
 def refine_project_strategy(feedback_type: str = "validation_failures") -> str:
     """
     Refine existing strategy with learning data from failures.
-    
+
     Args:
         feedback_type: Type of feedback to collect
             - 'validation_failures': Failed validation cases
             - 'test_failures': Failed test cases
             - 'all_failures': Both validation and test failures
-    
+
     Returns:
         Success message
     """
     print(f"🔄 Refining strategy with {feedback_type}...")
-    
-    # Collect feedback data from DB
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
+
+    state = StateManager(DB_PATH)
     feedback = {'type': feedback_type, 'cases': []}
-    
+
+    # Collect feedback data using StateManager
     if feedback_type in ['validation_failures', 'all_failures']:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, validated, transform_count
-            FROM transform_target_list
-            WHERE validated = 'N' AND transform_count > 1
-            LIMIT 20
-        """)
-        for row in cursor.fetchall():
+        for row in state.get_validation_failures(limit=20):
             feedback['cases'].append({
                 'stage': 'validate',
                 'mapper': row[0],
                 'sql_id': row[1],
                 'attempts': row[3]
             })
-    
+
     if feedback_type in ['test_failures', 'all_failures']:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, tested, test_result
-            FROM transform_target_list
-            WHERE tested = 'N' AND test_result LIKE '%FAIL%'
-            LIMIT 20
-        """)
-        for row in cursor.fetchall():
+        for row in state.get_test_failures(limit=20):
             feedback['cases'].append({
                 'stage': 'test',
                 'mapper': row[0],
                 'sql_id': row[1],
                 'result': row[3]
             })
-    
-    conn.close()
-    
+
     if not feedback['cases']:
         return "ℹ️ No failure cases found to learn from"
-    
+
     # Call Strategy Refine Agent
     try:
         from agents.strategy_refine.agent import create_strategy_refine_agent
@@ -221,151 +225,34 @@ def check_step_status() -> StepStatusResult:
 
 
 @tool
-def _check_step_status_legacy() -> dict:
-    """Legacy version - kept for compatibility during migration"""
-    result = {
-        'source_analyzed': False,
-        'extracted': 0, 'extract_total': 0,
-        'transformed': 0, 'transform_total': 0,
-        'reviewed': 0, 'review_total': 0,
-        'validated': 0, 'validate_total': 0,
-        'tested': 0, 'test_total': 0,
-        'merged': 0,
-        'next_step': None
-    }
-
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-
-    # Check source_xml_list
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='source_xml_list'")
-    if cursor.fetchone():
-        cursor.execute("SELECT COUNT(*) FROM source_xml_list")
-        count = cursor.fetchone()[0]
-        result['source_analyzed'] = count > 0
-        result['source_count'] = count
-
-    # Check transform_target_list
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
-    if cursor.fetchone():
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        result['extract_total'] = cursor.fetchone()[0]
-        result['extracted'] = result['extract_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
-        result['transformed'] = cursor.fetchone()[0]
-        result['transform_total'] = result['extract_total']
-
-        # reviewed column may not exist yet
-        try:
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
-            result['reviewed'] = cursor.fetchone()[0]
-        except:
-            result['reviewed'] = 0
-        result['review_total'] = result['transform_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-        result['validated'] = cursor.fetchone()[0]
-        result['validate_total'] = result['extract_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y'")
-        result['tested'] = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        result['test_total'] = cursor.fetchone()[0]
-
-    conn.close()
-
-    # Check merge output
-    merge_dir = MERGE_DIR
-    result['merged'] = len(list(merge_dir.rglob("*.xml"))) if merge_dir.exists() else 0
-
-    # Check strategy file
-    strategy_file = STRATEGY_DIR / "transform_strategy.md"
-    result['strategy_exists'] = strategy_file.exists()
-
-    # Add completion flags for each step
-    result['transform_complete'] = result['transformed'] == result['transform_total'] and result['transform_total'] > 0
-    result['review_complete'] = result['reviewed'] == result['review_total'] and result['review_total'] > 0
-    result['validate_complete'] = result['validated'] == result['validate_total'] and result['validate_total'] > 0
-    result['test_complete'] = result['tested'] == result['test_total'] and result['test_total'] > 0
-    result['merge_complete'] = result['merged'] > 0
-
-    # Determine next step
-    if not result['source_analyzed']:
-        result['next_step'] = 'analyze'
-    elif not result['strategy_exists']:
-        result['next_step'] = 'generate_strategy'
-    elif result['transformed'] < result['transform_total'] or result['transform_total'] == 0:
-        result['next_step'] = 'transform'
-    elif result['reviewed'] < result['review_total']:
-        result['next_step'] = 'review'
-    elif result['validated'] < result['validate_total']:
-        result['next_step'] = 'validate'
-    elif result['tested'] < result['test_total']:
-        result['next_step'] = 'test'
-    elif result['merged'] == 0:
-        result['next_step'] = 'merge'
-    else:
-        result['next_step'] = 'complete'
-
-    print(f"📊 Status: analyzed={result['source_analyzed']}, "
-          f"transformed={result['transformed']}/{result['transform_total']}, "
-          f"reviewed={result['reviewed']}/{result['review_total']}, "
-          f"validated={result['validated']}/{result['validate_total']}, "
-          f"tested={result['tested']}/{result['test_total']}, "
-          f"merged={result['merged']}")
-    print(f"➡️  Next: {result['next_step']}")
-
-    return result
-
-
-@tool
-def search_sql_ids(keyword: str = "") -> dict:
+def search_sql_ids(keyword: str = "") -> SearchSqlResult:
     """Search SQL IDs by keyword in mapper_file or sql_id.
-    
+
     Args:
         keyword: Search term (e.g., "User", "select", "Order")
-                 If empty, returns all SQL IDs
-    
+                 If empty, returns first 50 SQL IDs
+
     Returns:
-        Dict with matching SQL IDs grouped by mapper_file
+        SearchSqlResult with matching SQL IDs grouped by mapper_file
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    if keyword:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            WHERE mapper_file LIKE ? OR sql_id LIKE ?
-            ORDER BY mapper_file, seq_no
-        """, (f'%{keyword}%', f'%{keyword}%'))
-    else:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            ORDER BY mapper_file, seq_no
-            LIMIT 50
-        """)
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
+    state = StateManager(DB_PATH)
+    rows = state.search_sqls(keyword, limit=50)
+
     # Group by mapper
     results = {}
     for mapper, sql_id, sql_type in rows:
         if mapper not in results:
             results[mapper] = []
         results[mapper].append({'sql_id': sql_id, 'sql_type': sql_type})
-    
+
     total = sum(len(v) for v in results.values())
-    
-    return {
+
+    result: SearchSqlResult = {
         'total': total,
         'mappers_count': len(results),
-        'results': results,
-        'message': f"Found {total} SQL IDs across {len(results)} mappers"
+        'results': results
     }
+    return result
 
 
 @tool

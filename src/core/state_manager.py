@@ -294,6 +294,89 @@ class StateManager:
             """, (key, value))
             conn.commit()
 
+    # ========== Failure Case Queries ==========
+
+    def get_validation_failures(self, limit: int = 20) -> List[Tuple[str, str, str, int]]:
+        """
+        Get SQLs that failed validation (multiple transform attempts).
+
+        Args:
+            limit: Maximum number of failures to return
+
+        Returns:
+            List of (mapper_file, sql_id, validated, transform_count) tuples
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT mapper_file, sql_id, validated, transform_count
+                FROM transform_target_list
+                WHERE validated = 'N' AND transform_count > 1
+                ORDER BY transform_count DESC
+                LIMIT ?
+            """, (limit,))
+            return cursor.fetchall()
+
+    def get_test_failures(self, limit: int = 20) -> List[Tuple[str, str, str, str]]:
+        """
+        Get SQLs that failed testing.
+
+        Args:
+            limit: Maximum number of failures to return
+
+        Returns:
+            List of (mapper_file, sql_id, tested, test_result) tuples
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT mapper_file, sql_id, tested, test_result
+                FROM transform_target_list
+                WHERE tested = 'N' AND test_result LIKE '%FAIL%'
+                LIMIT ?
+            """, (limit,))
+            return cursor.fetchall()
+
+    def search_sqls(
+        self,
+        keyword: str = "",
+        limit: int = 50
+    ) -> List[Tuple[str, str, str]]:
+        """
+        Search SQL IDs by keyword in mapper_file or sql_id.
+
+        Args:
+            keyword: Search term (searches both mapper_file and sql_id)
+            limit: Maximum number of results
+
+        Returns:
+            List of (mapper_file, sql_id, sql_type) tuples
+
+        Example:
+            results = state.search_sqls('User')
+            # [('UserMapper.xml', 'selectUser', 'select'), ...]
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if keyword:
+                cursor.execute("""
+                    SELECT mapper_file, sql_id, sql_type
+                    FROM transform_target_list
+                    WHERE mapper_file LIKE ? OR sql_id LIKE ?
+                    ORDER BY mapper_file, seq_no
+                    LIMIT ?
+                """, (f'%{keyword}%', f'%{keyword}%', limit))
+            else:
+                cursor.execute("""
+                    SELECT mapper_file, sql_id, sql_type
+                    FROM transform_target_list
+                    ORDER BY mapper_file, seq_no
+                    LIMIT ?
+                """, (limit,))
+
+            return cursor.fetchall()
+
     # ========== Helper Methods ==========
 
     def table_exists(self, table_name: str) -> bool:
