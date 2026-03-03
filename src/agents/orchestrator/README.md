@@ -19,15 +19,15 @@ orchestrator/
 ├── __init__.py                  # Package initialization
 ├── agent.py                     # Main agent implementation
 ├── prompt.md                    # Agent system prompt
+├── schemas.py                   # TypedDict schemas (9 schemas)
 └── tools/
     ├── __init__.py              # Tools package initialization
-    ├── orchestrator_tools.py    # Pipeline management tools
-    └── diff_tools.py            # SQL diff, approval, report tools
+    └── orchestrator_tools.py    # 14 tools (uses StateManager)
 ```
 
 ## Tools
 
-The Orchestrator Agent provides seven core tools for pipeline management:
+The Orchestrator Agent provides 14 tools for pipeline management (uses StateManager for centralized state access):
 
 ### `check_setup()`
 Validates the OMA environment setup and configuration.
@@ -81,22 +81,29 @@ Tests a single SQL against PostgreSQL database.
 - On success: automatically updates DB (tested='Y')
 - Use this for testing specific SQL after modifications
 
-### Diff Tools (from `diff_tools.py`)
+### Additional Tools
 
-#### `show_sql_diff(mapper_file, sql_id)`
-- Shows side-by-side comparison of original Oracle and converted PostgreSQL SQL
+#### `transform_single_sql(mapper_file, sql_id)`
+- Transforms a specific SQL using Transform Agent
 
-#### `generate_diff_report()`
-- Generates a comprehensive diff report for all converted SQLs
+#### `validate_single_sql(mapper_file, sql_id)`
+- Validates a specific SQL using Validate Agent
 
-#### `get_review_candidates()`
-- Lists SQLs that need manual review
+#### `test_and_fix_single_sql(mapper_file, sql_id)`
+- Tests and fixes a specific SQL using Test Agent
 
-#### `approve_conversion(mapper_file, sql_id)`
-- Manually approves a specific SQL conversion
+#### `compact_strategy()`
+- Compacts the strategy file by removing duplicates
 
-#### `suggest_revision(mapper_file, sql_id, suggestion)`
-- Suggests a revision for a specific SQL conversion
+#### `regenerate_strategy()`
+- Regenerates the strategy file from scratch
+
+#### `show_progress()`
+- Shows real-time progress of pipeline execution
+
+#### `delegate_to_review_manager(user_request)`
+- Delegates review-related tasks to ReviewManager Agent
+- ReviewManager provides 5 tools: show_sql_diff, generate_diff_report, get_review_candidates, approve_conversion, suggest_revision
 
 ## Pipeline Steps
 

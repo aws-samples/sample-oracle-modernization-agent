@@ -46,6 +46,7 @@
 │                                                                  │
 │  "전체 파이프라인 실행해줘"  "변환 단계 재수행해줘"                │
 │  "User 관련 SQL 테스트해봐"  "전략 압축해줘"                      │
+│  "변환 결과 비교해줘" (ReviewManager 위임)                        │
 └────────────────────────┬────────────────────────────────────────┘
                          │
         ┌────────────────┼────────────────┬────────────┬──────────┐
@@ -59,6 +60,16 @@
    Mapper 스캔      패턴 분석        AI 자동 변환   품질 검증    DB 실행 테스트
    SQL ID 추출     전략 생성        배치 처리      자동 재변환   에러 자동 수정
                    학습 & 압축                     전략 보강     전략 보강
+
+                         ↓ (delegate)
+                  ┌─────────────┐
+                  │ReviewManager│
+                  │   Agent     │
+                  └─────────────┘
+                         │
+                         ▼
+                  Diff Tools
+                  SQL 비교/승인
 ```
 
 ### 2.2 Orchestrator 워크플로우
@@ -134,16 +145,23 @@
 src/agents/orchestrator/
 ├── agent.py                        # Agent 메인
 ├── prompt.md                       # Agent 프롬프트
+├── schemas.py                      # TypedDict 스키마 정의
 ├── README.md                       # Agent 설명
 └── tools/
     ├── __init__.py
-    ├── pipeline_controller.py      # 파이프라인 실행 제어
-    ├── status_monitor.py           # 상태 모니터링
-    ├── sql_manager.py              # 단일 SQL 관리
-    ├── strategy_manager.py         # 전략 관리
-    ├── setup_checker.py            # 환경 설정 확인
-    ├── orchestrator_tools.py       # Orchestrator 도구
-    └── diff_tools.py               # Diff 도구
+    ├── orchestrator_tools.py       # Orchestrator 14 tools (StateManager 사용)
+
+src/agents/review_manager/
+├── agent.py                        # Agent 메인
+├── prompt.md                       # Agent 프롬프트
+├── schemas.py                      # TypedDict 스키마 정의
+├── README.md                       # Agent 설명
+└── tools/
+    ├── __init__.py
+    └── diff_tools.py               # Diff 5 tools
+
+src/core/
+└── state_manager.py                # 중앙화된 상태 관리
 
 src/
 ├── run_orchestrator.py             # Orchestrator 실행 스크립트
@@ -219,34 +237,46 @@ src/
 
 ## 4. Tools 설계
 
-### 4.1 Tool 목록
+### 4.1 Orchestrator Tools (14개)
 
 | Tool | 목적 | 입력 | 출력 |
 |------|------|------|------|
 | check_setup | 환경 설정 확인 | 없음 | `{status, missing_items, suggestions}` |
 | check_step_status | 파이프라인 상태 확인 | 없음 | `{steps: {analyze, transform, validate, test}, progress}` |
 | run_step | 단일 단계 실행 | step_name, reset, workers | `{status, duration, results}` |
-| run_full_pipeline | 전체 파이프라인 실행 | reset, workers | `{status, total_duration, step_results}` |
 | reset_step | 단계 초기화 | step_name | `{status, reset_items}` |
+| get_summary | 전체 요약 생성 | 없음 | `{overall_status, outputs, reports}` |
 | search_sql_ids | SQL ID 검색 | keyword | `{matches: [{mapper, sql_id, type}]}` |
 | run_single_test | 단일 SQL 테스트 | mapper_file, sql_id | `{status, test_result, error_details}` |
+| transform_single_sql | 단일 SQL 변환 | mapper_file, sql_id | `{status, transformed_sql}` |
+| validate_single_sql | 단일 SQL 검증 | mapper_file, sql_id | `{status, validation_result}` |
+| test_and_fix_single_sql | 단일 SQL 테스트+수정 | mapper_file, sql_id | `{status, test_result, fixed}` |
 | compact_strategy | 전략 압축 | 없음 | `{status, before_size, after_size, reduction}` |
+| regenerate_strategy | 전략 재생성 | 없음 | `{status, strategy_file}` |
 | show_progress | 진행률 표시 | 없음 | `{overall_progress, step_details, eta}` |
-| check_errors | 에러 확인 | 없음 | `{errors: [{step, type, message, suggestion}]}` |
+| delegate_to_review_manager | ReviewManager 위임 | user_request | ReviewManager의 응답 |
 
-**Diff Tools** (별도 모듈):
-- `show_sql_diff`: Oracle vs PostgreSQL Diff 표시
-- `generate_diff_report`: 변환 리포트 생성 (Markdown)
-- `get_review_candidates`: 검토 대상 SQL 필터링
-- `approve_conversion`: 변환 승인 및 노트 기록
-- `suggest_revision`: 사용자 수정사항 적용
+**특징**:
+- StateManager를 통한 중앙화된 DB 접근
+- TypedDict 기반 타입 안전성
+- 직접 DB 호출 최소화 (34 → 29개)
 
-**단일 SQL 처리 Tools** (각 Agent 제공):
-- `transform_single_sql`: 특정 SQL만 변환
-- `validate_single_sql`: 특정 SQL만 검증
-- `test_and_fix_single_sql`: 특정 SQL 테스트 및 수정
+### 4.2 ReviewManager Tools (5개)
 
-**참고**: Diff Tools와 단일 처리 도구는 Orchestrator가 다른 Agent의 도구를 호출하는 방식으로 통합됩니다.
+ReviewManager Agent가 독립적으로 제공하는 도구:
+
+| Tool | 목적 | 입력 | 출력 |
+|------|------|------|------|
+| show_sql_diff | SQL 비교 표시 | mapper_file, sql_id | Oracle vs PostgreSQL Diff |
+| generate_diff_report | 변환 리포트 생성 | mapper_file (선택) | Markdown 리포트 |
+| get_review_candidates | 검토 대상 조회 | filter | `{candidates: [{mapper, sql_id}]}` |
+| approve_conversion | 변환 승인 | mapper_file, sql_id, note | `{status, approved}` |
+| suggest_revision | 수정 제안 적용 | mapper_file, sql_id, suggestion | `{status, revised}` |
+
+**특징**:
+- Orchestrator로부터 완전히 독립
+- Diff 작업 전문화
+- TypedDict 기반 타입 안전성
 
 ### 4.2 check_setup 상세
 
@@ -1089,7 +1119,7 @@ metrics = {
 
 ---
 
-**문서 버전**: 1.1  
-**작성일**: 2026-02-14  
-**최종 업데이트**: 2026-02-20  
+**문서 버전**: 1.2
+**작성일**: 2026-02-14
+**최종 업데이트**: 2026-03-03
 **작성자**: OMA Development Team
