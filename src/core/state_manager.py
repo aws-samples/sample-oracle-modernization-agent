@@ -79,23 +79,44 @@ class StateManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Build parameterized UPDATE query with validated columns
-            updates = []
+            # Build explicit UPDATE statements for each column to avoid dynamic SQL
+            # All column names are hardcoded, all values use parameterized queries
+            set_clauses = []
             values = []
 
-            for col in ALLOWED_COLUMNS:
-                if col in kwargs:
-                    updates.append(f"{col}=?")
-                    values.append(kwargs[col])
+            if 'transformed' in kwargs:
+                set_clauses.append("transformed = ?")
+                values.append(kwargs['transformed'])
+            if 'reviewed' in kwargs:
+                set_clauses.append("reviewed = ?")
+                values.append(kwargs['reviewed'])
+            if 'validated' in kwargs:
+                set_clauses.append("validated = ?")
+                values.append(kwargs['validated'])
+            if 'tested' in kwargs:
+                set_clauses.append("tested = ?")
+                values.append(kwargs['tested'])
+            if 'transform_count' in kwargs:
+                set_clauses.append("transform_count = ?")
+                values.append(kwargs['transform_count'])
+            if 'review_result' in kwargs:
+                set_clauses.append("review_result = ?")
+                values.append(kwargs['review_result'])
+            if 'validation_result' in kwargs:
+                set_clauses.append("validation_result = ?")
+                values.append(kwargs['validation_result'])
+            if 'test_result' in kwargs:
+                set_clauses.append("test_result = ?")
+                values.append(kwargs['test_result'])
 
-            if not updates:
+            if not set_clauses:
                 return
 
-            updates.append("updated_at=CURRENT_TIMESTAMP")
+            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
             values.extend([mapper_file, sql_id])
 
-            # Safe: column names are validated against whitelist, all values are parameterized
-            query = "UPDATE transform_target_list SET " + ", ".join(updates) + " WHERE mapper_file=? AND sql_id=?"
+            # All column names are explicitly hardcoded, preventing SQL injection
+            query = "UPDATE transform_target_list SET " + ", ".join(set_clauses) + " WHERE mapper_file = ? AND sql_id = ?"
             cursor.execute(query, values)
             conn.commit()
 
@@ -457,10 +478,22 @@ class StateManager:
             in query strings. This is the recommended security approach for DDL operations
             in SQLite per OWASP guidelines.
         """
+        # Security: Whitelist of allowed tables to prevent SQL injection
+        ALLOWED_TABLES = {
+            'transform_target_list',
+            'transform_history',
+            'diff_record',
+            'review_history',
+            'validation_history',
+            'test_history'
+        }
+
+        # Validate table is in whitelist
+        if table not in ALLOWED_TABLES:
+            raise ValueError(f"Invalid table name: {table}. Allowed tables: {ALLOWED_TABLES}")
+
         # Security: Strict input validation to prevent SQL injection
         # Only alphanumeric and underscore allowed for identifiers
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table):
-            raise ValueError(f"Invalid table name: {table} - must be alphanumeric/underscore only")
         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
             raise ValueError(f"Invalid column name: {column} - must be alphanumeric/underscore only")
         if not re.match(r'^[a-zA-Z0-9_\s()]+$', column_type):
@@ -470,7 +503,7 @@ class StateManager:
             cursor = conn.cursor()
 
             # Check existing columns
-            # Safe: table name validated with strict regex above (line 470-471)
+            # Safe: table name validated against whitelist above
             # SQLite PRAGMA does not support ? placeholders for table names
             pragma_query = f"PRAGMA table_info({table})"
             cursor.execute(pragma_query)
@@ -478,7 +511,7 @@ class StateManager:
 
             if column not in existing_cols:
                 # Add new column
-                # Safe: all identifiers validated with strict regex above (lines 470-476)
+                # Safe: table validated against whitelist, identifiers validated with strict regex
                 # SQLite ALTER TABLE does not support ? placeholders for identifiers
                 alter_query = f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
                 cursor.execute(alter_query)
