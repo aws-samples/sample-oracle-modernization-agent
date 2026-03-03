@@ -65,38 +65,28 @@ class StateManager:
         if not kwargs:
             return
 
+        # Security: whitelist of allowed columns to prevent SQL injection
+        ALLOWED_COLUMNS = {
+            'transformed', 'reviewed', 'validated', 'tested',
+            'transform_count', 'review_result', 'validation_result', 'test_result'
+        }
+
+        # Validate all keys are in whitelist
+        invalid_keys = set(kwargs.keys()) - ALLOWED_COLUMNS
+        if invalid_keys:
+            raise ValueError(f"Invalid column names: {invalid_keys}. Allowed: {ALLOWED_COLUMNS}")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Build UPDATE with explicit column mapping to avoid SQL injection
-            # Each column is explicitly handled to satisfy security scanners
+            # Build parameterized UPDATE query with validated columns
             updates = []
             values = []
 
-            if 'transformed' in kwargs:
-                updates.append("transformed=?")
-                values.append(kwargs['transformed'])
-            if 'reviewed' in kwargs:
-                updates.append("reviewed=?")
-                values.append(kwargs['reviewed'])
-            if 'validated' in kwargs:
-                updates.append("validated=?")
-                values.append(kwargs['validated'])
-            if 'tested' in kwargs:
-                updates.append("tested=?")
-                values.append(kwargs['tested'])
-            if 'transform_count' in kwargs:
-                updates.append("transform_count=?")
-                values.append(kwargs['transform_count'])
-            if 'review_result' in kwargs:
-                updates.append("review_result=?")
-                values.append(kwargs['review_result'])
-            if 'validation_result' in kwargs:
-                updates.append("validation_result=?")
-                values.append(kwargs['validation_result'])
-            if 'test_result' in kwargs:
-                updates.append("test_result=?")
-                values.append(kwargs['test_result'])
+            for col in ALLOWED_COLUMNS:
+                if col in kwargs:
+                    updates.append(f"{col}=?")
+                    values.append(kwargs[col])
 
             if not updates:
                 return
@@ -104,10 +94,9 @@ class StateManager:
             updates.append("updated_at=CURRENT_TIMESTAMP")
             values.extend([mapper_file, sql_id])
 
-            cursor.execute(
-                "UPDATE transform_target_list SET " + ", ".join(updates) + " WHERE mapper_file=? AND sql_id=?",
-                values
-            )
+            # Safe: column names are validated against whitelist, all values are parameterized
+            query = "UPDATE transform_target_list SET " + ", ".join(updates) + " WHERE mapper_file=? AND sql_id=?"
+            cursor.execute(query, values)
             conn.commit()
 
     def increment_transform_count(self, mapper_file: str, sql_id: str) -> None:
@@ -462,31 +451,35 @@ class StateManager:
             ValueError: If table/column/type contains invalid characters
 
         Security Note:
-            All parameters are strictly validated with regex before use.
-            PRAGMA and ALTER TABLE do not support prepared statements,
-            so input validation is the security mechanism here.
+            SQLite PRAGMA and ALTER TABLE statements do not support parameterized queries.
+            To prevent SQL injection, all identifiers are strictly validated with regex
+            patterns that only allow safe SQL identifier characters before being used
+            in query strings. This is the recommended security approach for DDL operations
+            in SQLite per OWASP guidelines.
         """
-        # Strict validation: only allow safe SQL identifiers
+        # Security: Strict input validation to prevent SQL injection
+        # Only alphanumeric and underscore allowed for identifiers
         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table):
-            raise ValueError(f"Invalid table name: {table}")
+            raise ValueError(f"Invalid table name: {table} - must be alphanumeric/underscore only")
         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
-            raise ValueError(f"Invalid column name: {column}")
-        # Validate column type (only allow safe type definitions)
+            raise ValueError(f"Invalid column name: {column} - must be alphanumeric/underscore only")
         if not re.match(r'^[a-zA-Z0-9_\s()]+$', column_type):
-            raise ValueError(f"Invalid column type: {column_type}")
+            raise ValueError(f"Invalid column type: {column_type} - contains disallowed characters")
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # PRAGMA table_info does not support parameterized queries
-            # Table name has been validated with strict regex above
-            pragma_query = "PRAGMA table_info(" + table + ")"
+            # Check existing columns
+            # Safe: table name validated with strict regex above (line 470-471)
+            # SQLite PRAGMA does not support ? placeholders for table names
+            pragma_query = f"PRAGMA table_info({table})"
             cursor.execute(pragma_query)
-            cols = [c[1] for c in cursor.fetchall()]
+            existing_cols = [c[1] for c in cursor.fetchall()]
 
-            if column not in cols:
-                # ALTER TABLE does not support parameterized queries
-                # All identifiers validated with strict regex above
-                alter_query = "ALTER TABLE " + table + " ADD COLUMN " + column + " " + column_type
+            if column not in existing_cols:
+                # Add new column
+                # Safe: all identifiers validated with strict regex above (lines 470-476)
+                # SQLite ALTER TABLE does not support ? placeholders for identifiers
+                alter_query = f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
                 cursor.execute(alter_query)
                 conn.commit()
