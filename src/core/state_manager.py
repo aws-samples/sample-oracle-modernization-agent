@@ -1,14 +1,24 @@
-"""StateManager - Unified interface for database access"""
-import sqlite3
-import re
+"""StateManager - Unified interface for database access using SQLAlchemy ORM
+
+Security: All database operations use SQLAlchemy ORM to prevent SQL injection.
+No raw SQL string concatenation is used.
+"""
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
+from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_
+from sqlalchemy.orm import Session, sessionmaker
+
+from core.models import (
+    TransformTargetList,
+    Properties,
+    SourceXmlList
+)
 
 
 class StateManager:
     """
-    StateManager provides a unified interface for database access.
+    StateManager provides a unified interface for database access using SQLAlchemy ORM.
 
     Responsibilities:
     - SQL status updates (transformed, reviewed, validated, tested)
@@ -21,26 +31,36 @@ class StateManager:
     - Consistent error handling
     - Reduced code duplication
     - Easier testing and maintenance
+    - SQL injection prevention via ORM
     """
 
     def __init__(self, db_path: Path):
         """
-        Initialize StateManager.
+        Initialize StateManager with SQLAlchemy engine.
 
         Args:
             db_path: Path to oma_control.db
         """
         self.db_path = db_path
-        self.timeout = 10  # seconds
+        self.engine = create_engine(
+            f'sqlite:///{db_path}',
+            connect_args={"timeout": 10},
+            echo=False
+        )
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     @contextmanager
-    def _get_connection(self):
-        """Context manager for database connections"""
-        conn = sqlite3.connect(str(self.db_path), timeout=self.timeout)
+    def _get_session(self) -> Session:
+        """Context manager for database sessions"""
+        session = self.SessionLocal()
         try:
-            yield conn
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
         finally:
-            conn.close()
+            session.close()
 
     # ========== SQL Status Updates ==========
 
@@ -51,7 +71,7 @@ class StateManager:
         **kwargs
     ) -> None:
         """
-        Update SQL status in transform_target_list.
+        Update SQL status in transform_target_list using SQLAlchemy ORM.
 
         Args:
             mapper_file: Mapper file name
@@ -65,7 +85,7 @@ class StateManager:
         if not kwargs:
             return
 
-        # Security: whitelist of allowed columns to prevent SQL injection
+        # Security: whitelist of allowed columns to prevent invalid updates
         ALLOWED_COLUMNS = {
             'transformed', 'reviewed', 'validated', 'tested',
             'transform_count', 'review_result', 'validation_result', 'test_result'
@@ -76,67 +96,39 @@ class StateManager:
         if invalid_keys:
             raise ValueError(f"Invalid column names: {invalid_keys}. Allowed: {ALLOWED_COLUMNS}")
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Build explicit UPDATE statements for each column to avoid dynamic SQL
-            # All column names are hardcoded, all values use parameterized queries
-            set_clauses = []
-            values = []
-
-            if 'transformed' in kwargs:
-                set_clauses.append("transformed = ?")
-                values.append(kwargs['transformed'])
-            if 'reviewed' in kwargs:
-                set_clauses.append("reviewed = ?")
-                values.append(kwargs['reviewed'])
-            if 'validated' in kwargs:
-                set_clauses.append("validated = ?")
-                values.append(kwargs['validated'])
-            if 'tested' in kwargs:
-                set_clauses.append("tested = ?")
-                values.append(kwargs['tested'])
-            if 'transform_count' in kwargs:
-                set_clauses.append("transform_count = ?")
-                values.append(kwargs['transform_count'])
-            if 'review_result' in kwargs:
-                set_clauses.append("review_result = ?")
-                values.append(kwargs['review_result'])
-            if 'validation_result' in kwargs:
-                set_clauses.append("validation_result = ?")
-                values.append(kwargs['validation_result'])
-            if 'test_result' in kwargs:
-                set_clauses.append("test_result = ?")
-                values.append(kwargs['test_result'])
-
-            if not set_clauses:
-                return
-
-            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
-            values.extend([mapper_file, sql_id])
-
-            # All column names are explicitly hardcoded, preventing SQL injection
-            query = "UPDATE transform_target_list SET " + ", ".join(set_clauses) + " WHERE mapper_file = ? AND sql_id = ?"
-            cursor.execute(query, values)
-            conn.commit()
+        with self._get_session() as session:
+            # Use SQLAlchemy ORM update - completely prevents SQL injection
+            stmt = (
+                sql_update(TransformTargetList)
+                .where(
+                    TransformTargetList.mapper_file == mapper_file,
+                    TransformTargetList.sql_id == sql_id
+                )
+                .values(**kwargs, updated_at=func.current_timestamp())
+            )
+            session.execute(stmt)
 
     def increment_transform_count(self, mapper_file: str, sql_id: str) -> None:
         """Increment transform_count for a SQL (used for retry tracking)"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE transform_target_list
-                SET transform_count = COALESCE(transform_count, 0) + 1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE mapper_file=? AND sql_id=?
-            """, (mapper_file, sql_id))
-            conn.commit()
+        with self._get_session() as session:
+            stmt = (
+                sql_update(TransformTargetList)
+                .where(
+                    TransformTargetList.mapper_file == mapper_file,
+                    TransformTargetList.sql_id == sql_id
+                )
+                .values(
+                    transform_count=func.coalesce(TransformTargetList.transform_count, 0) + 1,
+                    updated_at=func.current_timestamp()
+                )
+            )
+            session.execute(stmt)
 
     # ========== Task Retrieval ==========
 
     def get_pending_tasks(self, step: str) -> List[Tuple[str, str]]:
         """
-        Get pending tasks for a pipeline step.
+        Get pending tasks for a pipeline step using SQLAlchemy ORM.
 
         Args:
             step: Pipeline step ('transform', 'review', 'validate', 'test')
@@ -148,42 +140,26 @@ class StateManager:
             pending = state.get_pending_tasks('transform')
             # [('UserMapper.xml', 'selectUser'), ...]
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        # Map step to column attribute - type-safe ORM access
+        step_column_map = {
+            'transform': TransformTargetList.transformed,
+            'review': TransformTargetList.reviewed,
+            'validate': TransformTargetList.validated,
+            'test': TransformTargetList.tested
+        }
 
-            # Explicit SQL for each step to avoid dynamic SQL injection warnings
-            if step == 'transform':
-                cursor.execute("""
-                    SELECT mapper_file, sql_id
-                    FROM transform_target_list
-                    WHERE transformed='N'
-                    ORDER BY mapper_file, seq_no
-                """)
-            elif step == 'review':
-                cursor.execute("""
-                    SELECT mapper_file, sql_id
-                    FROM transform_target_list
-                    WHERE reviewed='N'
-                    ORDER BY mapper_file, seq_no
-                """)
-            elif step == 'validate':
-                cursor.execute("""
-                    SELECT mapper_file, sql_id
-                    FROM transform_target_list
-                    WHERE validated='N'
-                    ORDER BY mapper_file, seq_no
-                """)
-            elif step == 'test':
-                cursor.execute("""
-                    SELECT mapper_file, sql_id
-                    FROM transform_target_list
-                    WHERE tested='N'
-                    ORDER BY mapper_file, seq_no
-                """)
-            else:
-                raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
+        if step not in step_column_map:
+            raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
 
-            return cursor.fetchall()
+        with self._get_session() as session:
+            column = step_column_map[step]
+            stmt = (
+                select(TransformTargetList.mapper_file, TransformTargetList.sql_id)
+                .where(column == 'N')
+                .order_by(TransformTargetList.mapper_file, TransformTargetList.seq_no)
+            )
+            results = session.execute(stmt).all()
+            return [(row[0], row[1]) for row in results]
 
     def get_sql_info(
         self,
@@ -191,7 +167,7 @@ class StateManager:
         sql_id: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Get detailed SQL information.
+        Get detailed SQL information using SQLAlchemy ORM.
 
         Args:
             mapper_file: Mapper file name
@@ -200,37 +176,37 @@ class StateManager:
         Returns:
             Dict with SQL info or None if not found
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT mapper_file, sql_id, sql_type, namespace, source_file, target_file,
-                       transformed, reviewed, validated, tested
-                FROM transform_target_list
-                WHERE mapper_file=? AND sql_id=?
-            """, (mapper_file, sql_id))
+        with self._get_session() as session:
+            stmt = (
+                select(TransformTargetList)
+                .where(
+                    TransformTargetList.mapper_file == mapper_file,
+                    TransformTargetList.sql_id == sql_id
+                )
+            )
+            result = session.execute(stmt).scalar_one_or_none()
 
-            row = cursor.fetchone()
-            if not row:
+            if not result:
                 return None
 
             return {
-                'mapper_file': row[0],
-                'sql_id': row[1],
-                'sql_type': row[2],
-                'namespace': row[3],
-                'source_file': row[4],
-                'target_file': row[5],
-                'transformed': row[6],
-                'reviewed': row[7],
-                'validated': row[8],
-                'tested': row[9]
+                'mapper_file': result.mapper_file,
+                'sql_id': result.sql_id,
+                'sql_type': result.sql_type,
+                'namespace': result.namespace,
+                'source_file': result.source_file,
+                'target_file': result.target_file,
+                'transformed': result.transformed,
+                'reviewed': result.reviewed,
+                'validated': result.validated,
+                'tested': result.tested
             }
 
     # ========== Pipeline Status ==========
 
     def get_step_counts(self) -> Dict[str, int]:
         """
-        Get counts for each pipeline step.
+        Get counts for each pipeline step using SQLAlchemy ORM.
 
         Returns:
             Dict with step counts and completion flags
@@ -249,34 +225,30 @@ class StateManager:
                 'test_complete': False
             }
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Check if source_xml_list exists
-            cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='source_xml_list'")
-            has_source_table = cursor.fetchone()[0] > 0
+        with self._get_session() as session:
+            # Check if source_xml_list table exists
+            inspector = inspect(self.engine)
+            has_source_table = 'source_xml_list' in inspector.get_table_names()
 
             if has_source_table:
-                cursor.execute("SELECT COUNT(*) FROM source_xml_list")
-                source_analyzed = cursor.fetchone()[0]
+                source_analyzed = session.query(func.count(SourceXmlList.id)).scalar()
             else:
                 source_analyzed = 0
 
-            # Get transform_target_list counts
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-            extracted = cursor.fetchone()[0]
+            # Get transform_target_list counts using ORM
+            extracted = session.query(func.count(TransformTargetList.id)).scalar()
 
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
-            transformed = cursor.fetchone()[0]
+            transformed = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.transformed == 'Y').scalar()
 
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
-            reviewed = cursor.fetchone()[0]
+            reviewed = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.reviewed == 'Y').scalar()
 
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-            validated = cursor.fetchone()[0]
+            validated = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.validated == 'Y').scalar()
 
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y'")
-            tested = cursor.fetchone()[0]
+            tested = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.tested == 'Y').scalar()
 
             # Completion flags
             transform_complete = (extracted > 0 and transformed == extracted)
@@ -301,7 +273,7 @@ class StateManager:
 
     def reset_step_status(self, step: str) -> int:
         """
-        Reset status for a pipeline step.
+        Reset status for a pipeline step using SQLAlchemy ORM.
 
         Args:
             step: Pipeline step ('transform', 'review', 'validate', 'test')
@@ -309,66 +281,60 @@ class StateManager:
         Returns:
             Number of rows reset
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        # Map step to column attribute - type-safe ORM access
+        step_column_map = {
+            'transform': 'transformed',
+            'review': 'reviewed',
+            'validate': 'validated',
+            'test': 'tested'
+        }
 
-            # Explicit SQL for each step to avoid dynamic SQL injection warnings
-            if step == 'transform':
-                cursor.execute("""
-                    UPDATE transform_target_list
-                    SET transformed='N', updated_at=CURRENT_TIMESTAMP
-                    WHERE transformed='Y'
-                """)
-            elif step == 'review':
-                cursor.execute("""
-                    UPDATE transform_target_list
-                    SET reviewed='N', updated_at=CURRENT_TIMESTAMP
-                    WHERE reviewed='Y'
-                """)
-            elif step == 'validate':
-                cursor.execute("""
-                    UPDATE transform_target_list
-                    SET validated='N', updated_at=CURRENT_TIMESTAMP
-                    WHERE validated='Y'
-                """)
-            elif step == 'test':
-                cursor.execute("""
-                    UPDATE transform_target_list
-                    SET tested='N', updated_at=CURRENT_TIMESTAMP
-                    WHERE tested='Y'
-                """)
-            else:
-                raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
+        if step not in step_column_map:
+            raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
 
-            reset_count = cursor.rowcount
-            conn.commit()
-            return reset_count
+        column_name = step_column_map[step]
+
+        with self._get_session() as session:
+            # Get column attribute dynamically but safely (no SQL injection risk with ORM)
+            column_attr = getattr(TransformTargetList, column_name)
+
+            stmt = (
+                sql_update(TransformTargetList)
+                .where(column_attr == 'Y')
+                .values(**{column_name: 'N', 'updated_at': func.current_timestamp()})
+            )
+            result = session.execute(stmt)
+            return result.rowcount
 
     # ========== Property Management ==========
 
     def get_property(self, key: str) -> Optional[str]:
-        """Get a property value from properties table"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM properties WHERE key=?", (key,))
-            row = cursor.fetchone()
-            return row[0] if row else None
+        """Get a property value from properties table using ORM"""
+        with self._get_session() as session:
+            stmt = select(Properties.value).where(Properties.key == key)
+            result = session.execute(stmt).scalar_one_or_none()
+            return result
 
     def set_property(self, key: str, value: str) -> None:
-        """Set a property value in properties table"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO properties (key, value)
-                VALUES (?, ?)
-            """, (key, value))
-            conn.commit()
+        """Set a property value in properties table using ORM"""
+        with self._get_session() as session:
+            # Check if property exists
+            existing = session.query(Properties).filter(Properties.key == key).first()
+
+            if existing:
+                # Update existing
+                existing.value = value
+                existing.updated_at = func.current_timestamp()
+            else:
+                # Insert new
+                new_prop = Properties(key=key, value=value)
+                session.add(new_prop)
 
     # ========== Failure Case Queries ==========
 
     def get_validation_failures(self, limit: int = 20) -> List[Tuple[str, str, str, int]]:
         """
-        Get SQLs that failed validation (multiple transform attempts).
+        Get SQLs that failed validation (multiple transform attempts) using ORM.
 
         Args:
             limit: Maximum number of failures to return
@@ -376,20 +342,27 @@ class StateManager:
         Returns:
             List of (mapper_file, sql_id, validated, transform_count) tuples
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT mapper_file, sql_id, validated, transform_count
-                FROM transform_target_list
-                WHERE validated = 'N' AND transform_count > 1
-                ORDER BY transform_count DESC
-                LIMIT ?
-            """, (limit,))
-            return cursor.fetchall()
+        with self._get_session() as session:
+            stmt = (
+                select(
+                    TransformTargetList.mapper_file,
+                    TransformTargetList.sql_id,
+                    TransformTargetList.validated,
+                    TransformTargetList.transform_count
+                )
+                .where(
+                    TransformTargetList.validated == 'N',
+                    TransformTargetList.transform_count > 1
+                )
+                .order_by(TransformTargetList.transform_count.desc())
+                .limit(limit)
+            )
+            results = session.execute(stmt).all()
+            return [(row[0], row[1], row[2], row[3]) for row in results]
 
     def get_test_failures(self, limit: int = 20) -> List[Tuple[str, str, str, str]]:
         """
-        Get SQLs that failed testing.
+        Get SQLs that failed testing using ORM.
 
         Args:
             limit: Maximum number of failures to return
@@ -397,15 +370,22 @@ class StateManager:
         Returns:
             List of (mapper_file, sql_id, tested, test_result) tuples
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT mapper_file, sql_id, tested, test_result
-                FROM transform_target_list
-                WHERE tested = 'N' AND test_result LIKE '%FAIL%'
-                LIMIT ?
-            """, (limit,))
-            return cursor.fetchall()
+        with self._get_session() as session:
+            stmt = (
+                select(
+                    TransformTargetList.mapper_file,
+                    TransformTargetList.sql_id,
+                    TransformTargetList.tested,
+                    TransformTargetList.test_result
+                )
+                .where(
+                    TransformTargetList.tested == 'N',
+                    TransformTargetList.test_result.like('%FAIL%')
+                )
+                .limit(limit)
+            )
+            results = session.execute(stmt).all()
+            return [(row[0], row[1], row[2], row[3]) for row in results]
 
     def search_sqls(
         self,
@@ -413,7 +393,7 @@ class StateManager:
         limit: int = 50
     ) -> List[Tuple[str, str, str]]:
         """
-        Search SQL IDs by keyword in mapper_file or sql_id.
+        Search SQL IDs by keyword in mapper_file or sql_id using ORM.
 
         Args:
             keyword: Search term (searches both mapper_file and sql_id)
@@ -426,93 +406,29 @@ class StateManager:
             results = state.search_sqls('User')
             # [('UserMapper.xml', 'selectUser', 'select'), ...]
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with self._get_session() as session:
+            stmt = select(
+                TransformTargetList.mapper_file,
+                TransformTargetList.sql_id,
+                TransformTargetList.sql_type
+            ).order_by(TransformTargetList.mapper_file, TransformTargetList.seq_no)
 
             if keyword:
-                cursor.execute("""
-                    SELECT mapper_file, sql_id, sql_type
-                    FROM transform_target_list
-                    WHERE mapper_file LIKE ? OR sql_id LIKE ?
-                    ORDER BY mapper_file, seq_no
-                    LIMIT ?
-                """, (f'%{keyword}%', f'%{keyword}%', limit))
-            else:
-                cursor.execute("""
-                    SELECT mapper_file, sql_id, sql_type
-                    FROM transform_target_list
-                    ORDER BY mapper_file, seq_no
-                    LIMIT ?
-                """, (limit,))
+                search_pattern = f'%{keyword}%'
+                stmt = stmt.where(
+                    or_(
+                        TransformTargetList.mapper_file.like(search_pattern),
+                        TransformTargetList.sql_id.like(search_pattern)
+                    )
+                )
 
-            return cursor.fetchall()
+            stmt = stmt.limit(limit)
+            results = session.execute(stmt).all()
+            return [(row[0], row[1], row[2]) for row in results]
 
     # ========== Helper Methods ==========
 
     def table_exists(self, table_name: str) -> bool:
-        """Check if a table exists"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM sqlite_master
-                WHERE type='table' AND name=?
-            """, (table_name,))
-            return cursor.fetchone()[0] > 0
-
-    def add_column_if_not_exists(self, table: str, column: str, column_type: str) -> None:
-        """
-        Add a column to a table if it doesn't exist.
-
-        Args:
-            table: Table name (alphanumeric and underscore only)
-            column: Column name (alphanumeric and underscore only)
-            column_type: SQLite column type (alphanumeric, spaces, and parentheses only)
-
-        Raises:
-            ValueError: If table/column/type contains invalid characters
-
-        Security Note:
-            SQLite PRAGMA and ALTER TABLE statements do not support parameterized queries.
-            To prevent SQL injection, all identifiers are strictly validated with regex
-            patterns that only allow safe SQL identifier characters before being used
-            in query strings. This is the recommended security approach for DDL operations
-            in SQLite per OWASP guidelines.
-        """
-        # Security: Whitelist of allowed tables to prevent SQL injection
-        ALLOWED_TABLES = {
-            'transform_target_list',
-            'transform_history',
-            'diff_record',
-            'review_history',
-            'validation_history',
-            'test_history'
-        }
-
-        # Validate table is in whitelist
-        if table not in ALLOWED_TABLES:
-            raise ValueError(f"Invalid table name: {table}. Allowed tables: {ALLOWED_TABLES}")
-
-        # Security: Strict input validation to prevent SQL injection
-        # Only alphanumeric and underscore allowed for identifiers
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
-            raise ValueError(f"Invalid column name: {column} - must be alphanumeric/underscore only")
-        if not re.match(r'^[a-zA-Z0-9_\s()]+$', column_type):
-            raise ValueError(f"Invalid column type: {column_type} - contains disallowed characters")
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Check existing columns
-            # Safe: table name validated against whitelist above
-            # SQLite PRAGMA does not support ? placeholders for table names
-            pragma_query = f"PRAGMA table_info({table})"
-            cursor.execute(pragma_query)
-            existing_cols = [c[1] for c in cursor.fetchall()]
-
-            if column not in existing_cols:
-                # Add new column
-                # Safe: table validated against whitelist, identifiers validated with strict regex
-                # SQLite ALTER TABLE does not support ? placeholders for identifiers
-                alter_query = f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
-                cursor.execute(alter_query)
-                conn.commit()
+        """Check if a table exists using SQLAlchemy inspector"""
+        inspector = inspect(self.engine)
+        return table_name in inspector.get_table_names()

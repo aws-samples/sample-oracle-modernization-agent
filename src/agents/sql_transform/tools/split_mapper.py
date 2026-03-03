@@ -105,6 +105,7 @@ def _extract_level1_elements(xml_content: str):
 
 
 def _init_table(conn):
+    """Create transform_target_list table with complete schema (all 20 columns)"""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS transform_target_list (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,7 +121,13 @@ def _init_table(conn):
             tested TEXT DEFAULT 'N',
             completed TEXT DEFAULT 'N',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed TEXT DEFAULT 'N',
+            review_notes TEXT,
+            transform_count INTEGER,
+            review_result TEXT,
+            validation_result TEXT,
+            test_result TEXT
         )
     """)
     conn.commit()

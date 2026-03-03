@@ -176,12 +176,7 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
         conn.close()
         return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
 
-    # Ensure columns exist
-    cursor.execute("PRAGMA table_info(transform_target_list)")
-    cols = [c[1] for c in cursor.fetchall()]
-    if 'review_notes' not in cols:
-        cursor.execute("ALTER TABLE transform_target_list ADD COLUMN review_notes TEXT")
-
+    # Schema now includes 'review_notes' column from initial CREATE TABLE
     cursor.execute(
         "UPDATE transform_target_list SET reviewed='Y', review_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
         (notes, mapper_file, sql_id)

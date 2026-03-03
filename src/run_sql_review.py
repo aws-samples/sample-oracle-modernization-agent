@@ -16,18 +16,6 @@ from agents.sql_review.tools.review_tools import get_pending_reviews
 _log_dir = LOGS_DIR / "review"
 
 
-def _ensure_reviewed_column():
-    """Add 'reviewed' column if not exists."""
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(transform_target_list)")
-    cols = [r[1] for r in cursor.fetchall()]
-    if 'reviewed' not in cols:
-        conn.execute("ALTER TABLE transform_target_list ADD COLUMN reviewed TEXT DEFAULT 'N'")
-        conn.commit()
-    conn.close()
-
-
 def _group_by_file_size(sql_ids: list, max_group_bytes=30000) -> list:
     """Group SQL IDs by estimated token size. Review reads both source + transform."""
     groups, current, size = [], [], 0
@@ -207,7 +195,7 @@ def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
 
 def run(max_workers=8, max_rounds=2):
     print("🔍 SQL Review Agent 시작...\n", flush=True)
-    _ensure_reviewed_column()
+    # Schema now includes 'reviewed' column from initial CREATE TABLE
 
     for round_num in range(1, max_rounds + 1):
         if round_num > 1:
@@ -276,7 +264,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.reset:
-        _ensure_reviewed_column()
+        # Schema now includes 'reviewed' column from initial CREATE TABLE
         conn = sqlite3.connect(str(DB_PATH), timeout=10)
         conn.execute("UPDATE transform_target_list SET reviewed='N' WHERE transformed='Y'")
         conn.commit()
