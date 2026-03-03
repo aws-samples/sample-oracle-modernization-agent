@@ -16,6 +16,8 @@ venv/
 # IDE
 .vscode/
 .idea/
+.claude/
+.kiro/
 
 # Project specific
 src/config/oma_control.db
