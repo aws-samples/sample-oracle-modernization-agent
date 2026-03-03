@@ -1,53 +1,78 @@
 """Orchestrator tools - pipeline status check and step execution"""
 import sys
-import sqlite3
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH, CONFIG_DIR, REPORTS_DIR, LOGS_DIR, OUTPUT_DIR, MERGE_DIR, STRATEGY_DIR
+from utils.project_paths import PROJECT_ROOT, DB_PATH, OUTPUT_DIR, STRATEGY_DIR
+from core.state_manager import StateManager
+from agents.orchestrator.schemas import (
+    SetupCheckResult, StepStatusResult, RunStepResult, ResetStepResult,
+    SummaryResult, SearchSqlResult
+)
 
 
 @tool
-def check_setup() -> dict:
+def check_setup() -> SetupCheckResult:
     """Check if oma_control.db exists and has required properties.
 
     Returns:
-        Dict with ready status and missing items
+        SetupCheckResult with ready status and missing items
     """
     if not DB_PATH.exists():
-        return {'ready': False, 'missing': ['oma_control.db not found. Run: python3 src/run_setup.py']}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': ['oma_control.db not found. Run: python3 src/run_setup.py'],
+            'values': None
+        }
+        return result
 
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
+    state = StateManager(DB_PATH)
 
     # Check properties table
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='properties'")
-    if not cursor.fetchone():
-        conn.close()
-        return {'ready': False, 'missing': ['properties table not found. Run: python3 src/run_setup.py']}
+    if not state.table_exists('properties'):
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': ['properties table not found. Run: python3 src/run_setup.py'],
+            'values': None
+        }
+        return result
 
+    # Check required properties
     required = ['JAVA_SOURCE_FOLDER', 'SOURCE_DBMS_TYPE', 'TARGET_DBMS_TYPE']
     missing = []
     values = {}
+
     for key in required:
-        cursor.execute("SELECT value FROM properties WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        if not row:
+        value = state.get_property(key)
+        if not value:
             missing.append(key)
         else:
-            values[key] = row[0]
-
-    conn.close()
+            values[key] = value
 
     if missing:
-        return {'ready': False, 'missing': missing, 'values': values}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': missing,
+            'values': values if values else None
+        }
+        return result
 
     # Check source folder exists
     src = Path(values['JAVA_SOURCE_FOLDER'])
     if not src.exists():
-        return {'ready': False, 'missing': [f"JAVA_SOURCE_FOLDER path not found: {src}"], 'values': values}
+        result: SetupCheckResult = {
+            'ready': False,
+            'missing': [f"JAVA_SOURCE_FOLDER path not found: {src}"],
+            'values': values
+        }
+        return result
 
     print(f"✅ Setup OK: {values}")
-    return {'ready': True, 'values': values}
+    result: SetupCheckResult = {
+        'ready': True,
+        'missing': None,
+        'values': values
+    }
+    return result
 
 
 @tool
@@ -101,59 +126,43 @@ def generate_project_strategy() -> str:
 def refine_project_strategy(feedback_type: str = "validation_failures") -> str:
     """
     Refine existing strategy with learning data from failures.
-    
+
     Args:
         feedback_type: Type of feedback to collect
             - 'validation_failures': Failed validation cases
             - 'test_failures': Failed test cases
             - 'all_failures': Both validation and test failures
-    
+
     Returns:
         Success message
     """
     print(f"🔄 Refining strategy with {feedback_type}...")
-    
-    # Collect feedback data from DB
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
+
+    state = StateManager(DB_PATH)
     feedback = {'type': feedback_type, 'cases': []}
-    
+
+    # Collect feedback data using StateManager
     if feedback_type in ['validation_failures', 'all_failures']:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, validated, transform_count
-            FROM transform_target_list
-            WHERE validated = 'N' AND transform_count > 1
-            LIMIT 20
-        """)
-        for row in cursor.fetchall():
+        for row in state.get_validation_failures(limit=20):
             feedback['cases'].append({
                 'stage': 'validate',
                 'mapper': row[0],
                 'sql_id': row[1],
                 'attempts': row[3]
             })
-    
+
     if feedback_type in ['test_failures', 'all_failures']:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, tested, test_result
-            FROM transform_target_list
-            WHERE tested = 'N' AND test_result LIKE '%FAIL%'
-            LIMIT 20
-        """)
-        for row in cursor.fetchall():
+        for row in state.get_test_failures(limit=20):
             feedback['cases'].append({
                 'stage': 'test',
                 'mapper': row[0],
                 'sql_id': row[1],
                 'result': row[3]
             })
-    
-    conn.close()
-    
+
     if not feedback['cases']:
         return "ℹ️ No failure cases found to learn from"
-    
+
     # Call Strategy Refine Agent
     try:
         from agents.strategy_refine.agent import create_strategy_refine_agent
@@ -188,213 +197,130 @@ def compact_strategy() -> str:
 
 
 @tool
-def check_step_status() -> dict:
+def check_step_status() -> StepStatusResult:
     """Check current pipeline status from DB.
 
     Returns:
-        Dict with step completion counts
+        StepStatusResult with step completion counts and flags
     """
-    result = {
-        'source_analyzed': False,
-        'extracted': 0, 'extract_total': 0,
-        'transformed': 0, 'transform_total': 0,
-        'reviewed': 0, 'review_total': 0,
-        'validated': 0, 'validate_total': 0,
-        'tested': 0, 'test_total': 0,
-        'merged': 0,
-        'next_step': None
+    state = StateManager(DB_PATH)
+    counts = state.get_step_counts()
+
+    result: StepStatusResult = {
+        'source_analyzed': counts['source_analyzed'],
+        'extracted': counts['extracted'],
+        'transformed': counts['transformed'],
+        'reviewed': counts['reviewed'],
+        'validated': counts['validated'],
+        'tested': counts['tested'],
+        'merged': counts['merged'],
+        'transform_complete': counts['transform_complete'],
+        'review_complete': counts['review_complete'],
+        'validate_complete': counts['validate_complete'],
+        'test_complete': counts['test_complete'],
+        'merge_complete': counts['merge_complete']
     }
-
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-
-    # Check source_xml_list
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='source_xml_list'")
-    if cursor.fetchone():
-        cursor.execute("SELECT COUNT(*) FROM source_xml_list")
-        count = cursor.fetchone()[0]
-        result['source_analyzed'] = count > 0
-        result['source_count'] = count
-
-    # Check transform_target_list
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
-    if cursor.fetchone():
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        result['extract_total'] = cursor.fetchone()[0]
-        result['extracted'] = result['extract_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
-        result['transformed'] = cursor.fetchone()[0]
-        result['transform_total'] = result['extract_total']
-
-        # reviewed column may not exist yet
-        try:
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
-            result['reviewed'] = cursor.fetchone()[0]
-        except:
-            result['reviewed'] = 0
-        result['review_total'] = result['transform_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-        result['validated'] = cursor.fetchone()[0]
-        result['validate_total'] = result['extract_total']
-
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y'")
-        result['tested'] = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        result['test_total'] = cursor.fetchone()[0]
-
-    conn.close()
-
-    # Check merge output
-    merge_dir = MERGE_DIR
-    result['merged'] = len(list(merge_dir.rglob("*.xml"))) if merge_dir.exists() else 0
-
-    # Check strategy file
-    strategy_file = STRATEGY_DIR / "transform_strategy.md"
-    result['strategy_exists'] = strategy_file.exists()
-
-    # Add completion flags for each step
-    result['transform_complete'] = result['transformed'] == result['transform_total'] and result['transform_total'] > 0
-    result['review_complete'] = result['reviewed'] == result['review_total'] and result['review_total'] > 0
-    result['validate_complete'] = result['validated'] == result['validate_total'] and result['validate_total'] > 0
-    result['test_complete'] = result['tested'] == result['test_total'] and result['test_total'] > 0
-    result['merge_complete'] = result['merged'] > 0
-
-    # Determine next step
-    if not result['source_analyzed']:
-        result['next_step'] = 'analyze'
-    elif not result['strategy_exists']:
-        result['next_step'] = 'generate_strategy'
-    elif result['transformed'] < result['transform_total'] or result['transform_total'] == 0:
-        result['next_step'] = 'transform'
-    elif result['reviewed'] < result['review_total']:
-        result['next_step'] = 'review'
-    elif result['validated'] < result['validate_total']:
-        result['next_step'] = 'validate'
-    elif result['tested'] < result['test_total']:
-        result['next_step'] = 'test'
-    elif result['merged'] == 0:
-        result['next_step'] = 'merge'
-    else:
-        result['next_step'] = 'complete'
-
-    print(f"📊 Status: analyzed={result['source_analyzed']}, "
-          f"transformed={result['transformed']}/{result['transform_total']}, "
-          f"reviewed={result['reviewed']}/{result['review_total']}, "
-          f"validated={result['validated']}/{result['validate_total']}, "
-          f"tested={result['tested']}/{result['test_total']}, "
-          f"merged={result['merged']}")
-    print(f"➡️  Next: {result['next_step']}")
 
     return result
 
 
 @tool
-def search_sql_ids(keyword: str = "") -> dict:
+def search_sql_ids(keyword: str = "") -> SearchSqlResult:
     """Search SQL IDs by keyword in mapper_file or sql_id.
-    
+
     Args:
         keyword: Search term (e.g., "User", "select", "Order")
-                 If empty, returns all SQL IDs
-    
+                 If empty, returns first 50 SQL IDs
+
     Returns:
-        Dict with matching SQL IDs grouped by mapper_file
+        SearchSqlResult with matching SQL IDs grouped by mapper_file
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    if keyword:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            WHERE mapper_file LIKE ? OR sql_id LIKE ?
-            ORDER BY mapper_file, seq_no
-        """, (f'%{keyword}%', f'%{keyword}%'))
-    else:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            ORDER BY mapper_file, seq_no
-            LIMIT 50
-        """)
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
+    state = StateManager(DB_PATH)
+    rows = state.search_sqls(keyword, limit=50)
+
     # Group by mapper
     results = {}
     for mapper, sql_id, sql_type in rows:
         if mapper not in results:
             results[mapper] = []
         results[mapper].append({'sql_id': sql_id, 'sql_type': sql_type})
-    
+
     total = sum(len(v) for v in results.values())
-    
-    return {
+
+    result: SearchSqlResult = {
         'total': total,
         'mappers_count': len(results),
-        'results': results,
-        'message': f"Found {total} SQL IDs across {len(results)} mappers"
+        'results': results
     }
+    return result
 
 
 @tool
-def reset_step(step_name: str) -> dict:
+def reset_step(step_name: str) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
-    
+
     Args:
-        step_name: 'transform', 'validate', or 'test'
-    
+        step_name: 'transform', 'review', 'validate', or 'test'
+
     Returns:
-        dict with status and reset count
+        ResetStepResult with status and reset count
     """
     import shutil
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    if step_name == 'transform':
-        cursor.execute("UPDATE transform_target_list SET transformed='N'")
-        count = cursor.rowcount
+
+    state = StateManager(DB_PATH)
+
+    try:
+        # Reset status in DB
+        count = state.reset_step_status(step_name)
+
         # Delete output files
-        for d in ['extract', 'transform', 'origin']:
-            dir_path = PROJECT_ROOT / "output" / d
-            if dir_path.exists():
-                shutil.rmtree(dir_path)
-    elif step_name == 'review':
-        cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE transformed='Y'")
-        count = cursor.rowcount
-    elif step_name == 'validate':
-        cursor.execute("UPDATE transform_target_list SET validated='N'")
-        count = cursor.rowcount
-    elif step_name == 'test':
-        cursor.execute("UPDATE transform_target_list SET tested='N'")
-        count = cursor.rowcount
-        # Delete test output
-        test_dir = PROJECT_ROOT / "output" / "test"
-        if test_dir.exists():
-            shutil.rmtree(test_dir)
-    else:
-        conn.close()
-        return {'status': 'error', 'message': f'Unknown step: {step_name}'}
-    
-    conn.commit()
-    conn.close()
-    
-    return {'status': 'success', 'step': step_name, 'reset_count': count}
+        if step_name == 'transform':
+            for d in ['extract', 'transform', 'origin']:
+                dir_path = PROJECT_ROOT / "output" / d
+                if dir_path.exists():
+                    shutil.rmtree(dir_path)
+        elif step_name == 'test':
+            test_dir = PROJECT_ROOT / "output" / "test"
+            if test_dir.exists():
+                shutil.rmtree(test_dir)
+
+        result: ResetStepResult = {
+            'status': 'success',
+            'step': step_name,
+            'reset_count': count
+        }
+        return result
+
+    except ValueError as e:
+        result: ResetStepResult = {
+            'status': 'error',
+            'step': step_name,
+            'reset_count': 0
+        }
+        return result
 
 
 @tool
-def run_step(step_name: str) -> dict:
-    """Execute a pipeline step.
+def run_step(step_name: str) -> RunStepResult:
+    """Execute a pipeline step via direct Agent invocation (importlib).
+
+    Uses importlib.import_module() to directly invoke pipeline step modules
+    instead of subprocess.run(). This provides better performance and enables
+    future callback support for real-time progress updates.
 
     Args:
-        step_name: 'analyze', 'transform', 'validate', 'test', 'merge'
-    
+        step_name: Pipeline step to execute
+            - 'analyze': Source analysis and strategy generation
+            - 'transform': SQL transformation (Oracle → PostgreSQL)
+            - 'review': Rule compliance check
+            - 'validate': Functional equivalence validation
+            - 'test': Database execution testing
+            - 'merge': XML reassembly
+
     Returns:
-        Dict with status, step, output, and needs_merge flag (for test step)
+        RunStepResult with status, details, and needs_merge flag
     """
+    # Module mapping: step_name → (module_name, function_name)
     modules = {
         'analyze':   ('run_source_analyzer', 'run'),
         'transform': ('run_sql_transform',   'run'),
@@ -405,7 +331,12 @@ def run_step(step_name: str) -> dict:
     }
 
     if step_name not in modules:
-        return {'status': 'error', 'error': f'Unknown step: {step_name}. Valid: {list(modules.keys())}'}
+        result: RunStepResult = {
+            'status': 'error',
+            'details': f'Unknown step: {step_name}. Valid: {list(modules.keys())}',
+            'needs_merge': False
+        }
+        return result
 
     module_name, func_name = modules[step_name]
     print(f"\n🚀 Running: {step_name} ({module_name})...\n", flush=True)
@@ -426,76 +357,101 @@ def run_step(step_name: str) -> dict:
             return len(s)
 
     try:
-        import importlib
+        # Direct Agent invocation via importlib
         mod = importlib.import_module(module_name)
         func = getattr(mod, func_name)
+
+        # Capture output while displaying in real-time
         tee = TeeStream(sys.stdout)
         with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
             func()
 
+        # Keep last 100 lines if output is large
         output = ''.join(output_lines[-100:]) if len(output_lines) > 100 else ''.join(output_lines)
+
         print(f"\n✅ {step_name} 완료\n", flush=True)
+
+        # Show helpful tips
         if step_name == 'transform':
             print("💡 Tip: 변환 결과를 확인하려면 → 'diff 리포트 생성' 또는 '[SQL ID] 비교해줘'", flush=True)
-        result = {'status': 'success', 'step': step_name, 'output': output}
+
+        # Check if merge is needed (test step may modify SQL files)
+        needs_merge = False
+        details = f'{step_name} step completed successfully'
 
         if step_name == 'test' and 'Phase 2:' in output and '건 실패 SQL 수정' in output:
-            result['needs_merge'] = True
-            result['details'] = 'Test Agent modified SQL files. Run merge to apply changes to final XML.'
+            needs_merge = True
+            details = 'Test Agent modified SQL files. Run merge step to apply changes to final XML.'
 
+        result: RunStepResult = {
+            'status': 'success',
+            'details': details,
+            'needs_merge': needs_merge
+        }
         return result
 
     except Exception as e:
         output = ''.join(output_lines)
         print(f"\n❌ {step_name} 실패: {e}\n", flush=True)
-        return {'status': 'error', 'step': step_name, 'output': output, 'error': str(e)}
+
+        result: RunStepResult = {
+            'status': 'error',
+            'details': f'{step_name} failed: {str(e)}',
+            'needs_merge': False
+        }
+        return result
 
 
 @tool
-def get_summary() -> dict:
-    """Get full pipeline summary.
+def get_summary() -> SummaryResult:
+    """Get full pipeline summary with counts, output files, and completion status.
 
     Returns:
-        Dict with all counts, output files, and completion status
+        SummaryResult with complete pipeline information
     """
     status = check_step_status()
 
-    # Output files
+    # Output files count
     output_dir = OUTPUT_DIR
     files = {}
     for sub in ['origin', 'extract', 'transform', 'merge']:
         d = output_dir / sub
-        files[sub] = len(list(d.rglob("*.xml"))) if d.exists() else 0
+        count = len(list(d.rglob("*.xml"))) if d.exists() else 0
+        files[sub] = str(count)
 
-    # Reports
-    reports = list(REPORTS_DIR.glob("*.md")) if REPORTS_DIR.exists() else []
-
-    # Logs
-    log_dirs = ['transform', 'review', 'validate', 'test']
-    logs = {}
-    for ld in log_dirs:
-        d = LOGS_DIR / ld
-        logs[ld] = len(list(d.glob("*.log"))) if d.exists() else 0
-
-    summary = {
-        'pipeline_status': status,
-        'output_files': files,
-        'reports': [str(r.name) for r in reports],
-        'logs': logs,
-        'complete': status.get('next_step') == 'complete'
+    # Completion status
+    completion = {
+        'transform_complete': status['transform_complete'],
+        'review_complete': status['review_complete'],
+        'validate_complete': status['validate_complete'],
+        'test_complete': status['test_complete'],
+        'merge_complete': status['merge_complete']
     }
 
+    # Build summary
+    result: SummaryResult = {
+        'total_sqls': status['extracted'],
+        'transformed': status['transformed'],
+        'reviewed': status['reviewed'],
+        'validated': status['validated'],
+        'tested': status['tested'],
+        'merged': int(files.get('merge', '0')),
+        'output_files': files,
+        'completion_status': completion
+    }
+
+    # Print formatted summary
     print(f"\n{'='*60}")
     print(f"📊 OMA Pipeline Summary")
     print(f"{'='*60}")
     print(f"  Source Analyzed: {'✅' if status['source_analyzed'] else '❌'}")
-    print(f"  Transformed:    {status['transformed']}/{status['transform_total']}")
-    print(f"  Reviewed:       {status['reviewed']}/{status['review_total']}")
-    print(f"  Validated:      {status['validated']}/{status['validate_total']}")
-    print(f"  Tested:         {status['tested']}/{status['test_total']}")
-    print(f"  Merged:         {files.get('merge', 0)} files")
+    print(f"  Transformed:    {status['transformed']}/{status['extracted']}")
+    print(f"  Reviewed:       {status['reviewed']}/{status['extracted']}")
+    print(f"  Validated:      {status['validated']}/{status['extracted']}")
+    print(f"  Tested:         {status['tested']}/{status['extracted']}")
+    print(f"  Merged:         {files.get('merge', '0')} files")
     print(f"  Output:         {files}")
-    print(f"  Complete:       {'✅' if summary['complete'] else '❌ Next: ' + str(status.get('next_step'))}")
+    print(f"  Complete:       {'✅ All steps complete' if all(completion.values()) else '❌ Pipeline in progress'}")
     print(f"{'='*60}")
 
-    return summary
+    return result

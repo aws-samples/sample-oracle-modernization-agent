@@ -38,6 +38,7 @@ DB_PATH = CONFIG_DIR / "oma_control.db"
 
 # Model configuration
 DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"  # 프롬프트 캐싱 미지원으로 사용 금지 (2026-02-21)
 
 def _load_model_id() -> str:
     """Load model ID: env var > DB > default"""
