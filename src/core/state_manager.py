@@ -1,5 +1,6 @@
 """StateManager - Unified interface for database access"""
 import sqlite3
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
@@ -67,17 +68,46 @@ class StateManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Dynamic UPDATE statement
-            fields = ', '.join(f"{k}=?" for k in kwargs.keys())
-            fields += ", updated_at=CURRENT_TIMESTAMP"
-            values = list(kwargs.values()) + [mapper_file, sql_id]
+            # Build UPDATE with explicit column mapping to avoid SQL injection
+            # Each column is explicitly handled to satisfy security scanners
+            updates = []
+            values = []
 
-            cursor.execute(f"""
-                UPDATE transform_target_list
-                SET {fields}
-                WHERE mapper_file=? AND sql_id=?
-            """, values)
+            if 'transformed' in kwargs:
+                updates.append("transformed=?")
+                values.append(kwargs['transformed'])
+            if 'reviewed' in kwargs:
+                updates.append("reviewed=?")
+                values.append(kwargs['reviewed'])
+            if 'validated' in kwargs:
+                updates.append("validated=?")
+                values.append(kwargs['validated'])
+            if 'tested' in kwargs:
+                updates.append("tested=?")
+                values.append(kwargs['tested'])
+            if 'transform_count' in kwargs:
+                updates.append("transform_count=?")
+                values.append(kwargs['transform_count'])
+            if 'review_result' in kwargs:
+                updates.append("review_result=?")
+                values.append(kwargs['review_result'])
+            if 'validation_result' in kwargs:
+                updates.append("validation_result=?")
+                values.append(kwargs['validation_result'])
+            if 'test_result' in kwargs:
+                updates.append("test_result=?")
+                values.append(kwargs['test_result'])
 
+            if not updates:
+                return
+
+            updates.append("updated_at=CURRENT_TIMESTAMP")
+            values.extend([mapper_file, sql_id])
+
+            cursor.execute(
+                "UPDATE transform_target_list SET " + ", ".join(updates) + " WHERE mapper_file=? AND sql_id=?",
+                values
+            )
             conn.commit()
 
     def increment_transform_count(self, mapper_file: str, sql_id: str) -> None:
@@ -108,24 +138,41 @@ class StateManager:
             pending = state.get_pending_tasks('transform')
             # [('UserMapper.xml', 'selectUser'), ...]
         """
-        column_map = {
-            'transform': 'transformed',
-            'review': 'reviewed',
-            'validate': 'validated',
-            'test': 'tested'
-        }
-
-        if step not in column_map:
-            raise ValueError(f"Invalid step: {step}. Must be one of {list(column_map.keys())}")
-
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT mapper_file, sql_id
-                FROM transform_target_list
-                WHERE {column_map[step]}='N'
-                ORDER BY mapper_file, seq_no
-            """)
+
+            # Explicit SQL for each step to avoid dynamic SQL injection warnings
+            if step == 'transform':
+                cursor.execute("""
+                    SELECT mapper_file, sql_id
+                    FROM transform_target_list
+                    WHERE transformed='N'
+                    ORDER BY mapper_file, seq_no
+                """)
+            elif step == 'review':
+                cursor.execute("""
+                    SELECT mapper_file, sql_id
+                    FROM transform_target_list
+                    WHERE reviewed='N'
+                    ORDER BY mapper_file, seq_no
+                """)
+            elif step == 'validate':
+                cursor.execute("""
+                    SELECT mapper_file, sql_id
+                    FROM transform_target_list
+                    WHERE validated='N'
+                    ORDER BY mapper_file, seq_no
+                """)
+            elif step == 'test':
+                cursor.execute("""
+                    SELECT mapper_file, sql_id
+                    FROM transform_target_list
+                    WHERE tested='N'
+                    ORDER BY mapper_file, seq_no
+                """)
+            else:
+                raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
+
             return cursor.fetchall()
 
     def get_sql_info(
@@ -252,24 +299,37 @@ class StateManager:
         Returns:
             Number of rows reset
         """
-        column_map = {
-            'transform': 'transformed',
-            'review': 'reviewed',
-            'validate': 'validated',
-            'test': 'tested'
-        }
-
-        if step not in column_map:
-            raise ValueError(f"Invalid step: {step}")
-
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE transform_target_list
-                SET {column_map[step]}='N',
-                    updated_at=CURRENT_TIMESTAMP
-                WHERE {column_map[step]}='Y'
-            """)
+
+            # Explicit SQL for each step to avoid dynamic SQL injection warnings
+            if step == 'transform':
+                cursor.execute("""
+                    UPDATE transform_target_list
+                    SET transformed='N', updated_at=CURRENT_TIMESTAMP
+                    WHERE transformed='Y'
+                """)
+            elif step == 'review':
+                cursor.execute("""
+                    UPDATE transform_target_list
+                    SET reviewed='N', updated_at=CURRENT_TIMESTAMP
+                    WHERE reviewed='Y'
+                """)
+            elif step == 'validate':
+                cursor.execute("""
+                    UPDATE transform_target_list
+                    SET validated='N', updated_at=CURRENT_TIMESTAMP
+                    WHERE validated='Y'
+                """)
+            elif step == 'test':
+                cursor.execute("""
+                    UPDATE transform_target_list
+                    SET tested='N', updated_at=CURRENT_TIMESTAMP
+                    WHERE tested='Y'
+                """)
+            else:
+                raise ValueError(f"Invalid step: {step}. Must be one of: transform, review, validate, test")
+
             reset_count = cursor.rowcount
             conn.commit()
             return reset_count
@@ -390,11 +450,43 @@ class StateManager:
             return cursor.fetchone()[0] > 0
 
     def add_column_if_not_exists(self, table: str, column: str, column_type: str) -> None:
-        """Add a column to a table if it doesn't exist"""
+        """
+        Add a column to a table if it doesn't exist.
+
+        Args:
+            table: Table name (alphanumeric and underscore only)
+            column: Column name (alphanumeric and underscore only)
+            column_type: SQLite column type (alphanumeric, spaces, and parentheses only)
+
+        Raises:
+            ValueError: If table/column/type contains invalid characters
+
+        Security Note:
+            All parameters are strictly validated with regex before use.
+            PRAGMA and ALTER TABLE do not support prepared statements,
+            so input validation is the security mechanism here.
+        """
+        # Strict validation: only allow safe SQL identifiers
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table):
+            raise ValueError(f"Invalid table name: {table}")
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
+            raise ValueError(f"Invalid column name: {column}")
+        # Validate column type (only allow safe type definitions)
+        if not re.match(r'^[a-zA-Z0-9_\s()]+$', column_type):
+            raise ValueError(f"Invalid column type: {column_type}")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f"PRAGMA table_info({table})")
+
+            # PRAGMA table_info does not support parameterized queries
+            # Table name has been validated with strict regex above
+            pragma_query = "PRAGMA table_info(" + table + ")"
+            cursor.execute(pragma_query)
             cols = [c[1] for c in cursor.fetchall()]
+
             if column not in cols:
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+                # ALTER TABLE does not support parameterized queries
+                # All identifiers validated with strict regex above
+                alter_query = "ALTER TABLE " + table + " ADD COLUMN " + column + " " + column_type
+                cursor.execute(alter_query)
                 conn.commit()
