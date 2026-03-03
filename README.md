@@ -33,9 +33,11 @@ DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI 
 │   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
 │                     │  ────▶  │                              │  ────▶  │                         │
 │  MyBatis Mapper XML │         │  Orchestrator (Control Hub)  │         │  PostgreSQL Mapper XML  │
-│  (Oracle SQL)       │         │   ├─ Diff Tools              │         │  (Validated)            │
-│                     │         │   ├─ Single SQL Processing   │         │                         │
+│  (Oracle SQL)       │         │   ├─ Single SQL Processing   │         │  (Validated)            │
 │                     │         │   └─ Pipeline Control        │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  ReviewManager (Review Hub)  │         │                         │
+│                     │         │   └─ Diff Tools (compare)    │         │                         │
 │                     │         │                              │         │                         │
 │                     │         │  6 Pipeline Agents           │         │                         │
 │                     │         │   ├─ Source Analyzer         │         │                         │
@@ -52,12 +54,15 @@ DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI 
    • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Passed
                                • Validate Agent             ✅ Fix History (3-way diff)
                                • Test Agent                 ✅ Learned Conversion Strategy
-                               • Strategy Refine            
-                                                            
-                               Orchestrator Tools:          
-                               • Diff Tools (compare/approve)
-                               • Single SQL Processing
+                               • Strategy Refine
+
+                               Orchestrator:
                                • Pipeline Control
+                               • Single SQL Processing
+
+                               ReviewManager:
+                               • Diff Tools (compare/approve)
+                               • Conversion Review
 
 ```
 See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크플로우) for detailed workflow.
@@ -68,14 +73,16 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 ```
 ┌─────────────────────┐         ┌──────────────────────────────┐         ┌─────────────────────────┐
 │                     │         │                              │         │                         │
-│   📂 입력            │         │  🤖 OMA                      │         │   ✅ 출력                │
+│   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
 │                     │  ────▶  │                              │  ────▶  │                         │
-│  MyBatis Mapper XML │         │  Orchestrator (제어 허브)     │         │  PostgreSQL Mapper XML  │
-│  (Oracle SQL)       │         │   ├─ Diff Tools              │         │  (검증 완료)             │
-│                     │         │   ├─ 단일 SQL 처리            │         │                         │
-│                     │         │   └─ 파이프라인 제어          │         │                         │
+│  MyBatis Mapper XML │         │  Orchestrator (Control)      │         │  PostgreSQL Mapper XML  │
+│  (Oracle SQL)       │         │   ├─ Single SQL Process      │         │  (Validated)            │
+│                     │         │   └─ Pipeline Control        │         │                         │
 │                     │         │                              │         │                         │
-│                     │         │  6개 파이프라인 Agent         │         │                         │
+│                     │         │  ReviewManager (Review)      │         │                         │
+│                     │         │   └─ Diff Tools              │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  6 Pipeline Agents           │         │                         │
 │                     │         │   ├─ Source Analyzer         │         │                         │
 │                     │         │   ├─ Transform Agent         │         │                         │
 │                     │         │   ├─ Review Agent            │         │                         │
@@ -84,18 +91,21 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 │                     │         │   └─ Strategy Refine         │         │                         │
 └─────────────────────┘         └──────────────────────────────┘         └─────────────────────────┘
 
-   • UserMapper.xml           파이프라인 Agent:            ✅ 변환된 SQL (PostgreSQL)
-   • OrderMapper.xml           • Source Analyzer           ✅ 규칙 준수 검증 완료
-   • ProductMapper.xml         • Transform Agent           ✅ 기능 동등성 검증 완료
-   • 100+ SQL 구문             • Review Agent              ✅ DB 실행 테스트 통과
-                               • Validate Agent            ✅ 수정 이력 (fix_history)
-                               • Test Agent                ✅ 학습된 변환 전략
-                               • Strategy Refine           
-                                                           
-                               Orchestrator 도구:          
-                               • Diff Tools (비교/승인)
-                               • 단일 SQL 처리
-                               • 파이프라인 제어
+   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (PostgreSQL)
+   • OrderMapper.xml           • Source Analyzer            ✅ Rule Compliance Check
+   • ProductMapper.xml         • Transform Agent            ✅ Functional Equivalence
+   • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Pass
+                               • Validate Agent             ✅ Fix History (3-way diff)
+                               • Test Agent                 ✅ Learned Strategy
+                               • Strategy Refine
+
+                               Orchestrator:
+                               • Pipeline Control
+                               • Single SQL Processing
+
+                               ReviewManager:
+                               • Diff Tools (compare)
+                               • Conversion Review
 
 ```
 
@@ -434,13 +444,16 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 sql-migration-assistant/
 ├── src/
 │   ├── agents/                   # 7 Expert Agents
-│   │   ├── orchestrator/         # Pipeline control + Diff Tools
+│   │   ├── orchestrator/         # Pipeline control
+│   │   ├── review_manager/       # Diff tools + conversion review
 │   │   ├── source_analyzer/      # Source analysis + strategy generation
 │   │   ├── sql_transform/        # SQL transformation
 │   │   ├── sql_review/           # Rule compliance review
 │   │   ├── sql_validate/         # Functional equivalence validation
 │   │   ├── sql_test/             # DB execution test
 │   │   └── strategy_refine/      # Strategy enhancement/compression
+│   ├── core/
+│   │   └── state_manager.py      # Centralized state management
 │   ├── config/oma_control.db     # SQLite (state management)
 │   ├── reference/
 │   │   └── oracle_to_postgresql_rules.md  # General Rules
@@ -483,6 +496,6 @@ Contributions to improve the project are welcome. Refer to Agent design document
 
 ---
 
-**Last Updated**: 2026-02-20  
-**Version**: 3.0  
+**Last Updated**: 2026-03-03
+**Version**: 3.1
 **Status**: Production Ready
