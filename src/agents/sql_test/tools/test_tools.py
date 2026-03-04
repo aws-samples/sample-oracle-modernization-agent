@@ -288,13 +288,9 @@ def _update_tested(mapper_file: str, sql_id: str):
                     WHERE mapper_file = ? AND sql_id = ?
                 """, (mapper_file, sql_id))
                 conn.commit()
-            # Write signal for progress tracking
-            try:
-                signal_file = PROJECT_ROOT / "output" / "logs" / ".test_signals"
-                with open(signal_file, 'a', encoding='utf-8') as f:
-                    f.write(f"{mapper_file}|{sql_id}|PASS\n")
-            except Exception:
-                pass
+            # Emit progress event via thread-safe queue
+            from core.progress import emit_progress
+            emit_progress(mapper_file, sql_id, "PASS")
             return
         except sqlite3.OperationalError as e:
             if "locked" in str(e) and i < 4:

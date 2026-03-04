@@ -1,10 +1,7 @@
 """Multi-perspective SQL review: Syntax + Equivalence agents run in parallel,
 then a deterministic Facilitator merges results."""
-import io
 import json
 import re
-import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -37,6 +34,7 @@ def create_syntax_review_agent() -> Agent:
         model=model,
         system_prompt=_load_prompt_with_rules("prompt_syntax.md"),
         tools=[read_sql_source, read_transform],
+        callback_handler=None,
     )
 
 
@@ -48,6 +46,7 @@ def create_equivalence_review_agent() -> Agent:
         model=model,
         system_prompt=_load_prompt_with_rules("prompt_equivalence.md"),
         tools=[read_sql_source, read_transform],
+        callback_handler=None,
     )
 
 
@@ -85,33 +84,20 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-# Lock to protect sys.stdout/sys.stderr redirection in multi-threaded context.
-# Each perspective agent runs in its own thread — without this lock, concurrent
-# stdout swaps can cause one thread to save the other's buffer as "original" stdout.
-_stdio_lock = threading.Lock()
-
-
 def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
-    """Run a single perspective agent and capture its JSON output."""
-    buf = io.StringIO()
-    with _stdio_lock:
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = buf
-        sys.stderr = buf
-    try:
-        agent = agent_factory()
-        agent(
-            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
-            f"For each: read_sql_source for original, read_transform for converted, "
-            f"then check according to your review checklist. "
-            f"Output your results as the specified JSON format."
-        )
-    finally:
-        with _stdio_lock:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+    """Run a single perspective agent and extract its JSON output.
 
-    output = buf.getvalue()
+    Uses callback_handler=None to suppress streaming output (no stdout capture needed).
+    Extracts text from AgentResult via str().
+    """
+    agent = agent_factory()
+    result = agent(
+        f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
+        f"For each: read_sql_source for original, read_transform for converted, "
+        f"then check according to your review checklist. "
+        f"Output your results as the specified JSON format."
+    )
+    output = str(result)
     parsed = _extract_json(output)
     if parsed and "results" in parsed:
         return parsed
@@ -125,16 +111,34 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
     }
 
 
+def _normalize_issue(issue) -> dict:
+    """Normalize an issue entry to {severity, description} dict.
+
+    Handles both new format (dict with severity) and legacy format (plain string).
+    Legacy string issues are treated as CRITICAL for backward compatibility.
+    """
+    if isinstance(issue, dict) and "severity" in issue:
+        return issue
+    # Legacy: plain string → treat as CRITICAL
+    desc = issue if isinstance(issue, str) else str(issue)
+    return {"severity": "CRITICAL", "description": desc}
+
+
 def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str]) -> dict:
     """Deterministic facilitator: merge two perspective results into final review.
 
+    Severity-aware judgment:
+    - CRITICAL issues → FAIL (triggers re-transform)
+    - WARNING only → PASS_WITH_WARNINGS (no re-transform, warnings recorded)
+    - No issues → PASS
+
     Returns:
         {
-            "overall": "PASS" or "FAIL",
+            "overall": "PASS" or "PASS_WITH_WARNINGS" or "FAIL",
             "per_sql": {
                 "<sql_id>": {
-                    "result": "PASS" or "FAIL",
-                    "issues": [...],  # merged from both perspectives
+                    "result": "PASS" or "PASS_WITH_WARNINGS" or "FAIL",
+                    "issues": [...],
                     "feedback": "human-readable summary for re-transform"
                 }
             }
@@ -149,46 +153,68 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
 
     per_sql = {}
     has_any_fail = False
+    has_any_warning = False
 
     for sql_id in sql_ids:
         issues = []
-        sql_result = "PASS"
+        has_critical = False
+        has_warning = False
 
         # Collect syntax issues
         if syntax_parse_error:
-            issues.append("[Syntax] Review agent output could not be parsed — manual review needed")
-            sql_result = "FAIL"
+            issues.append({"severity": "CRITICAL", "description": "[Syntax] Review agent output could not be parsed — manual review needed"})
+            has_critical = True
         else:
             syn = syntax_results.get(sql_id, {})
             if syn.get("result") == "FAIL":
-                sql_result = "FAIL"
                 for issue in syn.get("issues", []):
-                    issues.append(f"[Syntax] {issue}")
+                    normalized = _normalize_issue(issue)
+                    normalized["description"] = f"[Syntax] {normalized['description']}"
+                    issues.append(normalized)
+                    if normalized["severity"] == "CRITICAL":
+                        has_critical = True
+                    else:
+                        has_warning = True
             elif not syn:
-                # Agent didn't report on this SQL ID
-                issues.append(f"[Syntax] No review result returned for {sql_id}")
-                sql_result = "FAIL"
+                issues.append({"severity": "CRITICAL", "description": f"[Syntax] No review result returned for {sql_id}"})
+                has_critical = True
 
         # Collect equivalence issues
         if equiv_parse_error:
-            issues.append("[Equivalence] Review agent output could not be parsed — manual review needed")
-            sql_result = "FAIL"
+            issues.append({"severity": "CRITICAL", "description": "[Equivalence] Review agent output could not be parsed — manual review needed"})
+            has_critical = True
         else:
             eq = equiv_results.get(sql_id, {})
             if eq.get("result") == "FAIL":
-                sql_result = "FAIL"
                 for issue in eq.get("issues", []):
-                    issues.append(f"[Equivalence] {issue}")
+                    normalized = _normalize_issue(issue)
+                    normalized["description"] = f"[Equivalence] {normalized['description']}"
+                    issues.append(normalized)
+                    if normalized["severity"] == "CRITICAL":
+                        has_critical = True
+                    else:
+                        has_warning = True
             elif not eq:
-                issues.append(f"[Equivalence] No review result returned for {sql_id}")
-                sql_result = "FAIL"
+                issues.append({"severity": "CRITICAL", "description": f"[Equivalence] No review result returned for {sql_id}"})
+                has_critical = True
 
-        if sql_result == "FAIL":
+        # Determine per-SQL result based on severity
+        if has_critical:
+            sql_result = "FAIL"
             has_any_fail = True
+        elif has_warning:
+            sql_result = "PASS_WITH_WARNINGS"
+            has_any_warning = True
+        else:
+            sql_result = "PASS"
 
-        # Build human-readable feedback for re-transform
-        if issues:
-            feedback = f"[{sql_id}] " + "; ".join(issues)
+        # Build human-readable feedback for re-transform (CRITICAL issues only)
+        if has_critical:
+            critical_descs = [i["description"] for i in issues if i["severity"] == "CRITICAL"]
+            feedback = f"[{sql_id}] " + "; ".join(critical_descs)
+        elif issues:
+            warning_descs = [i["description"] for i in issues]
+            feedback = f"[{sql_id}] WARNINGS: " + "; ".join(warning_descs)
         else:
             feedback = ""
 
@@ -198,8 +224,15 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
             "feedback": feedback,
         }
 
+    if has_any_fail:
+        overall = "FAIL"
+    elif has_any_warning:
+        overall = "PASS_WITH_WARNINGS"
+    else:
+        overall = "PASS"
+
     return {
-        "overall": "FAIL" if has_any_fail else "PASS",
+        "overall": overall,
         "per_sql": per_sql,
     }
 

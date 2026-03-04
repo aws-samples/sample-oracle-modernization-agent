@@ -1,7 +1,5 @@
 """Run SQL Validate Agent - parallel by mapper"""
 import sys
-import io
-import os
 import sqlite3
 import threading
 import time
@@ -10,9 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from strands import Agent
-from strands.models.bedrock import BedrockModel
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR
+from core.progress import drain_progress
 
 from agents.sql_validate.agent import create_sql_validate_agent
 from agents.sql_validate.tools.validate_tools import get_pending_validations
@@ -21,7 +18,10 @@ _log_dir = LOGS_DIR / "validate"
 
 
 def create_agent():
-    return create_sql_validate_agent()
+    agent = create_sql_validate_agent()
+    # Override callback_handler to suppress streaming output
+    agent.callback_handler = None
+    return agent
 
 
 def _group_by_file_size(sql_ids: list, max_group_bytes=30000) -> list:
@@ -45,14 +45,14 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
     _log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _log_dir / f"{Path(mapper_file).stem}.log"
     log_path.write_text('', encoding='utf-8')
-    
+
     # Progress log for console display
     progress_log = _log_dir.parent / "validate_progress.log"
 
     def log(msg):
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-    
+
     def console(sql_id, status):
         """Print real-time status with progress"""
         with progress_counter['lock']:
@@ -70,65 +70,41 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
     try:
         log(f"🔍 시작: {len(sql_ids)} SQL IDs")
         groups = _group_by_file_size(sql_ids)
-        
+
         for g_num, group in enumerate(groups, 1):
             ids_str = ", ".join(s['sql_id'] for s in group)
             log(f"📦 Group {g_num}/{len(groups)}: {len(group)} SQLs")
             log(f"   SQL IDs: {ids_str}")
-            
+
             # Show each SQL ID starting
             for s in group:
                 console(s['sql_id'], "🔍 검증중")
 
-            # Clear signal file before agent run
-            signal_file = PROJECT_ROOT / "output" / "logs" / ".validate_signals"
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            if signal_file.exists():
-                signal_file.unlink()
+            # Run agent (callback_handler=None suppresses streaming output)
+            agent = create_agent()
+            agent(
+                f"Validate the following SQL IDs in {mapper_file}: {ids_str}\n"
+                f"For each SQL ID: read_sql_source for original, read_transform for converted, compare and validate.\n"
+                f"If PASS: call set_validated. If FAIL: fix with convert_sql then call set_validated."
+            )
 
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            buf = io.StringIO()
-            sys.stdout = buf
-            sys.stderr = buf
-            
-            try:
-                agent = create_agent()
-                agent(
-                    f"Validate the following SQL IDs in {mapper_file}: {ids_str}\n"
-                    f"For each SQL ID: read_sql_source for original, read_transform for converted, compare and validate.\n"
-                    f"If PASS: call set_validated. If FAIL: fix with convert_sql then call set_validated."
-                )
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
-            
-            # Read completion signals
-            if signal_file.exists():
-                for line in signal_file.read_text(encoding='utf-8').strip().split('\n'):
-                    if not line:
-                        continue
-                    parts = line.split('|', 3)
-                    if len(parts) >= 3:
-                        sig_sql_id, sig_result = parts[1], parts[2]
-                        sig_notes = parts[3] if len(parts) > 3 else ""
-                        for s in group:
-                            if s['sql_id'] == sig_sql_id:
-                                if sig_result == 'PASS':
-                                    reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
-                                    console(s['sql_id'], f"✅ PASS - {reason}" if reason else "✅ PASS")
-                                else:
-                                    reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
-                                    console(s['sql_id'], f"🔧 FIXED - {reason}" if reason else "🔧 FIXED")
-                                break
-                signal_file.unlink(missing_ok=True)
+            # Read completion events from thread-safe queue
+            for event in drain_progress():
+                sig_sql_id = event["sql_id"]
+                sig_result = event.get("status", "")
+                sig_notes = event.get("notes", "")
+                for s in group:
+                    if s['sql_id'] == sig_sql_id:
+                        if sig_result == 'PASS':
+                            reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
+                            console(s['sql_id'], f"✅ PASS - {reason}" if reason else "✅ PASS")
+                        else:
+                            reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
+                            console(s['sql_id'], f"🔧 FIXED - {reason}" if reason else "🔧 FIXED")
+                        break
 
-            # Log agent output (errors only)
-            agent_output = buf.getvalue().strip()
-            for line in agent_output.split('\n'):
-                line = line.strip()
-                if line and '❌' in line:
-                    log(line)
+            # Log errors from agent output if any
+            # (Agent output no longer captured via stdout; errors logged by agent tools)
 
         log(f"✅ {mapper_file} 검증 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
@@ -136,30 +112,6 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
         log(f"❌ {mapper_file}: {e}")
         console("ERROR", f"❌ {str(e)}")
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
-
-
-def _monitor_logs(stop_event: threading.Event):
-    last_sizes = {}
-    while not stop_event.is_set():
-        if not _log_dir.exists():
-            stop_event.wait(3)
-            continue
-        for log_path in sorted(_log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True):
-            name = log_path.stem
-            size = log_path.stat().st_size
-            prev = last_sizes.get(name, 0)
-            if size > prev:
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    f.seek(prev)
-                    new_lines = f.read().strip()
-                last_sizes[name] = size
-                if new_lines:
-                    for line in new_lines.split('\n'):
-                        line = line.strip()
-                        if any(k in line for k in ['✅', '❌', '🔄', '🔍', 'PASS', 'FAIL', 'FIXED']):
-                            sys.stderr.write(f"  [{name}] {line}\n")
-                    sys.stderr.flush()
-        stop_event.wait(3)
 
 
 def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
@@ -192,7 +144,7 @@ def run(max_workers=8):
     # Initialize progress log
     progress_log = _log_dir.parent / "validate_progress.log"
     progress_log.write_text('', encoding='utf-8')
-    
+
     # Start tail monitor with original stderr
     original_stderr = sys.stderr
     stop_monitor = threading.Event()
@@ -232,7 +184,7 @@ def run(max_workers=8):
         print(f"⚠️  미완료: {remaining}개 SQL IDs", flush=True)
     else:
         print(f"✅ 전체 검증 완료!", flush=True)
-        
+
         # 전략 보강: FIXED 패턴 수집
         if _refine_strategy_from_logs():
             # 압축 제안
@@ -244,7 +196,7 @@ def run(max_workers=8):
 
 def _refine_strategy_from_logs():
     """Collect fix patterns and refine strategy via Strategy Refine Agent.
-    
+
     Returns:
         bool: True if patterns were added
     """

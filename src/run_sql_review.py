@@ -1,6 +1,5 @@
 """Run SQL Review Agent — multi-perspective review + re-transform failures"""
 import sys
-import io
 import json
 import sqlite3
 import threading
@@ -54,7 +53,7 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
         with progress_counter['lock']:
             if status == "🔍 리뷰중":
                 progress_counter['started'] += 1
-            elif "✅" in status or "❌" in status:
+            elif "✅" in status or "❌" in status or "⚠️" in status:
                 progress_counter['done'] += 1
             pct = int(progress_counter['started'] * 100 / total) if total > 0 else 0
             msg = f"[{pct:3d}%] [{Path(mapper_file).stem}] {sql_id} - {status}"
@@ -83,25 +82,47 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
                 issues = sql_result.get('issues', [])
                 feedback = sql_result.get('feedback', '')
 
+                # Serialize issues — may contain severity dicts
+                serialized_issues = []
+                for issue in issues:
+                    if isinstance(issue, dict):
+                        serialized_issues.append(issue)
+                    else:
+                        serialized_issues.append(str(issue))
+
                 feedback_json = json.dumps({
                     'result': res,
-                    'issues': issues,
+                    'issues': serialized_issues,
                     'feedback': feedback,
                 }, ensure_ascii=False)
+
+                # Build violations string for display
+                issue_strs = []
+                for issue in issues:
+                    if isinstance(issue, dict):
+                        sev = issue.get('severity', 'CRITICAL')
+                        desc = issue.get('description', '')
+                        issue_strs.append(f"[{sev}] {desc}")
+                    else:
+                        issue_strs.append(str(issue))
 
                 set_reviewed(
                     mapper_file=mapper_file,
                     sql_id=sid,
                     result=res,
-                    violations="; ".join(issues) if issues else "",
+                    violations="; ".join(issue_strs) if issue_strs else "",
                     review_feedback=feedback_json,
                 )
 
                 if res == 'PASS':
                     console(sid, "✅ PASS")
                     log(f"  ✅ PASS {sid}")
+                elif res == 'PASS_WITH_WARNINGS':
+                    summary = "; ".join(issue_strs[:2]) if issue_strs else ""
+                    console(sid, f"⚠️  PASS_WITH_WARNINGS - {summary[:80]}")
+                    log(f"  ⚠️  PASS_WITH_WARNINGS {sid}: {summary}")
                 else:
-                    summary = "; ".join(issues[:2]) if issues else "review failed"
+                    summary = "; ".join(issue_strs[:2]) if issue_strs else "review failed"
                     console(sid, f"❌ FAIL - {summary[:80]}")
                     log(f"  ❌ FAIL {sid}: {summary}")
 
@@ -114,7 +135,7 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
 
 
 def _retransform_failures():
-    """Re-transform SQL IDs that failed review, passing specific feedback."""
+    """Re-transform SQL IDs that failed review (FAIL only, not PASS_WITH_WARNINGS)."""
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -130,7 +151,6 @@ def _retransform_failures():
 
     from agents.sql_transform.agent import create_sql_transform_agent
 
-    # Group by mapper, collecting feedback per sql_id
     by_mapper = {}
     for mapper, sql_id, review_result in failures:
         if mapper not in by_mapper:
@@ -142,7 +162,6 @@ def _retransform_failures():
         ids_str = ", ".join(e['sql_id'] for e in sql_entries)
         log_path = _log_dir / f"{Path(mapper).stem}.log"
 
-        # Build specific feedback for each SQL ID
         feedback_lines = []
         for entry in sql_entries:
             sid = entry['sql_id']
@@ -153,35 +172,32 @@ def _retransform_failures():
                     issues = parsed.get('issues', [])
                     if issues:
                         for issue in issues:
-                            feedback_lines.append(f"  [{sid}] {issue}")
+                            if isinstance(issue, dict):
+                                # Only include CRITICAL issues in re-transform feedback
+                                if issue.get('severity') == 'CRITICAL':
+                                    feedback_lines.append(f"  [{sid}] {issue.get('description', '')}")
+                            else:
+                                feedback_lines.append(f"  [{sid}] {issue}")
                     else:
                         feedback_lines.append(f"  [{sid}] Review failed (no specific issues recorded)")
                 except (ValueError, TypeError):
-                    # review_result is plain text, not JSON
                     feedback_lines.append(f"  [{sid}] {review_result}")
             else:
                 feedback_lines.append(f"  [{sid}] Review failed (no feedback available)")
 
         feedback_text = "\n".join(feedback_lines)
 
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        buf = io.StringIO()
-        sys.stdout = buf
-        sys.stderr = buf
-        try:
-            agent = create_sql_transform_agent()
-            agent(
-                f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
-                f"These FAILED review. Here are the SPECIFIC issues found:\n"
-                f"{feedback_text}\n"
-                f"For each: fix the listed issues, apply ALL rules, "
-                f"read with read_sql_source, save with convert_sql."
-            )
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+        # Use callback_handler=None to suppress streaming output
+        agent = create_sql_transform_agent()
+        agent.callback_handler = None
+        agent(
+            f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
+            f"These FAILED review. Here are the SPECIFIC issues found:\n"
+            f"{feedback_text}\n"
+            f"For each: fix the listed issues, apply ALL rules, "
+            f"read with read_sql_source, save with convert_sql."
+        )
 
-        # Log re-transform with feedback
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] 🔄 Re-transform: {ids_str}\n")
             f.write(f"  Feedback:\n{feedback_text}\n")
@@ -216,7 +232,6 @@ def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
 
 def run(max_workers=8, max_rounds=2):
     print("🔍 SQL Review Agent 시작...\n", flush=True)
-    # Schema now includes 'reviewed' column from initial CREATE TABLE
 
     for round_num in range(1, max_rounds + 1):
         if round_num > 1:
@@ -250,10 +265,10 @@ def run(max_workers=8, max_rounds=2):
         stop_monitor.set()
         monitor.join(timeout=2)
 
-        # Check failures and re-transform
+        # Check failures and re-transform (FAIL only, not PASS_WITH_WARNINGS)
         retransformed = _retransform_failures()
         if retransformed == 0:
-            break  # No failures, done
+            break
 
     # Final summary
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:

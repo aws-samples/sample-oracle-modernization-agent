@@ -110,18 +110,27 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
   "results": {
     "<sql_id>": {
       "result": "PASS" or "FAIL",
-      "issues": ["specific issue description with line reference", ...],
+      "issues": [
+        {"severity": "CRITICAL", "description": "specific issue description with line reference"},
+        {"severity": "WARNING", "description": "optimization or style suggestion"}
+      ],
       "summary": "brief one-line summary"
     }
   }
 }
 ```
 
+### Severity Levels
+- **CRITICAL**: Affects functionality — unconverted Oracle syntax, wrong function mapping, broken SQL
+  - Examples: NVL not converted, SYSDATE remaining, (+) not converted, DECODE not rewritten, missing COALESCE for empty-string-as-NULL
+- **WARNING**: Optimization or style — does not change query results
+  - Examples: unnecessary alias, inefficient casting approach, redundant parentheses, suboptimal but functionally correct pattern
+
 ## Rules for Issues
 - **Be specific**: Include the actual Oracle syntax found and its location
   - Bad: "NVL remains"
   - Good: "NVL(status, 'N') on line 5 not converted to COALESCE"
-- Each issue should describe ONE violation
+- Each issue should describe ONE violation with a severity level
 - Empty issues array for PASS results
 
 ## ABSOLUTE RULES

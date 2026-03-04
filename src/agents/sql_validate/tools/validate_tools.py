@@ -4,7 +4,7 @@ import sqlite3
 import time
 from pathlib import Path
 from strands import tool
-from utils.project_paths import DB_PATH, PROJECT_ROOT
+from utils.project_paths import DB_PATH
 
 
 @tool
@@ -65,13 +65,9 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
                 conn.commit()
             flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
             print(f"  {flag} {mapper_file}/{sql_id} {notes}")
-            # Write signal for progress tracking
-            try:
-                signal_file = PROJECT_ROOT / "output" / "logs" / ".validate_signals"
-                with open(signal_file, 'a', encoding='utf-8') as f:
-                    f.write(f"{mapper_file}|{sql_id}|{result}|{notes}\n")
-            except Exception:
-                pass
+            # Emit progress event via thread-safe queue
+            from core.progress import emit_progress
+            emit_progress(mapper_file, sql_id, result, notes)
             return {'status': 'ok', 'sql_id': sql_id, 'result': result}
         except sqlite3.OperationalError as e:
             if "locked" in str(e) and i < 4:

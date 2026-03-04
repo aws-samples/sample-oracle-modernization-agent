@@ -81,18 +81,27 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
   "results": {
     "<sql_id>": {
       "result": "PASS" or "FAIL",
-      "issues": ["specific equivalence issue description", ...],
+      "issues": [
+        {"severity": "CRITICAL", "description": "specific equivalence issue description"},
+        {"severity": "WARNING", "description": "minor behavioral note"}
+      ],
       "summary": "brief one-line summary"
     }
   }
 }
 ```
 
+### Severity Levels
+- **CRITICAL**: Query results would differ — wrong JOIN type, missing WHERE condition, altered column output, broken MyBatis mapping
+  - Examples: INNER JOIN where Oracle had outer join, missing NULL handling for empty string, changed column alias affecting MyBatis
+- **WARNING**: Theoretical edge case or negligible behavioral difference
+  - Examples: ORDER BY on already-unique column, redundant DISTINCT that doesn't change results
+
 ## Rules for Issues
 - **Be specific**: Describe what behavioral difference would occur
   - Bad: "JOIN changed"
   - Good: "INNER JOIN used on line 8 where Oracle had (+) outer join on table B — rows with no match in B will be excluded"
-- Each issue should describe ONE equivalence violation
+- Each issue should describe ONE equivalence violation with a severity level
 - Empty issues array for PASS results
 
 ## ABSOLUTE RULES

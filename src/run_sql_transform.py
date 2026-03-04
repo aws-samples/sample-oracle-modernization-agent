@@ -1,7 +1,5 @@
 """Run SQL Transform Agent - parallel by mapper"""
 import sys
-import os
-import io
 import sqlite3
 import threading
 import time
@@ -14,6 +12,7 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, OUTPUT_DIR, MERGE_DIR, MODEL_ID
+from core.progress import drain_progress
 
 from agents.sql_transform.tools.load_mapper_list import load_mapper_list, get_pending_transforms, read_sql_source
 from agents.sql_transform.tools.split_mapper import split_mapper
@@ -60,7 +59,8 @@ def create_agent():
         name="SQLTransform",
         model=BedrockModel(model_id=model_id, max_tokens=64000),
         system_prompt=load_prompt(),
-        tools=[get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper]
+        tools=[get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
+        callback_handler=None,
     )
 
 
@@ -84,7 +84,7 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
     _log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _log_dir / f"{Path(mapper_file).stem}.log"
     log_path.write_text('', encoding='utf-8')
-    
+
     # Progress log for console display
     progress_log = LOGS_DIR / "transform_progress.log"
 
@@ -92,7 +92,7 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
         timestamp = time.strftime('%H:%M:%S')
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{timestamp}] {msg}\n")
-    
+
     def console(sql_id, status):
         """Print real-time status with progress: [progress%] [MapperName] sqlId - status"""
         with progress_counter['lock']:
@@ -110,58 +110,33 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
     try:
         log(f"🚀 시작: {len(sql_ids)} SQL IDs")
         groups = _group_by_file_size(sql_ids)
-        
+
         for g_num, group in enumerate(groups, 1):
             ids_str = ", ".join(s['sql_id'] for s in group)
             total_kb = sum(Path(s.get('source_file', '')).stat().st_size for s in group if Path(s.get('source_file', '')).exists()) // 1024
             log(f"📦 Group {g_num}/{len(groups)}: {len(group)} SQLs (~{total_kb}KB)")
             log(f"   SQL IDs: {ids_str}")
-            
+
             # Show each SQL ID starting
             for s in group:
                 console(s['sql_id'], "🔄 변환중")
 
-            # Clear signal file before agent run
-            signal_file = PROJECT_ROOT / "output" / "logs" / ".transform_signals"
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            if signal_file.exists():
-                signal_file.unlink()
-
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            buf = io.StringIO()
-            sys.stdout = buf
-            sys.stderr = buf
+            # Run agent (callback_handler=None suppresses streaming output)
             agent = create_agent()
             agent(
                 f"{mapper_file}의 다음 SQL ID들을 PostgreSQL로 변환해줘: {ids_str}\n"
                 f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
             )
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            
-            # Read completion signals from convert_sql tool
-            if signal_file.exists():
-                for line in signal_file.read_text(encoding='utf-8').strip().split('\n'):
-                    if not line:
-                        continue
-                    parts = line.split('|', 2)
-                    if len(parts) >= 2:
-                        sig_mapper, sig_sql_id = parts[0], parts[1]
-                        sig_notes = parts[2] if len(parts) > 2 else ""
-                        for s in group:
-                            if s['sql_id'] == sig_sql_id:
-                                reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
-                                console(s['sql_id'], f"✅ 완료 - {reason}" if reason else "✅ 완료")
-                                break
-                signal_file.unlink(missing_ok=True)
-            
-            # Log agent output (errors only)
-            agent_output = buf.getvalue().strip()
-            for line in agent_output.split('\n'):
-                line = line.strip()
-                if line and '❌' in line:
-                    log(line)
+
+            # Read completion events from thread-safe queue
+            for event in drain_progress():
+                sig_sql_id = event["sql_id"]
+                sig_notes = event.get("notes", "")
+                for s in group:
+                    if s['sql_id'] == sig_sql_id:
+                        reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
+                        console(s['sql_id'], f"✅ 완료 - {reason}" if reason else "✅ 완료")
+                        break
 
         log(f"✅ {mapper_file} 변환 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
@@ -179,7 +154,7 @@ def run(max_workers=8):
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
         table_exists = cursor.fetchone()
-    
+
     # Check if extract files exist
     extract_exists = (PROJECT_ROOT / "output" / "extract").exists()
 
@@ -206,7 +181,7 @@ def run(max_workers=8):
     progress_log = LOGS_DIR / "transform_progress.log"
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     progress_log.write_text('', encoding='utf-8')
-    
+
     # Start tail monitor with original stderr
     original_stderr = sys.stderr
     def tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
@@ -221,7 +196,7 @@ def run(max_workers=8):
                         stderr.flush()
                     last_pos = f.tell()
             stop_event.wait(0.1)
-    
+
     stop_monitor = threading.Event()
     monitor = threading.Thread(target=tail_progress_log, args=(progress_log, stop_monitor, original_stderr), daemon=True)
     monitor.start()
@@ -229,7 +204,7 @@ def run(max_workers=8):
     # 3. Parallel execution with progress tracking
     progress_counter = {'started': 0, 'done': 0, 'lock': threading.Lock()}
     total_sql_count = pending['total']
-    
+
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(transform_mapper, m, s, progress_counter, total_sql_count): m for m, s in mapper_list}

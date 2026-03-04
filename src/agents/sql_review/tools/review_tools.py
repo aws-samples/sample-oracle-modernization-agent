@@ -2,7 +2,7 @@
 import sqlite3
 import time
 from strands import tool
-from utils.project_paths import DB_PATH, PROJECT_ROOT
+from utils.project_paths import DB_PATH
 
 
 @tool
@@ -43,11 +43,13 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
     Args:
         mapper_file: Mapper file name
         sql_id: SQL statement ID
-        result: 'PASS' or 'FAIL'
+        result: 'PASS', 'PASS_WITH_WARNINGS', or 'FAIL'
         violations: Specific violation descriptions (for FAIL)
         review_feedback: Detailed review feedback JSON for re-transform guidance
     """
     feedback_to_store = review_feedback if review_feedback else violations
+    # PASS and PASS_WITH_WARNINGS both store reviewed='Y'; only FAIL stores 'F'
+    reviewed_flag = 'F' if result == 'FAIL' else 'Y'
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
@@ -55,19 +57,20 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
                     UPDATE transform_target_list
                     SET reviewed = ?, review_result = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE mapper_file = ? AND sql_id = ?
-                """, ('Y' if result == 'PASS' else 'F', feedback_to_store, mapper_file, sql_id))
+                """, (reviewed_flag, feedback_to_store, mapper_file, sql_id))
                 conn.commit()
 
-            flag = "✅ PASS" if result == 'PASS' else "❌ FAIL"
+            if result == 'PASS':
+                flag = "✅ PASS"
+            elif result == 'PASS_WITH_WARNINGS':
+                flag = "⚠️  PASS_WITH_WARNINGS"
+            else:
+                flag = "❌ FAIL"
             print(f"  {flag} {mapper_file}/{sql_id} {violations}")
 
-            # Signal file for progress tracking
-            try:
-                signal_file = PROJECT_ROOT / "output" / "logs" / ".review_signals"
-                with open(signal_file, 'a', encoding='utf-8') as f:
-                    f.write(f"{mapper_file}|{sql_id}|{result}|{violations}\n")
-            except Exception:
-                pass
+            # Emit progress event via thread-safe queue
+            from core.progress import emit_progress
+            emit_progress(mapper_file, sql_id, result, violations)
             return {'status': 'ok', 'sql_id': sql_id, 'result': result, 'violations': violations}
         except sqlite3.OperationalError as e:
             if "locked" in str(e) and i < 4:
