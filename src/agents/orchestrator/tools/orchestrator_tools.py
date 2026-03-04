@@ -95,11 +95,10 @@ def generate_project_strategy() -> str:
     
     print("🔍 Generating project strategy...")
     
-    import io, contextlib, importlib
+    import io, contextlib
     buf = io.StringIO()
     try:
         import run_source_analyzer
-        importlib.reload(run_source_analyzer)
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             run_source_analyzer.run()
         stdout = buf.getvalue()
@@ -184,11 +183,10 @@ def compact_strategy() -> str:
     if not strategy_file.exists():
         return "❌ 전략 파일이 없습니다."
     
-    import io, contextlib, importlib
+    import io, contextlib
     buf = io.StringIO()
     try:
         import run_strategy
-        importlib.reload(run_strategy)
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             run_strategy.compact_strategy()
         return f"✅ 전략 압축 완료\n{buf.getvalue()}"
@@ -214,11 +212,11 @@ def check_step_status() -> StepStatusResult:
         'validated': counts['validated'],
         'tested': counts['tested'],
         'merged': counts['merged'],
-        'transform_complete': counts['transform_complete'],
-        'review_complete': counts['review_complete'],
-        'validate_complete': counts['validate_complete'],
-        'test_complete': counts['test_complete'],
-        'merge_complete': counts['merge_complete']
+        'transform_complete': bool(counts['transform_complete']),
+        'review_complete': bool(counts['review_complete']),
+        'validate_complete': bool(counts['validate_complete']),
+        'test_complete': bool(counts['test_complete']),
+        'merge_complete': bool(counts['merge_complete'])
     }
 
     return result

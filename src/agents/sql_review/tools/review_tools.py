@@ -49,15 +49,14 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
     """
     feedback_to_store = review_feedback if review_feedback else violations
     for i in range(5):
-        conn = None
         try:
-            conn = sqlite3.connect(str(DB_PATH), timeout=10)
-            conn.execute("""
-                UPDATE transform_target_list
-                SET reviewed = ?, review_result = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE mapper_file = ? AND sql_id = ?
-            """, ('Y' if result == 'PASS' else 'F', feedback_to_store, mapper_file, sql_id))
-            conn.commit()
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                conn.execute("""
+                    UPDATE transform_target_list
+                    SET reviewed = ?, review_result = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE mapper_file = ? AND sql_id = ?
+                """, ('Y' if result == 'PASS' else 'F', feedback_to_store, mapper_file, sql_id))
+                conn.commit()
 
             flag = "✅ PASS" if result == 'PASS' else "❌ FAIL"
             print(f"  {flag} {mapper_file}/{sql_id} {violations}")
@@ -75,6 +74,4 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
                 time.sleep(0.5 * (i + 1))
             else:
                 raise
-        finally:
-            if conn:
-                conn.close()
+    raise sqlite3.OperationalError(f"Database locked after 5 retries: {mapper_file}/{sql_id}")
