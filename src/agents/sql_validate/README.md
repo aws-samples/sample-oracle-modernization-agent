@@ -4,7 +4,7 @@ A specialized AI agent built with the Strands Framework to validate Oracle-to-Po
 
 ## Overview
 
-The SQL Validate Agent focuses exclusively on functional equivalence between original Oracle SQL and converted PostgreSQL SQL. Rule compliance is handled by the Review Agent (prior step).
+The SQL Validate Agent focuses exclusively on functional equivalence between original Oracle SQL and converted PostgreSQL SQL. Rule compliance is handled by the Review Agent's multi-perspective review (Syntax + Equivalence agents, prior step).
 
 - Verifying semantic correctness (same input → same output)
 - Detecting Oracle/PostgreSQL behavioral differences ('', NULL, implicit casting)

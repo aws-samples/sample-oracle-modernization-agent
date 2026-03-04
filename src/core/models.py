@@ -3,7 +3,7 @@
 This module defines database models using SQLAlchemy ORM to prevent SQL injection
 and provide type-safe database access.
 """
-from sqlalchemy import Column, Integer, Text, DateTime, create_engine
+from sqlalchemy import Column, Index, Integer, Text, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, Session
 from sqlalchemy.sql import func
 
@@ -11,17 +11,14 @@ Base = declarative_base()
 
 
 class TransformTargetList(Base):
-    """Transform target SQL list - main tracking table
+    """Transform target SQL list - main tracking table (20 columns)
 
-    Schema is created in two phases:
-    1. Initial schema (split_mapper.py): 14 columns
-    2. Dynamic additions:
-       - reviewed (TEXT DEFAULT 'N') - added by run_sql_review.py
-       - review_notes (TEXT) - added by diff_tools.py
+    Full schema is created at setup time via run_setup.py (Base.metadata.create_all).
+    split_mapper.py also creates this table with CREATE TABLE IF NOT EXISTS as a fallback.
     """
     __tablename__ = 'transform_target_list'
 
-    # Initial schema (split_mapper.py)
+    # Identity
     id = Column(Integer, primary_key=True, autoincrement=True)
     mapper_file = Column(Text, nullable=False)
     sql_id = Column(Text, nullable=False)
@@ -31,23 +28,23 @@ class TransformTargetList(Base):
     source_file = Column(Text, nullable=False)
     target_file = Column(Text)
 
-    # Pipeline status flags (initial schema)
+    # Pipeline status flags
     transformed = Column(Text, default='N')
+    reviewed = Column(Text, default='N')
     validated = Column(Text, default='N')
     tested = Column(Text, default='N')
     completed = Column(Text, default='N')
 
-    # Timestamps (initial schema)
+    # Timestamps
     created_at = Column(DateTime, default=func.current_timestamp())
     updated_at = Column(DateTime, default=func.current_timestamp())
 
-    # Dynamically added columns (added at runtime via add_column_if_not_exists)
-    reviewed = Column(Text, default='N')  # Added by run_sql_review.py
-    review_notes = Column(Text)  # Added by diff_tools.py
+    # Extended columns
+    review_notes = Column(Text)        # Human review notes (ReviewManager)
     transform_count = Column(Integer)  # Retry count
-    review_result = Column(Text)  # Review result details
-    validation_result = Column(Text)  # Validation result details
-    test_result = Column(Text)  # Test result details
+    review_result = Column(Text)       # Multi-perspective review feedback JSON
+    validation_result = Column(Text)   # Validation result details
+    test_result = Column(Text)         # Test result details
 
     def __repr__(self):
         return f"<TransformTargetList(mapper_file={self.mapper_file}, sql_id={self.sql_id}, status=T:{self.transformed}/R:{self.reviewed}/V:{self.validated}/T:{self.tested})>"
@@ -90,6 +87,10 @@ class PgMetadata(Base):
     table_name = Column(Text, nullable=False)
     column_name = Column(Text, nullable=False)
     data_type = Column(Text, nullable=False)
+
+    __table_args__ = (
+        Index('idx_pg_meta_col', 'table_name', 'column_name'),
+    )
 
     def __repr__(self):
         return f"<PgMetadata(table={self.table_name}, column={self.column_name}, type={self.data_type})>"

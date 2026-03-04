@@ -1,47 +1,50 @@
 """OMA Environment Setup - Interactive setup for oma_control.db"""
+import getpass
+import os
 import sys
 import sqlite3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.project_paths import PROJECT_ROOT, CONFIG_DIR, DB_PATH
+from utils.project_paths import CONFIG_DIR, DB_PATH
+
+# Keys that contain sensitive values — masked in output, entered via getpass
+_SENSITIVE_KEYS = {'ORACLE_SVC_PASSWORD', 'PGPASSWORD'}
 
 
 def init_db():
-    """Create DB and properties table if not exists."""
+    """Create DB and all tables from models.py if not exists.
+
+    Uses SQLAlchemy Base.metadata.create_all() to ensure the full schema
+    is created upfront, including history tables, indexes, and all columns on
+    transform_target_list. Existing tables are not modified (IF NOT EXISTS).
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS properties (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+
+    from sqlalchemy import create_engine
+    from core.models import Base
+
+    engine = create_engine(f"sqlite:///{DB_PATH}", echo=False, connect_args={"timeout": 10})
+    Base.metadata.create_all(engine)
+    engine.dispose()
 
 
-def get_property(key: str) -> str:
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM properties WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
+def get_property(key: str):
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM properties WHERE key = ?", (key,))
+        row = cursor.fetchone()
     return row[0] if row else None
 
 
 def set_property(key: str, value: str, description: str = ""):
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("""
-        INSERT INTO properties (key, value, description) VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP
-    """, (key, value, description, value))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        conn.execute("""
+            INSERT INTO properties (key, value, description) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP
+        """, (key, value, description, value))
+        conn.commit()
 
 
 def ask(prompt: str, current: str = None) -> str:
@@ -51,6 +54,19 @@ def ask(prompt: str, current: str = None) -> str:
     else:
         while True:
             user_input = input(f"  {prompt}: ").strip()
+            if user_input:
+                return user_input
+            print("    ⚠️  값을 입력해주세요.")
+
+
+def ask_password(prompt: str, current: str = None) -> str:
+    """Prompt for password input without echoing to terminal."""
+    if current:
+        user_input = getpass.getpass(f"  {prompt} [****]: ").strip()
+        return user_input if user_input else current
+    else:
+        while True:
+            user_input = getpass.getpass(f"  {prompt}: ").strip()
             if user_input:
                 return user_input
             print("    ⚠️  값을 입력해주세요.")
@@ -113,9 +129,9 @@ def run():
     print("  SQL 변환(Transform)과 검증(Validate)은 DB 없이도 수행 가능합니다.")
     print("  테스트(Test) 단계에서만 PostgreSQL 접속이 필요합니다.")
     print("="*70)
-    
+
     setup_db = input("\n  DB 접속 정보를 지금 설정하시겠습니까? (y/n) [n]: ").strip().lower()
-    
+
     if setup_db != 'y':
         print("\n  ⏭️  DB 접속 정보 설정을 건너뜁니다.")
         print("  → 나중에 run_setup.py를 다시 실행하여 설정할 수 있습니다.")
@@ -131,7 +147,7 @@ def run():
     ora_port = ask("ORACLE_PORT", get_property('ORACLE_PORT') or '1521')
     ora_service = ask("ORACLE_SERVICE_NAME", get_property('ORACLE_SERVICE_NAME'))
     ora_user = ask("ORACLE_SVC_USER", get_property('ORACLE_SVC_USER'))
-    ora_password = ask("ORACLE_SVC_PASSWORD (입력값 표시됨)", get_property('ORACLE_SVC_PASSWORD'))
+    ora_password = ask_password("ORACLE_SVC_PASSWORD", get_property('ORACLE_SVC_PASSWORD'))
 
     set_property('ORACLE_HOST', ora_host, 'Oracle host')
     set_property('ORACLE_PORT', ora_port, 'Oracle port')
@@ -165,7 +181,7 @@ def run():
     pg_port = ask("PGPORT", get_property('PGPORT') or '5432')
     pg_database = ask("PGDATABASE", get_property('PGDATABASE'))
     pg_user = ask("PGUSER", get_property('PGUSER'))
-    pg_password = ask("PGPASSWORD (입력값 표시됨)", get_property('PGPASSWORD'))
+    pg_password = ask_password("PGPASSWORD", get_property('PGPASSWORD'))
 
     set_property('PGHOST', pg_host, 'PostgreSQL host')
     set_property('PGPORT', pg_port, 'PostgreSQL port')
@@ -198,10 +214,11 @@ def run():
     print("\n🔌 PostgreSQL 접속 테스트...", flush=True)
     try:
         import subprocess
-        env = {**__import__('os').environ, 'PGHOST': pg_host, 'PGPORT': pg_port,
+        env = {**os.environ, 'PGHOST': pg_host, 'PGPORT': pg_port,
                'PGDATABASE': pg_database, 'PGUSER': pg_user, 'PGPASSWORD': pg_password}
         result = subprocess.run(
-            ['psql', '-c', 'SELECT 1'], capture_output=True, text=True, timeout=10, env=env
+            ['psql', '-c', 'SELECT 1'],  # noqa: S603 S607 — trusted fixed command
+            capture_output=True, text=True, timeout=10, env=env
         )
         if result.returncode == 0:
             print("  ✅ 접속 성공!")
@@ -212,14 +229,16 @@ def run():
     except Exception as e:
         print(f"  ⚠️  접속 테스트 실패: {e}")
 
-    # 9. 확인
+    # 9. 확인 (비밀번호 마스킹)
     print("✅ 설정 완료:\n")
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT key, value FROM properties ORDER BY key")
-    for key, value in cursor.fetchall():
-        print(f"  {key} = {value}")
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM properties ORDER BY key")
+        for key, value in cursor.fetchall():
+            if key in _SENSITIVE_KEYS:
+                print(f"  {key} = ****")
+            else:
+                print(f"  {key} = {value}")
 
     print(f"\n📁 DB: {DB_PATH}")
     print("🚀 이제 run_source_analyzer.py를 실행하세요.")

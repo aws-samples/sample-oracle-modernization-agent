@@ -5,7 +5,7 @@
 OMA (Oracle Migration Assistant) is an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
 
 - **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to PostgreSQL syntax
-- **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review → Validate → Test) ensures conversion accuracy
+- **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review [multi-perspective: Syntax + Equivalence] → Validate → Test) ensures conversion accuracy
 - **Intelligent Pattern Learning**: Dynamic strategy generation adapts to project-specific SQL patterns and automatically learns from failures
 - **Real Database Testing**: Validates converted SQL against actual PostgreSQL instances to ensure functional equivalence
 - **Batch Processing Optimization**: Groups related SQL statements for efficient processing with prompt caching, reducing API costs by ~80%
@@ -55,7 +55,7 @@ This successful implementation validates the potential of GenAI technology to tr
 
 ## Architecture Highlights
 
-- **4-Stage Quality Pipeline**: Transform → Review → Validate → Test
+- **4-Stage Quality Pipeline**: Transform → Review (multi-perspective) → Validate → Test
 - **2-Tier Rule System**: Static General Rules + Dynamic Project Strategy
 - **Batch Processing**: Groups 3-5 SQL statements for cost-efficient processing
 - **Prompt Caching**: 3-block caching structure reduces API costs by 90%

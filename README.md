@@ -142,6 +142,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 
 ```bash
 # 1. Virtual environment
+# sudo dnf install -y python3.11 python3.11-pip 
 python3.11 -m venv .venv
 source .venv/bin/activate
 
@@ -293,8 +294,8 @@ Review and approve conversion results with Diff Tools:
 ## Pipeline Architecture
 
 ```
-Setup → Analyze → Transform → Review → Validate → Test → Merge
-                                ↓ FAIL
+Setup → Analyze → Transform → Review (multi-perspective) → Validate → Test → Merge
+                                ↓ FAIL (specific feedback)
                           Re-convert (max 2 rounds)
 ```
 
@@ -302,7 +303,7 @@ Setup → Analyze → Transform → Review → Validate → Test → Merge
 |-------|-------|------|--------|
 | **Analyze** | Source Analyzer | Scan Mappers, extract SQL, analyze patterns | Conversion strategy |
 | **Transform** | Transform Agent | Oracle → PostgreSQL conversion | Converted SQL |
-| **Review** | Review Agent | Rule compliance check (FAIL → re-convert) | PASS/FAIL |
+| **Review** | Review Agent | Multi-perspective review: Syntax + Equivalence (FAIL → re-convert with specific feedback) | PASS/FAIL + feedback |
 | **Validate** | Validate Agent | Functional equivalence verification | Validated |
 | **Test** | Test Agent | DB execution test, error fixing | Test passed |
 | **Merge** | - | XML reassembly | Final Mapper |
@@ -316,7 +317,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 |-----|-------|------|------|
 | **Analyze** | Source Analyzer | Mapper 스캔, SQL 추출, 패턴 분석 | 변환 전략 |
 | **Transform** | Transform Agent | Oracle → PostgreSQL 변환 | 변환된 SQL |
-| **Review** | Review Agent | 규칙 준수 체크 (FAIL → 재변환) | PASS/FAIL |
+| **Review** | Review Agent | 다관점 리뷰: Syntax + Equivalence (FAIL → 구체적 피드백과 재변환) | PASS/FAIL + 피드백 |
 | **Validate** | Validate Agent | 기능 동등성 검증 | 검증 완료 |
 | **Test** | Test Agent | DB 실행 테스트, 에러 수정 | 테스트 통과 |
 | **Merge** | - | XML 재조립 | 최종 Mapper |
@@ -347,7 +348,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 ```
 
 ### 4. Automated Quality Assurance
-- **Review**: Rule compliance check → Auto re-convert on FAIL (max 2 rounds)
+- **Review**: Multi-perspective review (Syntax + Equivalence) → Auto re-convert with specific feedback on FAIL (max 2 rounds)
 - **Validate**: Functional equivalence verification → Auto fix on FAIL
 - **Test**: DB execution test → Error analysis and auto fix on FAIL
 - **Learning**: Automatically reflect fix patterns into strategy
@@ -382,7 +383,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
 ```
 
 ### 4. 자동 품질 보증
-- **Review**: 규칙 준수 체크 → FAIL 시 자동 재변환 (최대 2라운드)
+- **Review**: 다관점 리뷰 (Syntax + Equivalence) → FAIL 시 구체적 피드백과 자동 재변환 (최대 2라운드)
 - **Validate**: 기능 동등성 검증 → FAIL 시 자동 수정
 - **Test**: DB 실행 테스트 → FAIL 시 에러 분석 및 자동 수정
 - **Learning**: 수정 패턴을 전략에 자동 반영
@@ -448,7 +449,7 @@ sql-migration-assistant/
 │   │   ├── review_manager/       # Diff tools + conversion review
 │   │   ├── source_analyzer/      # Source analysis + strategy generation
 │   │   ├── sql_transform/        # SQL transformation
-│   │   ├── sql_review/           # Rule compliance review
+│   │   ├── sql_review/           # Multi-perspective review (Syntax + Equivalence)
 │   │   ├── sql_validate/         # Functional equivalence validation
 │   │   ├── sql_test/             # DB execution test
 │   │   └── strategy_refine/      # Strategy enhancement/compression
@@ -496,6 +497,6 @@ Contributions to improve the project are welcome. Refer to Agent design document
 
 ---
 
-**Last Updated**: 2026-03-03
-**Version**: 3.1
+**Last Updated**: 2026-03-04
+**Version**: 3.2
 **Status**: Production Ready

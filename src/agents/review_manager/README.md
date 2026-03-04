@@ -98,7 +98,7 @@ ReviewManager is **independent** of the main pipeline (analyze/transform/test). 
 
 ```
 Pipeline Steps:
-  analyze → transform → review → validate → test → merge
+  analyze → transform → review (multi-perspective) → validate → test → merge
                                               ↓
                                    (Optional Review Layer)
                                               ↓

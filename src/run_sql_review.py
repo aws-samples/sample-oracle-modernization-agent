@@ -1,6 +1,7 @@
-"""Run SQL Review Agent — check rule compliance, re-transform failures"""
+"""Run SQL Review Agent — multi-perspective review + re-transform failures"""
 import sys
 import io
+import json
 import sqlite3
 import threading
 import time
@@ -9,9 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR
-from agents.sql_review.agent import create_sql_review_agent
-from agents.sql_review.tools.review_tools import get_pending_reviews
+from utils.project_paths import DB_PATH, LOGS_DIR
+from agents.sql_review.perspectives import run_multi_perspective_review
+from agents.sql_review.tools.review_tools import get_pending_reviews, set_reviewed
 
 _log_dir = LOGS_DIR / "review"
 
@@ -61,7 +62,7 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
                 f.write(f"{msg}\n")
 
     try:
-        log(f"🔍 시작: {len(sql_ids)} SQL IDs")
+        log(f"🔍 시작: {len(sql_ids)} SQL IDs (multi-perspective review)")
         groups = _group_by_file_size(sql_ids)
 
         for g_num, group in enumerate(groups, 1):
@@ -71,44 +72,38 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
             for s in group:
                 console(s['sql_id'], "🔍 리뷰중")
 
-            signal_file = PROJECT_ROOT / "output" / "logs" / ".review_signals"
-            signal_file.parent.mkdir(parents=True, exist_ok=True)
-            if signal_file.exists():
-                signal_file.unlink()
+            # Run multi-perspective review (Syntax + Equivalence in parallel)
+            result = run_multi_perspective_review(mapper_file, ids_str)
 
-            old_stdout, old_stderr = sys.stdout, sys.stderr
-            buf = io.StringIO()
-            sys.stdout = buf
-            sys.stderr = buf
-            try:
-                agent = create_sql_review_agent()
-                agent(
-                    f"Review the following SQL IDs in {mapper_file}: {ids_str}\n"
-                    f"For each: read_sql_source for original, read_transform for converted, "
-                    f"check ALL General Rules compliance, then set_reviewed with PASS or FAIL."
+            # Process results and update DB via set_reviewed
+            for s in group:
+                sid = s['sql_id']
+                sql_result = result.get('per_sql', {}).get(sid, {})
+                res = sql_result.get('result', 'FAIL')
+                issues = sql_result.get('issues', [])
+                feedback = sql_result.get('feedback', '')
+
+                feedback_json = json.dumps({
+                    'result': res,
+                    'issues': issues,
+                    'feedback': feedback,
+                }, ensure_ascii=False)
+
+                set_reviewed(
+                    mapper_file=mapper_file,
+                    sql_id=sid,
+                    result=res,
+                    violations="; ".join(issues) if issues else "",
+                    review_feedback=feedback_json,
                 )
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
 
-            if signal_file.exists():
-                for line in signal_file.read_text(encoding='utf-8').strip().split('\n'):
-                    if not line:
-                        continue
-                    parts = line.split('|', 3)
-                    if len(parts) >= 3:
-                        sid, res = parts[1], parts[2]
-                        notes = parts[3] if len(parts) > 3 else ""
-                        for s in group:
-                            if s['sql_id'] == sid:
-                                if res == 'PASS':
-                                    console(sid, "✅ PASS")
-                                    log(f"  ✅ PASS {sid}")
-                                else:
-                                    console(sid, f"❌ FAIL - {notes[:60]}")
-                                    log(f"  ❌ FAIL {sid}: {notes}")
-                                break
-                signal_file.unlink(missing_ok=True)
+                if res == 'PASS':
+                    console(sid, "✅ PASS")
+                    log(f"  ✅ PASS {sid}")
+                else:
+                    summary = "; ".join(issues[:2]) if issues else "review failed"
+                    console(sid, f"❌ FAIL - {summary[:80]}")
+                    log(f"  ❌ FAIL {sid}: {summary}")
 
         log(f"✅ {mapper_file} 리뷰 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
@@ -119,32 +114,56 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
 
 
 def _retransform_failures():
-    """Re-transform SQL IDs that failed review."""
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT mapper_file, sql_id FROM transform_target_list
-        WHERE reviewed = 'F'
-    """)
-    failures = cursor.fetchall()
-    conn.close()
+    """Re-transform SQL IDs that failed review, passing specific feedback."""
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mapper_file, sql_id, review_result FROM transform_target_list
+            WHERE reviewed = 'F'
+        """)
+        failures = cursor.fetchall()
 
     if not failures:
         return 0
 
-    print(f"\n🔄 Re-transforming {len(failures)} failed SQL IDs...", flush=True)
+    print(f"\n🔄 Re-transforming {len(failures)} failed SQL IDs with specific feedback...", flush=True)
 
     from agents.sql_transform.agent import create_sql_transform_agent
 
-    # Group by mapper
+    # Group by mapper, collecting feedback per sql_id
     by_mapper = {}
-    for mapper, sql_id in failures:
-        by_mapper.setdefault(mapper, []).append(sql_id)
+    for mapper, sql_id, review_result in failures:
+        if mapper not in by_mapper:
+            by_mapper[mapper] = []
+        by_mapper[mapper].append({'sql_id': sql_id, 'review_result': review_result or ''})
 
     fixed = 0
-    for mapper, sql_ids in by_mapper.items():
-        ids_str = ", ".join(sql_ids)
+    for mapper, sql_entries in by_mapper.items():
+        ids_str = ", ".join(e['sql_id'] for e in sql_entries)
         log_path = _log_dir / f"{Path(mapper).stem}.log"
+
+        # Build specific feedback for each SQL ID
+        feedback_lines = []
+        for entry in sql_entries:
+            sid = entry['sql_id']
+            review_result = entry['review_result']
+            if review_result:
+                try:
+                    parsed = json.loads(review_result)
+                    issues = parsed.get('issues', [])
+                    if issues:
+                        for issue in issues:
+                            feedback_lines.append(f"  [{sid}] {issue}")
+                    else:
+                        feedback_lines.append(f"  [{sid}] Review failed (no specific issues recorded)")
+                except (ValueError, TypeError):
+                    # review_result is plain text, not JSON
+                    feedback_lines.append(f"  [{sid}] {review_result}")
+            else:
+                feedback_lines.append(f"  [{sid}] Review failed (no feedback available)")
+
+        feedback_text = "\n".join(feedback_lines)
+
         old_stdout, old_stderr = sys.stdout, sys.stderr
         buf = io.StringIO()
         sys.stdout = buf
@@ -153,28 +172,30 @@ def _retransform_failures():
             agent = create_sql_transform_agent()
             agent(
                 f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
-                f"These FAILED review due to rule violations. "
-                f"Read each with read_sql_source, convert carefully applying ALL rules, save with convert_sql."
+                f"These FAILED review. Here are the SPECIFIC issues found:\n"
+                f"{feedback_text}\n"
+                f"For each: fix the listed issues, apply ALL rules, "
+                f"read with read_sql_source, save with convert_sql."
             )
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-        # Log re-transform
+        # Log re-transform with feedback
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] 🔄 Re-transform: {ids_str}\n")
+            f.write(f"  Feedback:\n{feedback_text}\n")
 
         # Reset reviewed flag for re-review
-        conn = sqlite3.connect(str(DB_PATH), timeout=10)
-        for sid in sql_ids:
-            conn.execute(
-                "UPDATE transform_target_list SET reviewed='N' WHERE mapper_file=? AND sql_id=?",
-                (mapper, sid)
-            )
-        conn.commit()
-        conn.close()
-        fixed += len(sql_ids)
-        print(f"  🔄 {mapper}: {len(sql_ids)} SQL IDs re-transformed", flush=True)
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            for entry in sql_entries:
+                conn.execute(
+                    "UPDATE transform_target_list SET reviewed='N' WHERE mapper_file=? AND sql_id=?",
+                    (mapper, entry['sql_id'])
+                )
+            conn.commit()
+        fixed += len(sql_entries)
+        print(f"  🔄 {mapper}: {len(sql_entries)} SQL IDs re-transformed", flush=True)
 
     return fixed
 
@@ -235,15 +256,14 @@ def run(max_workers=8, max_rounds=2):
             break  # No failures, done
 
     # Final summary
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
-    passed = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='F'")
-    failed = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
-    total = cursor.fetchone()[0]
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
+        passed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='F'")
+        failed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
+        total = cursor.fetchone()[0]
 
     print(f"\n{'='*60}", flush=True)
     print(f"📊 Review 결과: {passed} PASS / {failed} FAIL / {total} total", flush=True)
@@ -264,11 +284,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.reset:
-        # Schema now includes 'reviewed' column from initial CREATE TABLE
-        conn = sqlite3.connect(str(DB_PATH), timeout=10)
-        conn.execute("UPDATE transform_target_list SET reviewed='N' WHERE transformed='Y'")
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            conn.execute("UPDATE transform_target_list SET reviewed='N' WHERE transformed='Y'")
+            conn.commit()
         print("🗑️  Review 상태 초기화 완료\n", flush=True)
 
     run(max_workers=args.workers, max_rounds=args.max_rounds)

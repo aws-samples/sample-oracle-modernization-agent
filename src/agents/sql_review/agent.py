@@ -1,13 +1,20 @@
-from utils.project_paths import MODEL_ID
-"""SQL Review Agent — rule compliance checker"""
+"""SQL Review Agent — rule compliance checker (single + multi-perspective)"""
 from pathlib import Path
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 
+from utils.project_paths import MODEL_ID
 from .tools.review_tools import get_pending_reviews, set_reviewed
 from agents.sql_transform.tools.load_mapper_list import read_sql_source
 from agents.sql_validate.tools.validate_tools import read_transform
+
+# Multi-perspective review agents
+from .perspectives import (
+    create_syntax_review_agent,
+    create_equivalence_review_agent,
+    run_multi_perspective_review,
+)
 
 
 def _load_system_prompt():
@@ -23,6 +30,7 @@ def _load_system_prompt():
 
 
 def create_sql_review_agent() -> Agent:
+    """Create the original single-perspective review agent (backward compatible)."""
     model = BedrockModel(
         model_id=MODEL_ID,
         max_tokens=32000

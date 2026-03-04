@@ -4,7 +4,7 @@
 
 ### 1.1 목적
 - **주요 목표**: 원본 Oracle SQL과 변환된 PostgreSQL SQL의 기능 동등성 검증
-- **핵심 원칙**: 규칙 준수는 Review Agent가 담당. Validate는 "같은 입력에 같은 결과가 나오는가?"만 검증
+- **핵심 원칙**: 규칙 준수는 Review Agent(다관점: Syntax + Equivalence)가 담당. Validate는 "같은 입력에 같은 결과가 나오는가?"만 검증
 - **사용 시나리오**: Transform → Review(PASS) 후, 의미론적 정확성 검증
 
 ### 1.2 입력/출력

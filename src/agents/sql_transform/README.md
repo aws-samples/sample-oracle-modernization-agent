@@ -244,13 +244,13 @@ Final report includes:
 ## Pipeline Position
 
 ```
-Transform → Review → Validate → Test → Merge
-  변환       규칙 체크   의미 검증   DB 실행   XML 조립
-             ↓ FAIL
+Transform → Review (다관점) → Validate → Test → Merge
+  변환       Syntax+Equiv    의미 검증   DB 실행   XML 조립
+             ↓ FAIL (구체적 피드백)
           Transform 재호출
 ```
 
-After Transform, the Review Agent checks General Rules compliance. FAIL results trigger re-transformation with violation details.
+After Transform, the Review Agent runs multi-perspective review (Syntax + Equivalence agents in parallel). FAIL results trigger re-transformation with specific issue feedback from both perspectives.
 
 ## Best Practices
 

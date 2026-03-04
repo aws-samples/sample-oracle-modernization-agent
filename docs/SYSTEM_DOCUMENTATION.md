@@ -2,8 +2,8 @@
 
 **Oracle Migration Assistant - 시스템 전체 문서**
 
-**버전**: 3.2
-**최종 업데이트**: 2026-03-03
+**버전**: 3.3
+**최종 업데이트**: 2026-03-04
 **상태**: Production Ready
 
 ---
@@ -52,7 +52,7 @@ graph TB
     subgraph Pipeline["Pipeline Agents"]
         ANA[Analyze + Strategy<br/>Mapper 스캔, SQL 추출<br/>패턴 분석, 전략 생성]
         TRF[Transform Agent<br/>AI 변환, 배치 처리<br/>병렬 8 Workers]
-        REV[Review Agent<br/>규칙 준수 체크<br/>FAIL → 재변환]
+        REV[Review Agent<br/>다관점 리뷰<br/>Syntax + Equivalence]
         VAL[Validate Agent<br/>기능 동등성 검증<br/>Oracle/PG 동작 차이]
         TST[Test Agent<br/>DB 실행 검증<br/>에러 자동 수정]
         MRG[Merge<br/>XML 재조립]
@@ -103,7 +103,7 @@ Block 1: General Rules + cachePoint      (정적, 모든 Agent 공유)
 Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 ```
 
-- Review Agent는 Block 0 + Block 1만 사용 (Strategy 불필요)
+- Review Agent의 Syntax/Equivalence Agent는 각각 Block 0 + Block 1만 사용 (Strategy 불필요)
 - Prompt Caching으로 비용 90% 절감, 캐시 유효 5분
 
 ### Agent 역할 분리
@@ -113,7 +113,7 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 | **Orchestrator** | 파이프라인 제어 | "단계 실행, 상태 모니터링" | 없음 (제어만) |
 | **ReviewManager** | 변환 검토 관리 | "변환 결과 비교, 승인" | 없음 (검토만) |
 | **Transform** | Oracle → PG 변환 | "규칙 + 전문가 판단으로 변환" | SQL 생성 |
-| **Review** | 규칙 준수 체크 | "규칙 다 적용했나? 잘못 적용한 건 없나?" | 안 함 (PASS/FAIL만) |
+| **Review** | 다관점 리뷰 (Syntax + Equivalence) | "구문 규칙 준수 + 기능 동등성" | 안 함 (PASS/FAIL + 구체적 피드백) |
 | **Validate** | 기능 동등성 | "같은 입력에 같은 결과 나오나?" | FAIL 시 수정 |
 | **Test** | DB 실행 검증 | "실제로 돌아가나?" | FAIL 시 수정 |
 
@@ -135,17 +135,20 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 - **특징**: General Rules에 없는 Oracle 구문도 전문가 판단으로 변환
 - **SELF-CHECK**: Oracle 잔재, XML escaping, parameter casting 확인 후 저장
 
-### 3. Review Agent (신규)
+### 3. Review Agent (다관점 리뷰)
 - **위치**: `src/agents/sql_review/`
-- **역할**: General Rules 준수 여부 체크 (수정하지 않음)
-- **max_tokens**: 32000
-- **도구**: `get_pending_reviews`, `read_sql_source`, `read_transform`, `set_reviewed`
-- **체크 범위**:
+- **역할**: 2개 관점의 독립 리뷰 + Facilitator 통합 (수정하지 않음)
+- **구조**: Syntax Agent + Equivalence Agent (병렬) → Facilitator (Python 함수)
+- **Syntax Agent** (max_tokens=16000):
   - Phase 1~4 Oracle 잔재 (40+ 함수/구문)
   - 잘못된 변환 패턴 (COALESCE+OR IS NULL, interval 오류, ROUND numeric 등)
   - Parameter casting, XML escaping, MyBatis 태그 무결성
-- **FAIL 시**: Transform Agent 재호출 → 재리뷰 (최대 2라운드)
-- **Signal file**: `.review_signals` (mapper|sql_id|PASS/FAIL|violations)
+- **Equivalence Agent** (max_tokens=16000):
+  - Oracle/PG 동작 차이 ('' = NULL, DECODE NULL, OUTER JOIN + WHERE)
+  - 컬럼 출력, JOIN 관계, 정렬, 서브쿼리 로직, MyBatis 무결성
+- **Facilitator**: Python 함수로 두 결과 통합 (LLM 호출 없음)
+- **도구**: `read_sql_source`, `read_transform` (읽기 전용, 각 Perspective Agent)
+- **FAIL 시**: `review_result` 컬럼에 구체적 피드백 JSON 저장 → Transform Agent 재호출 (최대 2라운드)
 
 ### 4. Validate Agent
 - **위치**: `src/agents/sql_validate/`
@@ -209,8 +212,8 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 ### 전체 흐름
 
 ```
-Setup (1회) → Analyze → Transform → Review → Validate → Test → Merge
-                                      ↓ FAIL
+Setup (1회) → Analyze → Transform → Review (다관점) → Validate → Test → Merge
+                                      ↓ FAIL (구체적 피드백)
                                    Transform 재호출
 ```
 
@@ -354,5 +357,5 @@ output/logs/
 
 ---
 
-**문서 버전**: 3.2
-**마지막 업데이트**: 2026-03-03
+**문서 버전**: 3.3
+**마지막 업데이트**: 2026-03-04

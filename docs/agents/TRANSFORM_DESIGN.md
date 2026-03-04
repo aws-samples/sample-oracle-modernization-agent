@@ -568,9 +568,9 @@ Strategy Agent
 
 Transform Agent
     │
-    ├── output/transform/ ──→ Review Agent가 규칙 체크
+    ├── output/transform/ ──→ Review Agent가 다관점 리뷰 (Syntax + Equivalence)
     │                          ├── PASS → Validate Agent가 기능 동등성 검증
-    │                          └── FAIL → Transform Agent 재호출
+    │                          └── FAIL → 구체적 피드백과 함께 Transform Agent 재호출
     ├── logs/transform_progress.log
     └── DB 업데이트 (transformed='Y')
 

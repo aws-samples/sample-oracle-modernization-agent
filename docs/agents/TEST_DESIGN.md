@@ -521,7 +521,7 @@ Validate Agent
     ├── 기능 동등성 검증 결과 ──→ 테스트 우선순위 참조
     └── reports/validate_report.md
 
-Review Agent (선행 단계)
+Review Agent (선행 단계, 다관점: Syntax + Equivalence)
     │
     └── reviewed='Y' ──→ Validate Agent 입력 조건
 
