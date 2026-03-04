@@ -12,8 +12,8 @@ from .tools.sql_extractor import analyze_sql_complexity
 from .tools.report_generator import generate_markdown_report
 
 # Import tools - strategy generation
-from agents.source_analyzer.tools.pattern_analyzer import analyze_sql_patterns
-from agents.source_analyzer.tools.strategy_generator import generate_strategy, write_strategy_file
+from .tools.pattern_analyzer import analyze_sql_patterns
+from .tools.strategy_generator import generate_strategy, write_strategy_file
 
 
 def create_source_analyzer_agent() -> Agent:
@@ -61,7 +61,7 @@ def run_analysis():
     print(result)
     print("=" * 60)
 
-    from utils.project_paths import STRATEGY_DIR, MODEL_ID
+    from utils.project_paths import STRATEGY_DIR
     strategy_file = STRATEGY_DIR / "transform_strategy.md"
     if strategy_file.exists():
         size_kb = strategy_file.stat().st_size / 1024

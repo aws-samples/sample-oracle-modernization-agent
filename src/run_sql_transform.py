@@ -175,11 +175,10 @@ def run(max_workers=8):
     print("🚀 SQL Transform Agent 시작...\n", flush=True)
 
     # 1. 전처리 (extract 파일이 없으면 실행)
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
-    table_exists = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
+        table_exists = cursor.fetchone()
     
     # Check if extract files exist
     extract_exists = (PROJECT_ROOT / "output" / "extract").exists()
@@ -245,15 +244,14 @@ def run(max_workers=8):
     save_conversion_report()
 
     # 최종 완료 판단: DB 기준
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-    total = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
-    done = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='N'")
-    remaining = cursor.fetchone()[0]
-    conn.close()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
+        done = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='N'")
+        remaining = cursor.fetchone()[0]
 
     # merge 파일 확인
     merge_dir = MERGE_DIR
@@ -291,10 +289,9 @@ if __name__ == "__main__":
     if args.reset:
         import shutil
         print("🗑️  Reset: DB + output 초기화...", flush=True)
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.execute("DROP TABLE IF EXISTS transform_target_list")
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            conn.execute("DROP TABLE IF EXISTS transform_target_list")
+            conn.commit()
         output_dir = OUTPUT_DIR
         if output_dir.exists():
             shutil.rmtree(output_dir)

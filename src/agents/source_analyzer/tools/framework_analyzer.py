@@ -78,7 +78,7 @@ def _analyze_maven(pom_path: Path) -> Dict:
             'build_tool': 'Maven',
             'dependencies': deps
         }
-    except:
+    except Exception:
         return {'build_tool': 'Maven'}
 
 
@@ -100,7 +100,7 @@ def _detect_mybatis_info(source_path: Path, dependencies: list) -> dict:
             if '<!DOCTYPE mapper' in first_lines or '<!DOCTYPE configuration' in first_lines:
                 info['doctype_found'] = True
                 break
-        except:
+        except Exception:
             continue
 
     # MyBatis 3.x+ supports DOCTYPE-free operation
@@ -135,7 +135,7 @@ def _detect_framework_patterns(source_path: Path) -> list:
                 patterns.add('JPA')
             if 'extends HttpServlet' in content:
                 patterns.add('Servlet')
-        except:
+        except Exception:
             continue
-    
+
     return list(patterns)

@@ -56,16 +56,16 @@ def analyze_sql_complexity(mapper_files: list) -> dict:
         if 'mappers' in mapper_files:
             mapper_files = mapper_files['mappers']
         else:
-            raise ValueError(f"If dict is provided, it must have 'mappers' key. Got keys: {list(mapper_files.keys())}")
-    
+            return {'error': f"If dict is provided, it must have 'mappers' key. Got keys: {list(mapper_files.keys())}"}
+
     if not mapper_files:
         return _empty_result()
     if not isinstance(mapper_files, list):
-        raise ValueError(f"mapper_files must be a list or dict, got {type(mapper_files)}")
+        return {'error': f"mapper_files must be a list or dict, got {type(mapper_files)}"}
     if mapper_files and not isinstance(mapper_files[0], dict):
-        raise ValueError(f"mapper_files items must be dictionaries, got {type(mapper_files[0])}")
+        return {'error': f"mapper_files items must be dictionaries, got {type(mapper_files[0])}"}
     if mapper_files and 'path' not in mapper_files[0]:
-        raise ValueError(f"mapper_files items must have 'path' key, got keys: {list(mapper_files[0].keys())}")
+        return {'error': f"mapper_files items must have 'path' key, got keys: {list(mapper_files[0].keys())}"}
     
     complexity_scores = []
     complexity_details = []
@@ -111,11 +111,13 @@ def analyze_sql_complexity(mapper_files: list) -> dict:
             'postgresql': pattern_pg_map.get(name, '')
         })
     
+    all_scores = sorted(complexity_scores, reverse=True)
     return {
         'average': sum(complexity_scores) / len(complexity_scores),
         'max': max(complexity_scores),
         'min': min(complexity_scores),
         'total_queries': len(complexity_scores),
+        'all_scores': all_scores,
         'details': sorted(complexity_details, key=lambda x: x['score'], reverse=True)[:20],
         'distribution': _get_distribution(complexity_scores),
         'oracle_patterns': oracle_patterns,

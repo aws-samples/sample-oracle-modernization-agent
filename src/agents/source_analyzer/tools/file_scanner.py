@@ -40,9 +40,9 @@ def scan_mybatis_mappers(source_folder: str) -> Dict:
                     'namespace': namespace,
                     'sql_count': sql_count
                 })
-        except:
+        except Exception:
             continue
-    
+
     return {
         'total': len(mappers),
         'valid': len([m for m in mappers if m['sql_count'] > 0]),
@@ -78,7 +78,7 @@ def scan_java_files(source_folder: str, pattern: str = None) -> Dict:
                 content = java_file.read_text(encoding='utf-8', errors='ignore')
                 if re.search(pattern, content, re.IGNORECASE):
                     matches.append(str(java_file))
-            except:
+            except Exception:
                 continue
         results['matches'] = matches
         results['match_count'] = len(matches)

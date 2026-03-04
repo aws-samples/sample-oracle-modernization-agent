@@ -32,7 +32,7 @@ def generate_strategy(
     # Parse analysis data
     try:
         data = json.loads(analysis_data)
-    except:
+    except (json.JSONDecodeError, TypeError):
         data = {'raw_data': analysis_data}
     
     # Read reference rules if provided
@@ -111,14 +111,21 @@ def write_strategy_file(output_file: str, content: str, reference_rules: str = N
     try:
         from agents.source_analyzer.tools.report_generator import _generate_strategy_section
         from utils.project_paths import REPORTS_DIR
+        import re as _re
         analysis_report = REPORTS_DIR / "source_analysis.md"
         if analysis_report.exists():
             report_content = analysis_report.read_text(encoding='utf-8')
             new_section = _generate_strategy_section()
-            marker = "### 3.5.2 프로젝트별 변환 전략 (동적)"
-            if marker in report_content:
-                before = report_content[:report_content.index(marker)]
-                analysis_report.write_text(before + new_section, encoding='utf-8')
+            strategy_marker = "## 3.5 Migration Strategy"
+            if strategy_marker in report_content:
+                before = report_content[:report_content.index(strategy_marker)]
+                # Preserve sections after strategy (## 4. Recommendations, etc.)
+                after_match = _re.search(r'\n(## 4\. )', report_content[report_content.index(strategy_marker):])
+                after = ""
+                if after_match:
+                    after_start = report_content.index(strategy_marker) + after_match.start()
+                    after = "\n" + report_content[after_start:]
+                analysis_report.write_text(before + new_section + after, encoding='utf-8')
                 result += "✅ source_analysis.md 전략 섹션 업데이트 완료\n"
     except Exception as e:
         result += f"⚠️ source_analysis.md 업데이트 실패: {e}\n"

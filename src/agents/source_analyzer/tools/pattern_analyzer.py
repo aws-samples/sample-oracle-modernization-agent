@@ -92,11 +92,10 @@ def _extract_top_complex_sqls(report_content: str) -> list:
     
     # Get Java source folder from DB
     db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM properties WHERE key = 'JAVA_SOURCE_FOLDER'")
-    result = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM properties WHERE key = 'JAVA_SOURCE_FOLDER'")
+        result = cursor.fetchone()
     
     if not result:
         return top_complex
@@ -141,7 +140,7 @@ def _extract_sql_from_xml(xml_path: Path, sql_id: str) -> str:
     """
     try:
         content = xml_path.read_text(encoding='utf-8')
-    except:
+    except Exception:
         return f"[Failed to read XML: {xml_path}]"
     
     # Find SQL tag with matching id

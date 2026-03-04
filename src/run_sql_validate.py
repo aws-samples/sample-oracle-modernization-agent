@@ -212,13 +212,12 @@ def run(max_workers=8):
     monitor.join(timeout=2)
 
     # 결과
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-    validated = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-    total = cursor.fetchone()[0]
-    conn.close()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
+        validated = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        total = cursor.fetchone()[0]
 
     print(f"\n{'='*60}", flush=True)
     print(f"📊 결과: {validated}/{total} SQL IDs validated", flush=True)

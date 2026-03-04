@@ -50,18 +50,17 @@ def get_review_candidates(filter_type: str = 'all') -> dict:
     Returns:
         Dict with candidates grouped by priority
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
 
-    queries = {
-        'failed_validation': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND validated='N' ORDER BY mapper_file, seq_no",
-        'failed_test': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND validated='Y' AND tested='N' ORDER BY mapper_file, seq_no",
-        'not_tested': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND (tested IS NULL OR tested='N') ORDER BY mapper_file, seq_no",
-        'all': "SELECT mapper_file, sql_id, sql_type, validated, tested FROM transform_target_list WHERE transformed='Y' ORDER BY mapper_file, seq_no",
-    }
-    cursor.execute(queries.get(filter_type, queries['all']))
-    rows = cursor.fetchall()
-    conn.close()
+        queries = {
+            'failed_validation': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND validated='N' ORDER BY mapper_file, seq_no",
+            'failed_test': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND validated='Y' AND tested='N' ORDER BY mapper_file, seq_no",
+            'not_tested': "SELECT mapper_file, sql_id, sql_type FROM transform_target_list WHERE transformed='Y' AND (tested IS NULL OR tested='N') ORDER BY mapper_file, seq_no",
+            'all': "SELECT mapper_file, sql_id, sql_type, validated, tested FROM transform_target_list WHERE transformed='Y' ORDER BY mapper_file, seq_no",
+        }
+        cursor.execute(queries.get(filter_type, queries['all']))
+        rows = cursor.fetchall()
 
     candidates = [{'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2]} for r in rows]
     return {'status': 'success', 'total': len(candidates), 'candidates': candidates, 'filter_type': filter_type}
@@ -78,14 +77,13 @@ def show_sql_diff(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Dict with diff output
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT source_file, target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-        (mapper_file, sql_id)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT source_file, target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+            (mapper_file, sql_id)
+        )
+        row = cursor.fetchone()
 
     if not row:
         return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
@@ -106,19 +104,18 @@ def generate_diff_report(mapper_file: str = None) -> dict:
     Returns:
         Dict with report path
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    if mapper_file:
-        cursor.execute(
-            "SELECT mapper_file, sql_id, sql_type, source_file, target_file FROM transform_target_list WHERE transformed='Y' AND mapper_file=? ORDER BY mapper_file, seq_no",
-            (mapper_file,)
-        )
-    else:
-        cursor.execute(
-            "SELECT mapper_file, sql_id, sql_type, source_file, target_file FROM transform_target_list WHERE transformed='Y' ORDER BY mapper_file, seq_no"
-        )
-    rows = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        if mapper_file:
+            cursor.execute(
+                "SELECT mapper_file, sql_id, sql_type, source_file, target_file FROM transform_target_list WHERE transformed='Y' AND mapper_file=? ORDER BY mapper_file, seq_no",
+                (mapper_file,)
+            )
+        else:
+            cursor.execute(
+                "SELECT mapper_file, sql_id, sql_type, source_file, target_file FROM transform_target_list WHERE transformed='Y' ORDER BY mapper_file, seq_no"
+            )
+        rows = cursor.fetchall()
 
     if not rows:
         return {'status': 'error', 'message': 'No transformed SQLs found'}
@@ -166,23 +163,21 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
         sql_id: SQL statement ID
         notes: Optional review notes
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-        (mapper_file, sql_id)
-    )
-    if not cursor.fetchone():
-        conn.close()
-        return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+            (mapper_file, sql_id)
+        )
+        if not cursor.fetchone():
+            return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
 
-    # Schema now includes 'review_notes' column from initial CREATE TABLE
-    cursor.execute(
-        "UPDATE transform_target_list SET reviewed='Y', review_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-        (notes, mapper_file, sql_id)
-    )
-    conn.commit()
-    conn.close()
+        # Schema now includes 'review_notes' column from initial CREATE TABLE
+        cursor.execute(
+            "UPDATE transform_target_list SET reviewed='Y', review_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+            (notes, mapper_file, sql_id)
+        )
+        conn.commit()
     return {'status': 'success', 'message': f'Approved: {mapper_file}/{sql_id}'}
 
 

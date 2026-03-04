@@ -13,40 +13,38 @@ def save_conversion_report() -> dict:
     Returns:
         Dict with report_path and summary statistics
     """
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
 
-    # Summary stats
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-    total = cursor.fetchone()[0]
+        # Summary stats
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        total = cursor.fetchone()[0]
 
-    if total == 0:
-        conn.close()
-        return {'error': 'No records in transform_target_list', 'report_path': ''}
+        if total == 0:
+            return {'error': 'No records in transform_target_list', 'report_path': ''}
 
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed = 'Y'")
-    transformed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed = 'Y'")
+        transformed = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed = 'N'")
-    remaining = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed = 'N'")
+        remaining = cursor.fetchone()[0]
 
-    # Per-mapper stats
-    cursor.execute("""
-        SELECT mapper_file,
-               COUNT(*) as total,
-               SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as done
-        FROM transform_target_list
-        GROUP BY mapper_file ORDER BY mapper_file
-    """)
-    mapper_stats = cursor.fetchall()
+        # Per-mapper stats
+        cursor.execute("""
+            SELECT mapper_file,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as done
+            FROM transform_target_list
+            GROUP BY mapper_file ORDER BY mapper_file
+        """)
+        mapper_stats = cursor.fetchall()
 
-    # Detail list
-    cursor.execute("""
-        SELECT mapper_file, sql_id, sql_type, seq_no, transformed, target_file
-        FROM transform_target_list ORDER BY mapper_file, seq_no
-    """)
-    all_records = cursor.fetchall()
-    conn.close()
+        # Detail list
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, seq_no, transformed, target_file
+            FROM transform_target_list ORDER BY mapper_file, seq_no
+        """)
+        all_records = cursor.fetchall()
 
     # Build report
     lines = [

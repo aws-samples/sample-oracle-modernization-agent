@@ -20,21 +20,20 @@ def assemble_mapper(mapper_file: str) -> dict:
     Args:
         mapper_file: Mapper file name (e.g. 'SellerMapper.xml')
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
 
-    # Get all converted SQL IDs for this mapper
-    cursor.execute("""
-        SELECT sql_id, target_file FROM transform_target_list
-        WHERE mapper_file = ? AND transformed = 'Y'
-        ORDER BY seq_no
-    """, (mapper_file,))
-    rows = cursor.fetchall()
+        # Get all converted SQL IDs for this mapper
+        cursor.execute("""
+            SELECT sql_id, target_file FROM transform_target_list
+            WHERE mapper_file = ? AND transformed = 'Y'
+            ORDER BY seq_no
+        """, (mapper_file,))
+        rows = cursor.fetchall()
 
-    # Get relative_path for output directory
-    cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?", (mapper_file,))
-    src_row = cursor.fetchone()
-    conn.close()
+        # Get relative_path for output directory
+        cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?", (mapper_file,))
+        src_row = cursor.fetchone()
 
     if not rows:
         return {'error': f'No converted SQLs for {mapper_file}', 'output_path': '', 'total': 0, 'success': 0}

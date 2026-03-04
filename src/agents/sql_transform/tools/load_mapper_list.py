@@ -12,11 +12,10 @@ def load_mapper_list() -> dict:
     Returns:
         Dict with mappers list containing file_path, file_name, relative_path
     """
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_path, file_name, relative_path FROM source_xml_list ORDER BY id")
-    rows = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_path, file_name, relative_path FROM source_xml_list ORDER BY id")
+        rows = cursor.fetchall()
 
     mappers = [{'file_path': r[0], 'file_name': r[1], 'relative_path': r[2]} for r in rows]
     print(f"📋 Loaded {len(mappers)} mapper files from DB")
@@ -30,16 +29,15 @@ def get_pending_transforms() -> dict:
     Returns:
         Dict with pending list grouped by mapper_file
     """
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT mapper_file, sql_id, sql_type, seq_no, source_file, target_file
-        FROM transform_target_list
-        WHERE transformed = 'N'
-        ORDER BY mapper_file, seq_no
-    """)
-    rows = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, seq_no, source_file, target_file
+            FROM transform_target_list
+            WHERE transformed = 'N'
+            ORDER BY mapper_file, seq_no
+        """)
+        rows = cursor.fetchall()
 
     pending = {}
     for mapper, sql_id, sql_type, seq, source, target in rows:
@@ -66,14 +64,13 @@ def read_sql_source(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Dict with sql_id, sql_type, sql_body (original SQL content)
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT source_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-        (mapper_file, sql_id)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT source_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            (mapper_file, sql_id)
+        )
+        row = cursor.fetchone()
 
     if not row:
         return {'error': f'Not found: {mapper_file}/{sql_id}'}

@@ -18,14 +18,13 @@ def read_transform(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Dict with sql_id, sql_type, sql_body (transformed SQL)
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT target_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-        (mapper_file, sql_id)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT target_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            (mapper_file, sql_id)
+        )
+        row = cursor.fetchone()
 
     if not row:
         return {'error': f'Not found: {mapper_file}/{sql_id}'}
@@ -57,14 +56,13 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
     """
     for i in range(5):
         try:
-            conn = sqlite3.connect(str(DB_PATH), timeout=10)
-            conn.execute("""
-                UPDATE transform_target_list
-                SET validated = 'Y', updated_at = CURRENT_TIMESTAMP
-                WHERE mapper_file = ? AND sql_id = ?
-            """, (mapper_file, sql_id))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                conn.execute("""
+                    UPDATE transform_target_list
+                    SET validated = 'Y', updated_at = CURRENT_TIMESTAMP
+                    WHERE mapper_file = ? AND sql_id = ?
+                """, (mapper_file, sql_id))
+                conn.commit()
             flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
             print(f"  {flag} {mapper_file}/{sql_id} {notes}")
             # Write signal for progress tracking
@@ -72,7 +70,7 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
                 signal_file = PROJECT_ROOT / "output" / "logs" / ".validate_signals"
                 with open(signal_file, 'a', encoding='utf-8') as f:
                     f.write(f"{mapper_file}|{sql_id}|{result}|{notes}\n")
-            except:
+            except Exception:
                 pass
             return {'status': 'ok', 'sql_id': sql_id, 'result': result}
         except sqlite3.OperationalError as e:
@@ -89,27 +87,26 @@ def get_pending_validations() -> dict:
     Returns:
         Dict with pending list grouped by mapper_file
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    # Check if reviewed column exists
-    cursor.execute("PRAGMA table_info(transform_target_list)")
-    cols = [r[1] for r in cursor.fetchall()]
-    if 'reviewed' in cols:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, source_file, target_file
-            FROM transform_target_list
-            WHERE transformed = 'Y' AND reviewed = 'Y' AND validated = 'N'
-            ORDER BY mapper_file, seq_no
-        """)
-    else:
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, source_file, target_file
-            FROM transform_target_list
-            WHERE transformed = 'Y' AND validated = 'N'
-            ORDER BY mapper_file, seq_no
-        """)
-    rows = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        # Check if reviewed column exists
+        cursor.execute("PRAGMA table_info(transform_target_list)")
+        cols = [r[1] for r in cursor.fetchall()]
+        if 'reviewed' in cols:
+            cursor.execute("""
+                SELECT mapper_file, sql_id, sql_type, source_file, target_file
+                FROM transform_target_list
+                WHERE transformed = 'Y' AND reviewed = 'Y' AND validated = 'N'
+                ORDER BY mapper_file, seq_no
+            """)
+        else:
+            cursor.execute("""
+                SELECT mapper_file, sql_id, sql_type, source_file, target_file
+                FROM transform_target_list
+                WHERE transformed = 'Y' AND validated = 'N'
+                ORDER BY mapper_file, seq_no
+            """)
+        rows = cursor.fetchall()
 
     pending = {}
     for mapper, sql_id, sql_type, source, target in rows:

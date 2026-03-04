@@ -117,22 +117,20 @@ ORDER BY table_schema, table_name, ordinal_position;
             return {'status': 'empty', 'error': 'No rows returned', 'row_count': 0}
 
         # Parse and insert
-        conn = sqlite3.connect(str(DB_PATH))
-        _init_metadata_table(conn)
-        conn.execute("DELETE FROM pg_metadata")  # Clean refresh
-
         rows = []
         for line in lines:
             parts = line.split('|')
             if len(parts) == 4:
                 rows.append(tuple(p.strip() for p in parts))
 
-        conn.executemany(
-            "INSERT INTO pg_metadata (table_schema, table_name, column_name, data_type) VALUES (?,?,?,?)",
-            rows
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            _init_metadata_table(conn)
+            conn.execute("DELETE FROM pg_metadata")  # Clean refresh
+            conn.executemany(
+                "INSERT INTO pg_metadata (table_schema, table_name, column_name, data_type) VALUES (?,?,?,?)",
+                rows
+            )
+            conn.commit()
 
         print(f"📊 Metadata: {len(rows)} columns saved to pg_metadata table")
         return {'status': 'success', 'row_count': len(rows)}
@@ -158,21 +156,19 @@ def lookup_column_type(table_name: str, column_name: str) -> dict:
     Returns:
         Dict with data_type or 'unknown' if not found
     """
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
 
-    # Check if table exists
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pg_metadata'")
-    if not cursor.fetchone():
-        conn.close()
-        return {'table_name': table_name, 'column_name': column_name, 'data_type': 'unknown', 'reason': 'no metadata table'}
+        # Check if table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pg_metadata'")
+        if not cursor.fetchone():
+            return {'table_name': table_name, 'column_name': column_name, 'data_type': 'unknown', 'reason': 'no metadata table'}
 
-    cursor.execute(
-        "SELECT data_type FROM pg_metadata WHERE LOWER(table_name) = LOWER(?) AND LOWER(column_name) = LOWER(?)",
-        (table_name, column_name)
-    )
-    row = cursor.fetchone()
-    conn.close()
+        cursor.execute(
+            "SELECT data_type FROM pg_metadata WHERE LOWER(table_name) = LOWER(?) AND LOWER(column_name) = LOWER(?)",
+            (table_name, column_name)
+        )
+        row = cursor.fetchone()
 
     if row:
         return {'table_name': table_name, 'column_name': column_name, 'data_type': row[0]}

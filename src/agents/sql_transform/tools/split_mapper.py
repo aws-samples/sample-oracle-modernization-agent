@@ -160,51 +160,53 @@ def split_mapper(file_path: str) -> dict:
     elements, namespace, xml_header, xml_doctype = _extract_level1_elements(content)
 
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    sub_dir = _get_sub_dir(cursor, str(path))
+    try:
+        cursor = conn.cursor()
+        sub_dir = _get_sub_dir(cursor, str(path))
 
-    _init_table(conn)
-    cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (path.name,))
+        _init_table(conn)
+        cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (path.name,))
 
-    # 1. Copy original to output/origin/
-    origin_dir = ORIGIN_DIR / sub_dir if sub_dir else ORIGIN_DIR
-    origin_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(path), str(origin_dir / path.name))
+        # 1. Copy original to output/origin/
+        origin_dir = ORIGIN_DIR / sub_dir if sub_dir else ORIGIN_DIR
+        origin_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(path), str(origin_dir / path.name))
 
-    # 2. Extract each SQL ID to output/extract/
-    sql_ids = []
-    for seq, elem in enumerate(elements, 1):
-        body_match = re.search(r'>(.+)</', elem['full_tag'], re.DOTALL)
-        sql_body = body_match.group(1).strip() if body_match else ''
+        # 2. Extract each SQL ID to output/extract/
+        sql_ids = []
+        for seq, elem in enumerate(elements, 1):
+            body_match = re.search(r'>(.+)</', elem['full_tag'], re.DOTALL)
+            sql_body = body_match.group(1).strip() if body_match else ''
 
-        file_name = f"{path.stem}-{seq:02d}-{elem['type']}-{elem['id']}.xml"
-        extract_file = str(EXTRACT_DIR / sub_dir / file_name) if sub_dir else str(EXTRACT_DIR / file_name)
-        target_file = str(TRANSFORM_DIR / sub_dir / file_name) if sub_dir else str(TRANSFORM_DIR / file_name)
+            file_name = f"{path.stem}-{seq:02d}-{elem['type']}-{elem['id']}.xml"
+            extract_file = str(EXTRACT_DIR / sub_dir / file_name) if sub_dir else str(EXTRACT_DIR / file_name)
+            target_file = str(TRANSFORM_DIR / sub_dir / file_name) if sub_dir else str(TRANSFORM_DIR / file_name)
 
-        # Write extract file
-        extract_path = Path(extract_file)
-        extract_path.parent.mkdir(parents=True, exist_ok=True)
-        comment = f"\n{elem['preceding_comment']}" if elem['preceding_comment'] else ""
-        extract_path.write_text(
-            f"{xml_header}\n<mapper namespace=\"{namespace}\">\n{comment}\n{elem['full_tag']}\n</mapper>\n",
-            encoding='utf-8'
-        )
+            # Write extract file
+            extract_path = Path(extract_file)
+            extract_path.parent.mkdir(parents=True, exist_ok=True)
+            comment = f"\n{elem['preceding_comment']}" if elem['preceding_comment'] else ""
+            extract_path.write_text(
+                f"{xml_header}\n<mapper namespace=\"{namespace}\">\n{comment}\n{elem['full_tag']}\n</mapper>\n",
+                encoding='utf-8'
+            )
 
-        cursor.execute("""
-            INSERT INTO transform_target_list
-            (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
+            cursor.execute("""
+                INSERT INTO transform_target_list
+                (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
 
-        sql_ids.append({
-            'id': elem['id'], 'type': elem['type'], 'seq_no': seq,
-            'sql': sql_body, 'full_tag': elem['full_tag'],
-            'preceding_comment': elem['preceding_comment'],
-            'line_count': elem['line_count'], 'target_file': target_file
-        })
+            sql_ids.append({
+                'id': elem['id'], 'type': elem['type'], 'seq_no': seq,
+                'sql': sql_body, 'full_tag': elem['full_tag'],
+                'preceding_comment': elem['preceding_comment'],
+                'line_count': elem['line_count'], 'target_file': target_file
+            })
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
     print(f"✂️  Split {path.name}: {len(sql_ids)} SQL IDs → origin/ + extract/ + DB")
     return {

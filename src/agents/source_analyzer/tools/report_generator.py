@@ -339,12 +339,11 @@ def _assess_risk(complexity: Dict) -> str:
 
 
 def _calculate_std_dev(complexity: Dict) -> float:
-    """Calculate standard deviation (simplified)"""
-    details = complexity.get('details', [])
-    if not details:
+    """Calculate standard deviation using all scores"""
+    scores = complexity.get('all_scores', [])
+    if not scores:
         return 0.0
-    
-    scores = [d['score'] for d in details]
+
     avg = sum(scores) / len(scores)
     variance = sum((x - avg) ** 2 for x in scores) / len(scores)
     return variance ** 0.5

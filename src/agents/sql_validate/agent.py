@@ -1,5 +1,5 @@
-from utils.project_paths import MODEL_ID
 """SQL Validate Agent - Strands Framework"""
+from utils.project_paths import MODEL_ID
 from pathlib import Path
 from strands import Agent
 from strands.models.bedrock import BedrockModel

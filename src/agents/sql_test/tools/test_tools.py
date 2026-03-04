@@ -80,70 +80,70 @@ def run_bulk_test(test_folder: str = "") -> dict:
             test_results = _parse_stdout_results(result.stdout)
 
         # Update DB flags
-        conn = sqlite3.connect(str(DB_PATH), timeout=10)
-        cursor = conn.cursor()
         success_count = 0
         fail_count = 0
         failures = []
-        
+
         print(f"\n  📊 Parsing {len(test_results.get('results', []))} test results...", flush=True)
 
-        for item in test_results.get('results', []):
-            sql_id = item.get('sqlId', '')
-            filename = item.get('filename', '')  # Just the XML filename
-            status = item.get('status', 'UNKNOWN')
-            error = item.get('error', '')
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            cursor = conn.cursor()
 
-            if status == 'SUCCESS':
-                # Match by filename in target_file path (ends with filename)
-                cursor.execute("""
-                    UPDATE transform_target_list
-                    SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
-                    WHERE target_file LIKE ? AND sql_id = ?
-                """, (f'%/{filename}', sql_id))
-                
-                if cursor.rowcount > 0:
-                    success_count += 1
-                    if success_count <= 5:  # Show first 5
-                        print(f"    ✅ {filename}:{sql_id}", flush=True)
-                else:
-                    # Try without leading slash for Windows paths
+            for item in test_results.get('results', []):
+                sql_id = item.get('sqlId', '')
+                filename = item.get('filename', '')  # Just the XML filename
+                status = item.get('status', 'UNKNOWN')
+                error = item.get('error', '')
+
+                if status == 'SUCCESS':
+                    # Match by filename in target_file path (ends with filename)
                     cursor.execute("""
                         UPDATE transform_target_list
                         SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
                         WHERE target_file LIKE ? AND sql_id = ?
-                    """, (f'%{filename}', sql_id))
+                    """, (f'%/{filename}', sql_id))
+
                     if cursor.rowcount > 0:
                         success_count += 1
-                        if success_count <= 5:
+                        if success_count <= 5:  # Show first 5
                             print(f"    ✅ {filename}:{sql_id}", flush=True)
                     else:
-                        print(f"    ⚠️  No DB match: {filename} / {sql_id}", flush=True)
-            else:
-                # Find mapper_file from target_file for failure reporting
-                cursor.execute("""
-                    SELECT mapper_file FROM transform_target_list
-                    WHERE (target_file LIKE ? OR target_file LIKE ?) AND sql_id = ?
-                """, (f'%/{filename}', f'%{filename}', sql_id))
-                row = cursor.fetchone()
-                mapper_file = row[0] if row else filename
-                
-                fail_count += 1
-                failures.append({
-                    'mapper_file': mapper_file,
-                    'sql_id': sql_id,
-                    'error': error
-                })
-                if fail_count <= 5:  # Show first 5 failures
-                    print(f"    ❌ {mapper_file}:{sql_id} - {error[:100]}", flush=True)
-        
-        if success_count > 5:
-            print(f"    ... and {success_count - 5} more passed", flush=True)
-        if fail_count > 5:
-            print(f"    ... and {fail_count - 5} more failed", flush=True)
+                        # Try without leading slash for Windows paths
+                        cursor.execute("""
+                            UPDATE transform_target_list
+                            SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
+                            WHERE target_file LIKE ? AND sql_id = ?
+                        """, (f'%{filename}', sql_id))
+                        if cursor.rowcount > 0:
+                            success_count += 1
+                            if success_count <= 5:
+                                print(f"    ✅ {filename}:{sql_id}", flush=True)
+                        else:
+                            print(f"    ⚠️  No DB match: {filename} / {sql_id}", flush=True)
+                else:
+                    # Find mapper_file from target_file for failure reporting
+                    cursor.execute("""
+                        SELECT mapper_file FROM transform_target_list
+                        WHERE (target_file LIKE ? OR target_file LIKE ?) AND sql_id = ?
+                    """, (f'%/{filename}', f'%{filename}', sql_id))
+                    row = cursor.fetchone()
+                    mapper_file = row[0] if row else filename
 
-        conn.commit()
-        conn.close()
+                    fail_count += 1
+                    failures.append({
+                        'mapper_file': mapper_file,
+                        'sql_id': sql_id,
+                        'error': error
+                    })
+                    if fail_count <= 5:  # Show first 5 failures
+                        print(f"    ❌ {mapper_file}:{sql_id} - {error[:100]}", flush=True)
+
+            if success_count > 5:
+                print(f"    ... and {success_count - 5} more passed", flush=True)
+            if fail_count > 5:
+                print(f"    ... and {fail_count - 5} more failed", flush=True)
+
+            conn.commit()
 
         print(f"\n  📊 Test results: {success_count} passed, {fail_count} failed", flush=True)
         return {
@@ -174,14 +174,13 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
         return {'status': 'skipped', 'error': 'No PostgreSQL connection info'}
 
     # Find the transform file
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT target_file FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-        (mapper_file, sql_id)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT target_file FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            (mapper_file, sql_id)
+        )
+        row = cursor.fetchone()
 
     if not row:
         return {'status': 'error', 'error': f'Not found: {mapper_file}/{sql_id}'}
@@ -255,16 +254,15 @@ def get_test_failures() -> dict:
     Returns:
         Dict with failures list grouped by mapper_file
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT mapper_file, sql_id, sql_type, source_file, target_file
-        FROM transform_target_list
-        WHERE validated = 'Y' AND tested = 'N'
-        ORDER BY mapper_file, seq_no
-    """)
-    rows = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, source_file, target_file
+            FROM transform_target_list
+            WHERE validated = 'Y' AND tested = 'N'
+            ORDER BY mapper_file, seq_no
+        """)
+        rows = cursor.fetchall()
 
     pending = {}
     for mapper, sql_id, sql_type, source, target in rows:
@@ -283,20 +281,19 @@ def get_test_failures() -> dict:
 def _update_tested(mapper_file: str, sql_id: str):
     for i in range(5):
         try:
-            conn = sqlite3.connect(str(DB_PATH), timeout=10)
-            conn.execute("""
-                UPDATE transform_target_list
-                SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
-                WHERE mapper_file = ? AND sql_id = ?
-            """, (mapper_file, sql_id))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                conn.execute("""
+                    UPDATE transform_target_list
+                    SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
+                    WHERE mapper_file = ? AND sql_id = ?
+                """, (mapper_file, sql_id))
+                conn.commit()
             # Write signal for progress tracking
             try:
                 signal_file = PROJECT_ROOT / "output" / "logs" / ".test_signals"
                 with open(signal_file, 'a', encoding='utf-8') as f:
                     f.write(f"{mapper_file}|{sql_id}|PASS\n")
-            except:
+            except Exception:
                 pass
             return
         except sqlite3.OperationalError as e:

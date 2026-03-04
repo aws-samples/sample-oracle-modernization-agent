@@ -30,16 +30,15 @@ def transform_single_sql(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Status dict with result (SUCCESS/FAIL)
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    
-    # Check if SQL ID exists
-    cursor.execute(
-        "SELECT id FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-        (mapper_file, sql_id)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+
+        # Check if SQL ID exists
+        cursor.execute(
+            "SELECT id FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            (mapper_file, sql_id)
+        )
+        row = cursor.fetchone()
     
     if not row:
         return {

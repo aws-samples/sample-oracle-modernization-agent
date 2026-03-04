@@ -35,38 +35,36 @@ def save_xml_list(xml_files: str) -> str:
         if 'mappers' in xml_files:
             xml_files = xml_files['mappers']
         else:
-            raise ValueError(f"If dict is provided, it must have 'mappers' key. Got keys: {list(xml_files.keys())}")
-    
+            return f"Error: If dict is provided, it must have 'mappers' key. Got keys: {list(xml_files.keys())}"
+
     if not isinstance(xml_files, list):
-        raise ValueError(f"xml_files must be a list or dict, got {type(xml_files)}")
+        return f"Error: xml_files must be a list or dict, got {type(xml_files)}"
     
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    
-    # Drop and recreate table for clean reset
-    cursor.execute("DROP TABLE IF EXISTS source_xml_list")
-    cursor.execute("""
-        CREATE TABLE source_xml_list (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT NOT NULL,
-            file_name TEXT NOT NULL,
-            relative_path TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Insert data
-    for xml_file in xml_files:
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+
+        # Drop and recreate table for clean reset
+        cursor.execute("DROP TABLE IF EXISTS source_xml_list")
         cursor.execute("""
-            INSERT INTO source_xml_list (file_path, file_name, relative_path)
-            VALUES (?, ?, ?)
-        """, (xml_file['path'], xml_file['name'], xml_file['relative']))
-    
-    conn.commit()
-    count = len(xml_files)
-    conn.close()
-    
-    return f"Saved {count} XML files to database"
+            CREATE TABLE source_xml_list (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                relative_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Insert data
+        for xml_file in xml_files:
+            cursor.execute("""
+                INSERT INTO source_xml_list (file_path, file_name, relative_path)
+                VALUES (?, ?, ?)
+            """, (xml_file['path'], xml_file['name'], xml_file['relative']))
+
+        conn.commit()
+
+    return f"Saved {len(xml_files)} XML files to database"
 
 
 @tool
@@ -76,13 +74,12 @@ def get_java_source_folder() -> str:
     Returns:
         Path to Java source folder
     """
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM properties WHERE key = 'JAVA_SOURCE_FOLDER'")
-    result = cursor.fetchone()
-    conn.close()
-    
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM properties WHERE key = 'JAVA_SOURCE_FOLDER'")
+        result = cursor.fetchone()
+
     if not result:
-        raise ValueError("JAVA_SOURCE_FOLDER not found in properties table")
-    
+        return "Error: JAVA_SOURCE_FOLDER not found in properties table"
+
     return result[0]

@@ -33,17 +33,16 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
     # Read original Oracle SQL for reference
     original = ""
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=5)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT source_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect(str(DB_PATH), timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT source_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                (mapper_file, sql_id)
+            )
+            row = cursor.fetchone()
         if row and Path(row[0]).exists():
             original = Path(row[0]).read_text(encoding='utf-8')
-    except:
+    except Exception:
         pass
 
     content = (
@@ -69,17 +68,16 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         mapper_file: Source mapper file name
         notes: Conversion notes (e.g. 'MANUAL_REVIEW')
     """
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
 
-    # Get target_file and source info from DB
-    cursor.execute("""
-        SELECT id, target_file, source_file, namespace, sql_type, seq_no
-        FROM transform_target_list
-        WHERE mapper_file = ? AND sql_id = ?
-    """, (mapper_file, sql_id))
-    row = cursor.fetchone()
-    conn.close()
+        # Get target_file and source info from DB
+        cursor.execute("""
+            SELECT id, target_file, source_file, namespace, sql_type, seq_no
+            FROM transform_target_list
+            WHERE mapper_file = ? AND sql_id = ?
+        """, (mapper_file, sql_id))
+        row = cursor.fetchone()
 
     if not row:
         return {'status': 'error', 'message': f'Not found in DB: {mapper_file}/{sql_id}'}
@@ -134,14 +132,13 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
 
     # Update DB flag
     def _update_db():
-        conn2 = sqlite3.connect(str(DB_PATH), timeout=10)
-        conn2.execute("""
-            UPDATE transform_target_list
-            SET transformed = 'Y', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (record_id,))
-        conn2.commit()
-        conn2.close()
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn2:
+            conn2.execute("""
+                UPDATE transform_target_list
+                SET transformed = 'Y', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (record_id,))
+            conn2.commit()
 
     _db_execute_with_retry(_update_db)
 
@@ -154,7 +151,14 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         signal_file.parent.mkdir(parents=True, exist_ok=True)
         with open(signal_file, 'a', encoding='utf-8') as f:
             f.write(f"{mapper_file}|{sql_id}|{notes}\n")
-    except:
+    except Exception:
         pass
-    
+
     return {'status': 'saved', 'sql_id': sql_id, 'target_file': target_file}
+
+
+def clear_conversions():
+    """Clear signal file from previous runs."""
+    signal_file = PROJECT_ROOT / "output" / "logs" / ".transform_signals"
+    if signal_file.exists():
+        signal_file.unlink()
