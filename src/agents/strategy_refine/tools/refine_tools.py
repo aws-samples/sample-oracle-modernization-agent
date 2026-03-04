@@ -20,7 +20,7 @@ def read_strategy() -> str:
 
 @tool
 def get_feedback_patterns(source: str = "all") -> str:
-    """Collect raw fix patterns from signal files and fix_history logs.
+    """Collect raw fix patterns from fix_history logs.
 
     Args:
         source: 'validate', 'test', or 'all'
@@ -30,30 +30,6 @@ def get_feedback_patterns(source: str = "all") -> str:
     """
     results = {}
     logs_dir = PROJECT_ROOT / "output" / "logs"
-
-    # Signal files
-    signal_map = {
-        'validate': '.validate_signals',
-        'test': '.transform_signals',
-    }
-    for src, fname in signal_map.items():
-        if source not in ('all', src):
-            continue
-        sig = logs_dir / fname
-        if not sig.exists():
-            continue
-        patterns = []
-        for line in sig.read_text(encoding='utf-8').strip().split('\n'):
-            if not line.strip():
-                continue
-            parts = line.split('|')
-            if len(parts) < 3:
-                continue
-            note = parts[-1].strip()
-            if note and note not in patterns:
-                patterns.append(note)
-        if patterns:
-            results[src] = patterns
 
     # Fix history logs
     fix_dir = logs_dir / "fix_history"

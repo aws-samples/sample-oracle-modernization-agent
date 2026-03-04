@@ -27,7 +27,7 @@ These are ALL in General Rules — NEVER add to strategy:
 | Tool | Purpose |
 |------|---------|
 | `read_strategy()` | Read current strategy file |
-| `get_feedback_patterns(source)` | Collect raw patterns from signal/log files |
+| `get_feedback_patterns(source)` | Collect raw patterns from fix_history logs |
 | `append_patterns(section, patterns_md)` | Add formatted patterns to a section |
 | `write_strategy(content)` | Overwrite entire file (for compaction) |
 

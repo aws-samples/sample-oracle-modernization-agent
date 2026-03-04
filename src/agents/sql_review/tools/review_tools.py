@@ -76,5 +76,5 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
             if "locked" in str(e) and i < 4:
                 time.sleep(0.5 * (i + 1))
             else:
-                raise
-    raise sqlite3.OperationalError(f"Database locked after 5 retries: {mapper_file}/{sql_id}")
+                return {'status': 'error', 'sql_id': sql_id, 'result': 'DB_ERROR', 'violations': str(e)}
+    return {'status': 'error', 'sql_id': sql_id, 'result': 'DB_LOCKED', 'violations': f'Database locked after 5 retries: {mapper_file}/{sql_id}'}

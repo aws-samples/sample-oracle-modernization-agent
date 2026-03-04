@@ -129,6 +129,7 @@ def _empty_result() -> dict:
     return {
         'average': 0, 'max': 0, 'min': 0, 'total_queries': 0,
         'details': [],
+        'all_scores': [],
         'distribution': {'Simple': 0, 'Medium': 0, 'Complex': 0, 'Very Complex': 0},
         'oracle_patterns': [],
         'oracle_pattern_total': 0

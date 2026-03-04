@@ -73,7 +73,8 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
             if "locked" in str(e) and i < 4:
                 time.sleep(0.5 * (i + 1))
             else:
-                raise
+                return {'status': 'error', 'sql_id': sql_id, 'result': str(e)}
+    return {'status': 'error', 'sql_id': sql_id, 'result': f'Database locked after 5 retries: {mapper_file}/{sql_id}'}
 
 
 @tool
