@@ -1,12 +1,6 @@
 # OMA - Application SQL Transform Assistant
 
-## ⚠️ Important Disclaimer
-
-This code is provided as a sample for educational and demonstration purposes only.
-
-- **NOT FOR PRODUCTION USE**: Do not deploy without additional security testing.
-- **AI-Generated Output**: SQL transformations must be reviewed before execution.
-- **No Warranty**: Provided "AS IS" without warranty of any kind.
+> ⚠️ Sample code for educational purposes. Not for production use without review. See [Disclaimer](#disclaimer).
 
 ## What is OMA?
 
@@ -486,6 +480,61 @@ sql-migration-assistant/
 - Java 11+ (for SQL testing)
 - psql (for PostgreSQL metadata collection)
 
+## AWS Permissions
+
+OMA requires an IAM identity (user or role) with access to the following AWS services:
+
+| Service | Actions | Purpose |
+|---------|---------|---------|
+| **Amazon Bedrock** | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | LLM inference (all Agents) |
+| **SSM Parameter Store** | `ssm:PutParameter` | Save DB connection info during setup |
+| | `ssm:GetParametersByPath` (with `WithDecryption`) | Read DB connection info at runtime |
+
+### Minimum IAM Policy
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+    },
+    {
+      "Sid": "SSMParameterStore",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": "arn:aws:ssm:*:*:parameter/oma/*"
+    }
+  ]
+}
+```
+
+> **Note**: If using [cross-region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html), the Bedrock resource ARN may need adjustment (e.g. `arn:aws:bedrock:us-east-1:*:inference-profile/*`). SSM Parameter Store paths default to `/oma/source_oracle/*` and `/oma/target_postgres/*`.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+OMA를 실행하려면 다음 AWS 서비스에 대한 IAM 권한이 필요합니다:
+
+| 서비스 | 권한 | 용도 |
+|--------|------|------|
+| **Amazon Bedrock** | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | LLM 추론 (모든 Agent) |
+| **SSM Parameter Store** | `ssm:PutParameter` | Setup 시 DB 접속 정보 저장 |
+| | `ssm:GetParametersByPath` (복호화 포함) | Runtime 시 DB 접속 정보 조회 |
+
+> **참고**: Cross-region inference 사용 시 Bedrock 리소스 ARN 조정이 필요할 수 있습니다. SSM 경로 기본값은 `/oma/source_oracle/*`, `/oma/target_postgres/*` 입니다.
+
+</details>
+
 ## Documentation
 
 - [System Documentation](docs/SYSTEM_DOCUMENTATION.md) — Architecture, Agent details, DB schema
@@ -499,6 +548,14 @@ sql-migration-assistant/
   - [Test Agent](docs/agents/TEST_DESIGN.md)
 - Per-Agent README: `src/agents/*/README.md`
 
+## Disclaimer
+
+This code is provided as a sample for educational and demonstration purposes only.
+
+- **NOT FOR PRODUCTION USE**: Do not deploy without additional security testing.
+- **AI-Generated Output**: SQL transformations must be reviewed before execution.
+- **No Warranty**: Provided "AS IS" without warranty of any kind.
+
 ## License
 
 This project is distributed under an appropriate license. See [LICENSE](LICENSE) file for details.
@@ -509,6 +566,6 @@ Contributions to improve the project are welcome. Refer to Agent design document
 
 ---
 
-**Last Updated**: 2026-03-04
-**Version**: 3.2
+**Last Updated**: 2026-03-05
+**Version**: 3.3
 **Status**: Production Ready
