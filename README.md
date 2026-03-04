@@ -403,6 +403,12 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
 
 80% API cost reduction with Prompt Caching (90%+ cache hit rate)
 
+> **Warning: Model Selection**
+> OMA relies on **Prompt Caching** (3-Block strategy) for cost optimization.
+> Only use models that support Bedrock Prompt Caching (e.g. Claude Sonnet 4.5).
+> Models without caching support (e.g. Claude Sonnet 4.6, Opus 4.6) will result in **5-10x higher API costs**.
+> Check [AWS Bedrock Prompt Caching docs](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html) before changing `OMA_MODEL_ID`.
+
 <details>
 <summary><b>한글 설명 보기</b></summary>
 
@@ -413,6 +419,12 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
 | **인프라** | AWS Bedrock 사용량 기반 (서버리스) |
 
 Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
+
+> **경고: 모델 선택 주의**
+> OMA는 **Prompt Caching** (3-Block 전략)에 의존하여 비용을 최적화합니다.
+> 반드시 Bedrock Prompt Caching을 지원하는 모델(예: Claude Sonnet 4.5)을 사용하세요.
+> 캐싱 미지원 모델(예: Claude Sonnet 4.6, Opus 4.6)을 사용하면 **API 비용이 5~10배 증가**합니다.
+> `OMA_MODEL_ID` 변경 전 [AWS Bedrock Prompt Caching 문서](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)를 확인하세요.
 
 </details>
 

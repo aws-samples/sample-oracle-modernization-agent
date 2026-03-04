@@ -37,8 +37,10 @@ TEST_DIR = OUTPUT_DIR / "test"
 DB_PATH = CONFIG_DIR / "oma_control.db"
 
 # Model configuration
+# ⚠️ Prompt Caching 미지원 모델 사용 시 API 비용 5~10배 증가 주의
 DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-# DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"  # 프롬프트 캐싱 미지원으로 사용 금지 (2026-02-21)
+# DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"  # 캐싱 미지원 (2026-02-21)
+# DEFAULT_MODEL_ID = "global.anthropic.claude-opus-4-6-v1[1m]"  # 캐싱 미지원 (2026-03-04)
 
 def _load_model_id() -> str:
     """Load model ID: env var > DB > default"""

@@ -24,3 +24,4 @@ src/config/oma_control.db
 output/
 src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
+src/reference/lib/backup/
