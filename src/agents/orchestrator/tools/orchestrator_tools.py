@@ -190,7 +190,7 @@ def compact_strategy() -> str:
         import run_strategy
         importlib.reload(run_strategy)
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            run_strategy.run(task="compact_strategy")
+            run_strategy.compact_strategy()
         return f"✅ 전략 압축 완료\n{buf.getvalue()}"
     except Exception as e:
         return f"❌ 압축 실패: {e}"

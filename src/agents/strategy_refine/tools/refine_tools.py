@@ -1,6 +1,5 @@
 """Strategy Refine tools — add patterns, deduplicate, compact"""
 import json
-from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT
 
@@ -45,8 +44,12 @@ def get_feedback_patterns(source: str = "all") -> str:
             continue
         patterns = []
         for line in sig.read_text(encoding='utf-8').strip().split('\n'):
+            if not line.strip():
+                continue
             parts = line.split('|')
-            note = parts[-1].strip() if len(parts) >= 3 else ''
+            if len(parts) < 3:
+                continue
+            note = parts[-1].strip()
             if note and note not in patterns:
                 patterns.append(note)
         if patterns:
@@ -109,24 +112,20 @@ def append_patterns(section: str, patterns_md: str) -> str:
     if section not in content:
         return f"❌ Section '{section}' not found in strategy"
 
-    # Replace placeholder or append
+    # Replace placeholder or append before next section boundary
     placeholder = '*(없음)*' if section == '## 알려진 오류' else '*(패턴 없음)*'
     section_start = content.index(section)
     after = content[section_start + len(section):]
 
-    # Find next ## section boundary
     next_section = after.find('\n## ')
     section_body = after[:next_section] if next_section > 0 else after
+    rest = after[next_section:] if next_section > 0 else ''
 
     if placeholder in section_body:
-        new_body = section_body.replace(placeholder, patterns_md)
+        section_body = section_body.replace(placeholder, patterns_md)
     else:
-        insert_pos = next_section if next_section > 0 else len(after)
-        new_body = after[:insert_pos] + '\n' + patterns_md + (after[insert_pos:] if next_section > 0 else '')
-        content = content[:section_start + len(section)] + new_body
-        STRATEGY_FILE.write_text(content, encoding='utf-8')
-        return f"✅ Patterns appended to {section}"
+        section_body = section_body.rstrip('\n') + '\n\n' + patterns_md + '\n'
 
-    content = content[:section_start + len(section)] + new_body + (after[next_section:] if next_section > 0 else '')
+    content = content[:section_start + len(section)] + section_body + rest
     STRATEGY_FILE.write_text(content, encoding='utf-8')
     return f"✅ Patterns added to {section}"
