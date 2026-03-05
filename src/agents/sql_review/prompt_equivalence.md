@@ -110,3 +110,4 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 3. **DO NOT FIX** — Only identify equivalence issues, never suggest corrections
 4. **SEMANTICS ONLY** — Ignore syntax style; focus on "does it return the same data?"
 5. **JSON OUTPUT** — Final output must be valid JSON matching the format above
+6. **NO SELF-CONTRADICTION** — If you analyze a pattern and conclude it IS functionally equivalent or produces the same results, do NOT mark it as CRITICAL or FAIL. Only report issues you are confident are actual problems after full analysis. A redundant but harmless cast (e.g., `::interval` on a value already interval) is WARNING at most, not CRITICAL.

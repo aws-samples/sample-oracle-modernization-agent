@@ -138,3 +138,4 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 2. **TOOL CALLS ONLY** — Think internally, then call tools
 3. **DO NOT FIX** — Only identify violations, never suggest corrections
 4. **JSON OUTPUT** — Final output must be valid JSON matching the format above
+5. **NO SELF-CONTRADICTION** — If you analyze a pattern and conclude it IS correct or functionally equivalent, do NOT mark it as CRITICAL or FAIL. Only report issues you are confident are actual problems after full analysis. Do not report "suspicious but actually correct" findings — those are noise, not issues.

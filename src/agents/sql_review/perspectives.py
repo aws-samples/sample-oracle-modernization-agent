@@ -124,6 +124,57 @@ def _normalize_issue(issue) -> dict:
     return {"severity": "CRITICAL", "description": desc}
 
 
+# Phrases that indicate the reviewer concluded the issue is not actually a problem.
+# When these appear in a CRITICAL finding, it's a self-contradiction → downgrade to WARNING.
+_SELF_CONTRADICT_PHRASES = [
+    "actually correct",
+    "functionally correct",
+    "functionally equivalent",
+    "semantically equivalent",
+    "behaviorally equivalent",
+    "actually safe",
+    "safe and equivalent",
+    "no issue",
+    "no equivalence issue",
+    "not an issue",
+    "equivalence preserved",
+    "behavior preserved",
+    "behavioural equivalence preserved",
+    "behavioral equivalence preserved",
+    "this is correct",
+    "this cast is correct",
+    "this conversion is correct",
+    "same behavior",
+    "same behaviour",
+    "however, this is functionally",
+    "however, since coalesce",
+]
+
+
+def _downgrade_self_contradictions(issues: list[dict]) -> list[dict]:
+    """Downgrade CRITICAL→WARNING when the description contradicts its own severity.
+
+    Review agents sometimes find a suspicious pattern, analyze it, conclude it's
+    correct, but still mark it CRITICAL. This filter catches those cases.
+    """
+    result = []
+    for issue in issues:
+        if issue["severity"] != "CRITICAL":
+            result.append(issue)
+            continue
+
+        desc_lower = issue["description"].lower()
+        if any(phrase in desc_lower for phrase in _SELF_CONTRADICT_PHRASES):
+            result.append({
+                **issue,
+                "severity": "WARNING",
+                "description": issue["description"] + " [auto-downgraded: self-contradicting]",
+            })
+        else:
+            result.append(issue)
+    return result
+
+
 def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str]) -> dict:
     """Deterministic facilitator: merge two perspective results into final review.
 
@@ -197,6 +248,13 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
             elif not eq:
                 issues.append({"severity": "CRITICAL", "description": f"[Equivalence] No review result returned for {sql_id}"})
                 has_critical = True
+
+        # Downgrade self-contradicting CRITICALs before final judgment
+        issues = _downgrade_self_contradictions(issues)
+
+        # Re-evaluate severity after downgrade
+        has_critical = any(i["severity"] == "CRITICAL" for i in issues)
+        has_warning = any(i["severity"] == "WARNING" for i in issues)
 
         # Determine per-SQL result based on severity
         if has_critical:
