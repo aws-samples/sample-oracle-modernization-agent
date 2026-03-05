@@ -71,7 +71,7 @@ python3 src/run_setup.py
 python3 src/run_sql_transform.py --workers 6
 
 # 3. Review — 내부 병렬(Syntax+Equiv) 고려하여 worker 절반
-python3 src/run_sql_review.py --workers 4 --max-rounds 2
+python3 src/run_sql_review.py --workers 4 --max-rounds 3
 
 # 4. Validate
 python3 src/run_sql_validate.py --workers 6

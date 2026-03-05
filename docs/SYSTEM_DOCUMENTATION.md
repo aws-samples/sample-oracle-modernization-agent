@@ -125,11 +125,12 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 - **Equivalence Agent** (max_tokens=16000):
   - Oracle/PG 동작 차이 ('' = NULL, DECODE NULL, OUTER JOIN + WHERE)
   - 컬럼 출력, JOIN 관계, 정렬, 서브쿼리 로직, MyBatis 무결성
-- **Facilitator**: Python 함수로 두 결과 severity 기반 통합 (LLM 호출 없음)
+- **Facilitator**: LLM 기반 (Claude Haiku 4.5, `LITE_MODEL_ID`) — CRITICAL 판정의 자기반박 여부를 의미적으로 검증
   - CRITICAL 이슈 → FAIL (재변환), WARNING만 → PASS_WITH_WARNINGS (경고 기록, 재변환 안 함)
+  - 자기반박 패턴 (분석 후 "correct"라고 결론냈으나 CRITICAL로 표기) → WARNING으로 다운그레이드
 - **도구**: `read_sql_source`, `read_transform` (읽기 전용, 각 Perspective Agent)
-- **Agent 출력 캡처**: `callback_handler=None` + `str(AgentResult)` (stdout 리다이렉션 없음)
-- **FAIL 시**: `review_result` 컬럼에 CRITICAL 피드백 JSON 저장 → Transform Agent 재호출 (최대 2라운드)
+- **Agent 출력 캡처**: `suppress_streaming=True`로 Agent 생성 (callback_handler=None을 생성자에 전달)
+- **FAIL 시**: `review_result` 컬럼에 CRITICAL 피드백 JSON 저장 → Transform Agent 재호출 (최대 3라운드, round 2+에서 Strategy Refine 자동 호출)
 
 ### 4. Validate Agent
 - **위치**: `src/agents/sql_validate/`
@@ -147,6 +148,10 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 - **역할**: PostgreSQL DB에서 실행 테스트, 에러 수정
 - **max_tokens**: 64000
 - **도구**: `get_test_failures`, `read_sql_source`, `read_transform`, `convert_sql`, `run_single_test`, `lookup_column_type`
+- **Phase 0**: EXPLAIN 기반 DML 검증 — INSERT/UPDATE/DELETE를 `EXPLAIN`으로 구문/테이블/컬럼/타입 검증 (실행 없음, PK/NULL 무관)
+- **Phase 1**: Java bulk test — SELECT 실행 테스트
+- **Phase 2**: Agent가 실패 SQL 수정
+- **DB 미설정 시**: PostgreSQL 접속 정보 없으면 test step이 skipped 반환 + 안내 메시지
 - **특징**: General Rules 참조하여 올바른 패턴으로 수정 (ad-hoc 수정 금지)
 
 ### 6. Strategy Refine Agent
@@ -182,7 +187,7 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
 - **Test**: `test_and_fix_single_sql` - 특정 SQL 테스트 및 자동 수정
 - **특징**:
   - 배치 처리 없이 즉시 실행
-  - Agent를 `callback_handler=None`으로 생성 (streaming 억제)
+  - Agent를 `suppress_streaming=True`로 생성 (streaming 억제)
   - 결과 판정: DB 상태 직접 조회 (stdout 파싱 아님)
   - 디버깅 및 문제 해결에 유용
   - Orchestrator를 통해 자연어로 호출 가능
@@ -199,8 +204,9 @@ Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
                             ^          |
                             |   FAIL   |  PASS / PASS_WITH_WARNINGS
                             +----------+   --> next stage
-                           (max 2 rounds,
-                            CRITICAL only)
+                           (max 3 rounds,
+                            CRITICAL only,
+                            round 2+: Strategy Refine)
 ```
 
 ### 단계별 상태 전이 (DB)
@@ -260,9 +266,8 @@ Common Wrong Conversions — 자주 발생하는 잘못된 변환 패턴 5개
 ### 전략 학습 흐름
 
 ```
-Validate/Test에서 FAIL → 수정 → fix_history 기록
-    ↓
-Strategy Refine Agent 호출
+호출 경로 1: Validate/Test에서 FAIL → 수정 → fix_history 기록 → Strategy Refine
+호출 경로 2: Review round 2+ 지속 FAIL → Strategy Refine 자동 호출 → 재변환
     ↓
 General Rules 중복 체크 → 중복이면 무시
     ↓
@@ -299,7 +304,7 @@ CREATE TABLE transform_target_list (
 ```
 
 #### 기타 테이블
-- **properties**: 환경 설정 (Java 경로, DB 접속 정보)
+- **properties**: 환경 설정 (Java 경로, DB 접속 정보, `OMA_MODEL_ID`, `OMA_LITE_MODEL_ID`, `OMA_OUTPUT_DIR`)
 - **source_xml_list**: Mapper XML 파일 목록
 - **pg_metadata**: PostgreSQL 컬럼 메타데이터 (타입 캐스팅용)
 
@@ -310,7 +315,7 @@ CREATE TABLE transform_target_list (
 | 구분 | 기술 |
 |------|------|
 | **Framework** | [Strands Agents SDK](https://github.com/strands-agents/sdk-python) v1.24.0+ |
-| **Model** | Claude Sonnet 4.5 (AWS Bedrock, cross-region inference) |
+| **Model** | Claude Sonnet 4.5 (`MODEL_ID`, AWS Bedrock) · Claude Haiku 4.5 (`LITE_MODEL_ID`, Facilitator) |
 | **Prompt Caching** | 3-Block: prompt + General Rules + Strategy |
 | **DB** | SQLite (상태 관리), PostgreSQL (타겟 DB) |
 | **상태 관리** | StateManager (중앙화된 DB 접근 인터페이스) |
