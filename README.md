@@ -130,6 +130,16 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 
 </details>
 
+## Try It — Example
+
+Want to try OMA quickly? The `example/` folder has a sample Spring Boot app with 10 Oracle MyBatis mapper XMLs:
+
+```bash
+cd example && ./run_example.sh
+```
+
+See [example/README.md](example/README.md) for details.
+
 ## How It Works
 
 ### Step 1 — Setup (~5 minutes)

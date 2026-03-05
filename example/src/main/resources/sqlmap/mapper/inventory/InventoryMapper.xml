@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="amzn.bo.mapper.InventoryMapper">
+
+    <!-- 재고 현황 분석 (PARTITION BY, DENSE_RANK 활용) -->
+    <select id="selectInventoryStatusAnalysis" parameterType="map" resultType="amzn.bo.dto.InventoryStatusDto">
+        SELECT 
+            i.INVENTORY_ID,
+            i.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU as PRODUCT_SKU,
+            p.BRAND,
+            c.CATEGORY_NAME,
+            i.WAREHOUSE_ID,
+            i.QUANTITY_ON_HAND,
+            i.QUANTITY_RESERVED,
+            i.QUANTITY_AVAILABLE,
+            i.REORDER_LEVEL,
+            i.LAST_UPDATED,
+            -- 재고 상태 분류
+            <![CDATA[
+            CASE 
+                WHEN i.QUANTITY_AVAILABLE <= 0 THEN 'OUT_OF_STOCK'
+                WHEN i.QUANTITY_AVAILABLE <= i.REORDER_LEVEL THEN 'LOW_STOCK'
+                WHEN i.QUANTITY_AVAILABLE <= i.REORDER_LEVEL * 2 THEN 'MEDIUM_STOCK'
+                ELSE 'HIGH_STOCK'
+            END as STOCK_STATUS,
+            ]]>
+            -- 재고 회전율 계산
+            ROUND(NVL(
+                sales_stats.MONTHLY_SALES_AVG / NULLIF(i.QUANTITY_ON_HAND, 0) * 12, 0
+            ), 2) as INVENTORY_TURNOVER_RATE,
+            -- 재고 일수 (현재 재고로 몇 일간 판매 가능한지)
+            CASE 
+                WHEN sales_stats.DAILY_SALES_AVG > 0 
+                THEN ROUND(i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG, 1)
+                ELSE 999
+            END as DAYS_OF_INVENTORY,
+            -- 재고 가치
+            ROUND(i.QUANTITY_ON_HAND * NVL(p.BASE_PRICE, 0), 2) as INVENTORY_VALUE,
+            -- 카테고리 내 재고 순위
+            DENSE_RANK() OVER (
+                PARTITION BY p.CATEGORY_ID 
+                ORDER BY i.QUANTITY_AVAILABLE DESC
+            ) as CATEGORY_STOCK_RANK,
+            -- 브랜드 내 재고 순위
+            DENSE_RANK() OVER (
+                PARTITION BY p.BRAND 
+                ORDER BY i.QUANTITY_AVAILABLE DESC
+            ) as BRAND_STOCK_RANK,
+            -- 창고 내 재고 순위
+            DENSE_RANK() OVER (
+                PARTITION BY i.WAREHOUSE_ID 
+                ORDER BY i.QUANTITY_AVAILABLE DESC
+            ) as WAREHOUSE_STOCK_RANK,
+            -- 판매 속도 기반 우선순위
+            <![CDATA[
+            CASE 
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 7 THEN 'URGENT'
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 14 THEN 'HIGH'
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 30 THEN 'MEDIUM'
+                ELSE 'LOW'
+            END as RESTOCK_PRIORITY,
+            ]]>
+            -- 예상 재고 소진일
+            CASE 
+                WHEN sales_stats.DAILY_SALES_AVG > 0 
+                THEN TO_CHAR(DATE '2025-01-01' + (i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG), 'YYYY-MM-DD')
+                ELSE NULL
+            END as ESTIMATED_STOCKOUT_DATE,
+            -- 안전 재고 권장량
+            CEIL(
+                NVL(sales_stats.DAILY_SALES_AVG, 0) * 14 + 
+                NVL(sales_stats.SALES_VOLATILITY, 0) * 2
+            ) as RECOMMENDED_SAFETY_STOCK
+        FROM INVENTORY i,
+             PRODUCTS p,
+             CATEGORIES c,
+             (SELECT 
+                oi.PRODUCT_ID,
+                ROUND(AVG(daily_sales.DAILY_QUANTITY), 2) as DAILY_SALES_AVG,
+                ROUND(AVG(monthly_sales.MONTHLY_QUANTITY), 2) as MONTHLY_SALES_AVG,
+                ROUND(STDDEV(daily_sales.DAILY_QUANTITY), 2) as SALES_VOLATILITY
+              FROM ORDER_ITEMS oi,
+                   ORDERS o,
+                   (SELECT 
+                      oi2.PRODUCT_ID,
+                      TRUNC(o2.ORDERED_AT) as SALE_DATE,
+                      SUM(oi2.QUANTITY) as DAILY_QUANTITY
+                    FROM ORDER_ITEMS oi2, ORDERS o2
+                    WHERE oi2.ORDER_ID = o2.ORDER_ID
+                    AND o2.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                    <![CDATA[ AND o2.ORDERED_AT >= SYSDATE - 90 ]]>
+                    GROUP BY oi2.PRODUCT_ID, TRUNC(o2.ORDERED_AT)) daily_sales,
+                   (SELECT 
+                      oi3.PRODUCT_ID,
+                      TO_CHAR(o3.ORDERED_AT, 'YYYY-MM') as SALE_MONTH,
+                      SUM(oi3.QUANTITY) as MONTHLY_QUANTITY
+                    FROM ORDER_ITEMS oi3, ORDERS o3
+                    WHERE oi3.ORDER_ID = o3.ORDER_ID
+                    AND o3.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                    <![CDATA[ AND o3.ORDERED_AT >= SYSDATE - 365 ]]>
+                    GROUP BY oi3.PRODUCT_ID, TO_CHAR(o3.ORDERED_AT, 'YYYY-MM')) monthly_sales
+              WHERE oi.ORDER_ID = o.ORDER_ID
+              AND o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              AND oi.PRODUCT_ID = daily_sales.PRODUCT_ID
+              AND oi.PRODUCT_ID = monthly_sales.PRODUCT_ID
+              GROUP BY oi.PRODUCT_ID) sales_stats
+        WHERE i.PRODUCT_ID = p.PRODUCT_ID
+        AND p.CATEGORY_ID = c.CATEGORY_ID
+        AND i.PRODUCT_ID = sales_stats.PRODUCT_ID(+)
+        <if test="warehouseId != null and warehouseId != ''">
+            AND i.WAREHOUSE_ID = #{warehouseId}
+        </if>
+        <if test="stockStatus != null and stockStatus != ''">
+            <![CDATA[
+            AND CASE 
+                WHEN i.QUANTITY_AVAILABLE <= 0 THEN 'OUT_OF_STOCK'
+                WHEN i.QUANTITY_AVAILABLE <= i.REORDER_LEVEL THEN 'LOW_STOCK'
+                WHEN i.QUANTITY_AVAILABLE <= i.REORDER_LEVEL * 2 THEN 'MEDIUM_STOCK'
+                ELSE 'HIGH_STOCK'
+            END = #{stockStatus}
+            ]]>
+        </if>
+        <if test="restockPriority != null and restockPriority != ''">
+            <![CDATA[
+            AND CASE 
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 7 THEN 'URGENT'
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 14 THEN 'HIGH'
+                WHEN sales_stats.DAILY_SALES_AVG > 0 AND i.QUANTITY_AVAILABLE / sales_stats.DAILY_SALES_AVG <= 30 THEN 'MEDIUM'
+                ELSE 'LOW'
+            END = #{restockPriority}
+            ]]>
+        </if>
+        ORDER BY 
+            DECODE(RESTOCK_PRIORITY, 'URGENT', 1, 'HIGH', 2, 'MEDIUM', 3, 4),
+            DAYS_OF_INVENTORY,
+            p.PRODUCT_NAME
+    </select>
+
+    <!-- 창고별 재고 분석 (ROLLUP, CUBE 활용) -->
+    <select id="selectWarehouseInventoryAnalysis" parameterType="map" resultType="amzn.bo.dto.WarehouseInventoryDto">
+        SELECT 
+            warehouse_id,
+            category_name,
+            brand,
+            COUNT(*) as PRODUCT_COUNT,
+            SUM(current_stock) as TOTAL_STOCK,
+            ROUND(AVG(current_stock), 2) as AVG_STOCK_PER_PRODUCT,
+            SUM(stock_value) as TOTAL_STOCK_VALUE,
+            GROUPING(warehouse_id) as WAREHOUSE_GROUPING,
+            GROUPING(category_name) as CATEGORY_GROUPING,
+            GROUPING(brand) as BRAND_GROUPING
+        FROM (
+            SELECT 
+                1 as warehouse_id,
+                c.CATEGORY_NAME as category_name,
+                NVL(p.BRAND, 'UNKNOWN') as brand,
+                NVL(pv.STOCK_QUANTITY, 0) as current_stock,
+                NVL(pv.STOCK_QUANTITY, 0) * NVL(p.BASE_PRICE, 0) as stock_value
+            FROM PRODUCTS p,
+                 CATEGORIES c,
+                 PRODUCT_VARIANTS pv
+            WHERE p.CATEGORY_ID = c.CATEGORY_ID
+            AND p.PRODUCT_ID = pv.PRODUCT_ID(+)
+            AND p.STATUS = 'ACTIVE'
+        )
+        GROUP BY ROLLUP(warehouse_id, category_name, brand)
+        ORDER BY GROUPING(warehouse_id), GROUPING(category_name), GROUPING(brand), TOTAL_STOCK_VALUE DESC
+    </select>
+
+    <!-- 재고 이동 및 추적 분석 -->
+    <select id="selectInventoryMovementTracking" parameterType="map" resultType="amzn.bo.dto.InventoryMovementDto">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            1 as WAREHOUSE_ID,
+            TO_DATE('2025-01-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS') as MOVEMENT_DATE,
+            'IN' as MOVEMENT_TYPE,
+            100 as QUANTITY,
+            pv.STOCK_QUANTITY as CURRENT_STOCK,
+            <![CDATA[
+            CASE 
+                WHEN pv.STOCK_QUANTITY <= 10 THEN 'LOW_STOCK'
+                WHEN pv.STOCK_QUANTITY <= 50 THEN 'MEDIUM_STOCK'
+                ELSE 'HIGH_STOCK'
+            END as STOCK_STATUS
+            ]]>
+        FROM PRODUCTS p,
+             PRODUCT_VARIANTS pv
+        WHERE p.PRODUCT_ID = pv.PRODUCT_ID(+)
+        AND p.STATUS = 'ACTIVE'
+        ORDER BY p.PRODUCT_ID
+    </select>
+
+</mapper>

@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="amzn.bo.mapper.ProductMapper">
+
+    <!-- 상품 계층 카테고리 관리 (CONNECT BY 활용) -->
+    <select id="selectCategoryHierarchy" resultType="amzn.bo.dto.CategoryHierarchyDto">
+        SELECT 
+            CATEGORY_ID,
+            PARENT_CATEGORY_ID,
+            CATEGORY_NAME,
+            TO_CHAR(DESCRIPTION) as DESCRIPTION,
+            LEVEL as CATEGORY_LEVEL,
+            SYS_CONNECT_BY_PATH(CATEGORY_NAME, ' > ') as CATEGORY_PATH,
+            CONNECT_BY_ROOT CATEGORY_NAME as ROOT_CATEGORY,
+            CONNECT_BY_ISLEAF as IS_LEAF,
+            (SELECT COUNT(*) FROM PRODUCTS p WHERE p.CATEGORY_ID = c.CATEGORY_ID) as PRODUCT_COUNT,
+            (SELECT COUNT(*) 
+             FROM PRODUCTS p 
+             WHERE p.CATEGORY_ID IN (
+                SELECT CATEGORY_ID 
+                FROM CATEGORIES 
+                START WITH CATEGORY_ID = c.CATEGORY_ID 
+                CONNECT BY PRIOR CATEGORY_ID = PARENT_CATEGORY_ID
+             )) as TOTAL_PRODUCT_COUNT_INCLUDING_SUBCATEGORIES,
+            SORT_ORDER,
+            IS_ACTIVE
+        FROM CATEGORIES c
+        START WITH PARENT_CATEGORY_ID IS NULL
+        CONNECT BY PRIOR CATEGORY_ID = PARENT_CATEGORY_ID
+        ORDER SIBLINGS BY SORT_ORDER, CATEGORY_NAME
+    </select>
+
+    <!-- 상품 목록 조회 -->
+    <select id="selectProductList" parameterType="map" resultType="amzn.bo.dto.ProductDto">
+        SELECT * FROM (
+            SELECT 
+                p.PRODUCT_ID,
+                p.PRODUCT_NAME,
+                p.SKU,
+                p.BRAND,
+                p.BASE_PRICE as PRICE,
+                0 as STOCK_QUANTITY,
+                p.STATUS,
+                p.CREATED_AT,
+                p.UPDATED_AT,
+                c.CATEGORY_NAME,
+                0 as TOTAL_SOLD,
+                0 as TOTAL_REVENUE,
+                0 as AVG_RATING,
+                0 as REVIEW_COUNT,
+                ROW_NUMBER() OVER (ORDER BY p.CREATED_AT DESC) as RN
+            FROM PRODUCTS p,
+                 CATEGORIES c
+            WHERE p.CATEGORY_ID = c.CATEGORY_ID(+)
+            <if test="productName != null and productName != ''">
+                AND UPPER(p.PRODUCT_NAME) LIKE '%' || UPPER(#{productName}) || '%'
+            </if>
+            <if test="brand != null and brand != ''">
+                AND UPPER(p.BRAND) LIKE '%' || UPPER(#{brand}) || '%'
+            </if>
+            <if test="status != null and status != ''">
+                AND p.STATUS = #{status}
+            </if>
+            <if test="categoryId != null and categoryId != ''">
+                AND p.CATEGORY_ID = #{categoryId}
+            </if>
+            <if test="minPrice != null and minPrice != ''">
+                <![CDATA[ AND p.BASE_PRICE >= #{minPrice} ]]>
+            </if>
+            <if test="maxPrice != null and maxPrice != ''">
+                <![CDATA[ AND p.BASE_PRICE <= #{maxPrice} ]]>
+            </if>
+        )
+        <if test="limit != null and limit != '' and offset != null and offset != ''">
+            <![CDATA[ WHERE ROWNUM <= #{offset} + #{limit} ]]>
+            <![CDATA[ AND RN > #{offset} ]]>
+        </if>
+        ORDER BY RN
+    </select>
+
+    <!-- 상품 총 개수 조회 -->
+    <select id="selectProductCount" parameterType="map" resultType="long">
+        SELECT COUNT(*) as count
+        FROM PRODUCTS p
+        WHERE 1=1
+        <if test="productName != null and productName != ''">
+            AND UPPER(p.PRODUCT_NAME) LIKE '%' || UPPER(#{productName}) || '%'
+        </if>
+        <if test="brand != null and brand != ''">
+            AND UPPER(p.BRAND) LIKE '%' || UPPER(#{brand}) || '%'
+        </if>
+        <if test="status != null and status != ''">
+            AND p.STATUS = #{status}
+        </if>
+        <if test="categoryId != null and categoryId != ''">
+            AND p.CATEGORY_ID = #{categoryId}
+        </if>
+        <if test="minPrice != null and minPrice != ''">
+            <![CDATA[ AND p.BASE_PRICE >= #{minPrice} ]]>
+        </if>
+        <if test="maxPrice != null and maxPrice != ''">
+            <![CDATA[ AND p.BASE_PRICE <= #{maxPrice} ]]>
+        </if>
+    </select>
+
+    <!-- 상품 상세 정보 조회 -->
+    <select id="selectProductDetail" parameterType="long" resultType="amzn.bo.dto.ProductDto">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            p.BRAND,
+            p.BASE_PRICE as PRICE,
+            0 as STOCK_QUANTITY,
+            p.STATUS,
+            TO_CHAR(p.DESCRIPTION) as DESCRIPTION,
+            p.CREATED_AT,
+            p.UPDATED_AT,
+            c.CATEGORY_NAME,
+            0 as TOTAL_SOLD,
+            0 as TOTAL_REVENUE,
+            0 as AVG_RATING,
+            0 as REVIEW_COUNT
+        FROM PRODUCTS p,
+             CATEGORIES c
+        WHERE p.CATEGORY_ID = c.CATEGORY_ID(+)
+        AND p.PRODUCT_ID = #{productId}
+    </select>
+
+    <select id="selectBrandStatistics" resultType="map">
+        SELECT 
+            p.BRAND,
+            COUNT(*) as PRODUCT_COUNT,
+            COUNT(CASE WHEN p.STATUS = 'ACTIVE' THEN 1 END) as ACTIVE_PRODUCTS,
+            COUNT(CASE WHEN p.STATUS = 'INACTIVE' THEN 1 END) as INACTIVE_PRODUCTS,
+            ROUND(AVG(p.BASE_PRICE), 2) as AVG_PRICE,
+            MIN(p.BASE_PRICE) as MIN_PRICE,
+            MAX(p.BASE_PRICE) as MAX_PRICE,
+            ROUND(COUNT(CASE WHEN p.STATUS = 'ACTIVE' THEN 1 END) * 100.0 / COUNT(*), 2) as ACTIVE_PERCENTAGE,
+            ROUND(COUNT(CASE WHEN p.STATUS = 'INACTIVE' THEN 1 END) * 100.0 / COUNT(*), 2) as INACTIVE_PERCENTAGE
+        FROM PRODUCTS p
+        WHERE p.BRAND IS NOT NULL
+        GROUP BY p.BRAND
+        ORDER BY PRODUCT_COUNT DESC, p.BRAND
+    </select>
+
+    <!-- 카테고리별 상품 통계 -->
+    <select id="selectCategoryStatistics" resultType="map">
+        SELECT 
+            c.CATEGORY_ID,
+            c.CATEGORY_NAME,
+            c.PARENT_CATEGORY_ID,
+            COUNT(p.PRODUCT_ID) as PRODUCT_COUNT,
+            COUNT(CASE WHEN p.STATUS = 'ACTIVE' THEN 1 END) as ACTIVE_PRODUCTS,
+            COUNT(CASE WHEN p.STATUS = 'INACTIVE' THEN 1 END) as INACTIVE_PRODUCTS,
+            ROUND(AVG(p.BASE_PRICE), 2) as AVG_PRICE,
+            MIN(p.BASE_PRICE) as MIN_PRICE,
+            MAX(p.BASE_PRICE) as MAX_PRICE,
+            ROUND(COUNT(CASE WHEN p.STATUS = 'ACTIVE' THEN 1 END) * 100.0 / NULLIF(COUNT(p.PRODUCT_ID), 0), 2) as ACTIVE_PERCENTAGE,
+            ROUND(COUNT(CASE WHEN p.STATUS = 'INACTIVE' THEN 1 END) * 100.0 / NULLIF(COUNT(p.PRODUCT_ID), 0), 2) as INACTIVE_PERCENTAGE
+        FROM CATEGORIES c,
+             PRODUCTS p
+        WHERE c.CATEGORY_ID = p.CATEGORY_ID(+)
+        GROUP BY c.CATEGORY_ID, c.CATEGORY_NAME, c.PARENT_CATEGORY_ID
+        ORDER BY PRODUCT_COUNT DESC, c.CATEGORY_NAME
+    </select>
+
+    <!-- 상품 재고 현황 조회 -->
+    <select id="selectProductInventoryStatus" parameterType="map" resultType="map">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            p.BRAND,
+            c.CATEGORY_NAME,
+            p.BASE_PRICE,
+            p.STATUS,
+            COALESCE(inv.QUANTITY_ON_HAND, 0) as CURRENT_STOCK,
+            COALESCE(inv.QUANTITY_RESERVED, 0) as RESERVED_STOCK,
+            COALESCE(inv.QUANTITY_AVAILABLE, 0) as AVAILABLE_STOCK,
+            COALESCE(inv.REORDER_LEVEL, 10) as REORDER_LEVEL,
+            <![CDATA[
+            CASE 
+                WHEN COALESCE(inv.QUANTITY_AVAILABLE, 0) = 0 THEN 'OUT_OF_STOCK'
+                WHEN COALESCE(inv.QUANTITY_AVAILABLE, 0) <= COALESCE(inv.REORDER_LEVEL, 10) THEN 'LOW_STOCK'
+                ELSE 'IN_STOCK'
+            END as STOCK_STATUS
+            ]]>
+        FROM PRODUCTS p,
+             CATEGORIES c,
+             INVENTORY inv
+        WHERE p.CATEGORY_ID = c.CATEGORY_ID(+)
+        AND p.PRODUCT_ID = inv.PRODUCT_ID(+)
+        <if test="lowStockOnly != null and lowStockOnly == true or categoryId != null">
+        AND 1=1
+        </if>
+            <if test="lowStockOnly != null and lowStockOnly == true">
+                <![CDATA[ AND (COALESCE(inv.QUANTITY_AVAILABLE, 0) = 0 OR COALESCE(inv.QUANTITY_AVAILABLE, 0) <= COALESCE(inv.REORDER_LEVEL, 10)) ]]>
+            </if>
+            <if test="categoryId != null and categoryId != ''">
+                AND p.CATEGORY_ID = #{categoryId}
+            </if>
+        ORDER BY 
+            CASE 
+                WHEN COALESCE(inv.QUANTITY_AVAILABLE, 0) = 0 THEN 1
+                <![CDATA[ WHEN COALESCE(inv.QUANTITY_AVAILABLE, 0) <= COALESCE(inv.REORDER_LEVEL, 10) THEN 2 ]]>
+                ELSE 3
+            END,
+            p.PRODUCT_NAME
+    </select>
+
+    <!-- 상품 가격 히스토리 조회 (PRICE_HISTORY 테이블 없음 - 현재 가격 정보로 대체) -->
+    <select id="selectProductPriceHistory" parameterType="long" resultType="map">
+        SELECT 
+            p.PRODUCT_ID as PRICE_HISTORY_ID,
+            p.PRODUCT_ID,
+            p.BASE_PRICE as NEW_PRICE,
+            'Current Price' as CHANGE_REASON,
+            TO_CHAR(p.UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') as CHANGED_AT,
+            'SYSTEM' as CHANGED_BY_USER_ID
+        FROM PRODUCTS p
+        WHERE p.PRODUCT_ID = #{productId}
+        UNION ALL
+        SELECT 
+            p.PRODUCT_ID + 1000000 as PRICE_HISTORY_ID,
+            p.PRODUCT_ID,
+            p.BASE_PRICE as NEW_PRICE,
+            'Initial Price' as CHANGE_REASON,
+            TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') as CHANGED_AT,
+            'SYSTEM' as CHANGED_BY_USER_ID
+        FROM PRODUCTS p
+        WHERE p.PRODUCT_ID = #{productId}
+        ORDER BY CHANGED_AT DESC
+    </select>
+
+    <!-- 상품 등록 -->
+    <insert id="createProduct" parameterType="amzn.bo.dto.ProductDto">
+        INSERT INTO PRODUCTS (
+            PRODUCT_ID,
+            PRODUCT_NAME,
+            SKU,
+            BRAND,
+            CATEGORY_ID,
+            DESCRIPTION,
+            BASE_PRICE,
+            WEIGHT,
+            DIMENSIONS,
+            STATUS,
+            CREATED_AT,
+            UPDATED_AT
+        ) VALUES (
+            SEQ_PRODUCTS.NEXTVAL,
+            #{productName},
+            #{sku},
+            #{brand},
+            #{categoryId},
+            #{description},
+            #{price},
+            #{weight},
+            #{dimensions},
+            COALESCE(#{status}, 'ACTIVE'),
+            SYSDATE,
+            SYSDATE
+        )
+    </insert>
+
+    <!-- 상품 정보 업데이트 -->
+    <update id="updateProduct" parameterType="amzn.bo.dto.ProductDto">
+        UPDATE PRODUCTS
+        <set>
+            <if test="productName != null and productName != ''">
+                PRODUCT_NAME = #{productName},
+            </if>
+            <if test="sku != null and sku != ''">
+                SKU = #{sku},
+            </if>
+            <if test="brand != null and brand != ''">
+                BRAND = #{brand},
+            </if>
+            <if test="categoryId != null and categoryId != ''">
+                CATEGORY_ID = #{categoryId},
+            </if>
+            <if test="description != null and description != ''">
+                DESCRIPTION = #{description},
+            </if>
+            <if test="price != null and price != ''">
+                BASE_PRICE = #{price},
+            </if>
+            <if test="status != null and status != ''">
+                STATUS = #{status},
+            </if>
+            <if test="weight != null and weight != ''">
+                WEIGHT = #{weight},
+            </if>
+            <if test="dimensions != null and dimensions != ''">
+                DIMENSIONS = #{dimensions},
+            </if>
+            UPDATED_AT = SYSDATE
+        </set>
+        WHERE PRODUCT_ID = #{productId}
+    </update>
+
+    <!-- 상품 상태 업데이트 -->
+    <update id="updateProductStatus" parameterType="map">
+        UPDATE PRODUCTS
+        SET STATUS = #{status},
+            UPDATED_AT = SYSDATE
+        WHERE PRODUCT_ID = #{productId}
+    </update>
+
+    <!-- 상품 재고 업데이트 (재고 테이블이 별도로 있을 수 있으므로 일단 주석 처리) -->
+    <update id="updateProductStock" parameterType="map">
+        <!-- PRODUCTS 테이블에 재고 컬럼이 없으므로 별도 처리 필요 -->
+        UPDATE PRODUCTS
+        SET UPDATED_AT = SYSDATE
+        WHERE PRODUCT_ID = #{productId}
+    </update>
+
+    <!-- 상품 삭제 -->
+    <delete id="deleteProduct" parameterType="long">
+        DELETE FROM PRODUCTS
+        WHERE PRODUCT_ID = #{productId}
+    </delete>
+
+    <!-- 상품 일괄 상태 업데이트 -->
+    <update id="updateProductStatusBatch" parameterType="map">
+        UPDATE PRODUCTS
+        SET STATUS = #{status},
+            UPDATED_AT = SYSDATE
+        WHERE PRODUCT_ID IN
+        <foreach collection="productIds" item="productId" open="(" separator="," close=")">
+            #{productId}
+        </foreach>
+    </update>
+
+</mapper>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMZN 백오피스 관리 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- 헤더 -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-store"></i> AMZN 백오피스 관리 시스템
+            </span>
+            <div class="d-flex align-items-center">
+                <div class="me-3">
+                    <label class="text-light me-2">기간:</label>
+                    <input type="date" class="form-control form-control-sm d-inline-block" id="startDate" style="width: 150px;">
+                    <span class="text-light mx-2">~</span>
+                    <input type="date" class="form-control form-control-sm d-inline-block" id="endDate" style="width: 150px;">
+                </div>
+                <button class="btn btn-outline-light btn-sm me-2" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i> 새로고침
+                </button>
+                <span class="text-light" id="lastUpdate"></span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-3">
+        <!-- 통계 카드 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 id="totalUsers">-</h4>
+                                <p class="mb-0">총 사용자</p>
+                                <small id="todayUsers">오늘 +0</small>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-users fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 id="totalProducts">-</h4>
+                                <p class="mb-0">총 상품</p>
+                                <small id="todayProducts">오늘 +0</small>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-box fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 id="totalOrders">-</h4>
+                                <p class="mb-0">총 주문</p>
+                                <small id="todayOrders">오늘 +0</small>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-shopping-cart fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 id="totalRevenue">-</h4>
+                                <p class="mb-0">총 매출</p>
+                                <small id="todayRevenue">오늘 +0</small>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-won-sign fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 차트 섹션 -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-line"></i> 주문 트렌드 (최근 7일)</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="orderTrendChart" height="100"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-pie"></i> 사용자 등급 분포</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="userGradeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 탭 메뉴 -->
+        <ul class="nav nav-tabs" id="mainTabs">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#users">
+                    <i class="fas fa-users"></i> 사용자 관리
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#products">
+                    <i class="fas fa-box"></i> 상품 관리
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#orders">
+                    <i class="fas fa-shopping-cart"></i> 주문 관리
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#analytics" onclick="loadAnalyticsTab()">
+                    <i class="fas fa-chart-line"></i> 분석 리포트
+                </a>
+            </li>
+        </ul>
+
+        <!-- 탭 컨텐츠 -->
+        <div class="tab-content mt-3">
+            <!-- 사용자 관리 탭 -->
+            <div class="tab-pane fade show active" id="users">
+                <div id="usersContent"></div>
+            </div>
+
+            <!-- 상품 관리 탭 -->
+            <div class="tab-pane fade" id="products">
+                <div id="productsContent"></div>
+            </div>
+
+            <!-- 주문 관리 탭 -->
+            <div class="tab-pane fade" id="orders">
+                <div id="ordersContent"></div>
+            </div>
+
+            <!-- 분석 리포트 탭 -->
+            <div class="tab-pane fade" id="analytics">
+                <div id="analyticsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달 -->
+    <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">상세 정보</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modalBody">
+                    <!-- 동적 컨텐츠 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 스크립트 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/app.js?v=2"></script>
+    <script src="components/users.js?v=2"></script>
+    <script src="components/products.js?v=2"></script>
+    <script src="components/orders.js?v=2"></script>
+    <script src="components/analytics.js?v=1"></script>
+</body>
+</html>

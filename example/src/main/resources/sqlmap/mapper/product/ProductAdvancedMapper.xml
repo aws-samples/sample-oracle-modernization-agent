@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="amzn.bo.mapper.ProductAdvancedMapper">
+
+    <!-- 가격 이력 분석 - 단순화된 버전 -->
+    <select id="selectPriceHistoryAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            p.BASE_PRICE as CURRENT_PRICE,
+            p.BASE_PRICE as MIN_HISTORICAL_PRICE,
+            p.BASE_PRICE as MAX_HISTORICAL_PRICE,
+            p.BASE_PRICE as AVG_HISTORICAL_PRICE,
+            0 as PRICE_VOLATILITY,
+            p.CREATED_AT as FIRST_PRICE_DATE,
+            p.UPDATED_AT as LAST_PRICE_DATE,
+            'PRICE_STABLE' as PRICE_TREND,
+            0 as PRICE_CHANGE_PCT
+        FROM PRODUCTS p
+        WHERE p.STATUS = 'ACTIVE'
+        ORDER BY p.BASE_PRICE DESC
+    </select>
+
+    <!-- 상품 생명주기 분석 - 단순화된 버전 -->
+    <select id="selectProductLifecycleAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            p.CREATED_AT as LAUNCH_DATE,
+            TRUNC(SYSDATE) - TRUNC(CAST(p.CREATED_AT AS DATE)) as DAYS_SINCE_LAUNCH,
+            NVL(sales.TOTAL_QUANTITY_SOLD, 0) as TOTAL_QUANTITY_SOLD,
+            NVL(sales.TOTAL_REVENUE, 0) as TOTAL_REVENUE,
+            NVL(sales.TOTAL_QUANTITY_SOLD, 0) as PEAK_MONTHLY_SALES,
+            NVL(sales.TOTAL_QUANTITY_SOLD, 0) as RECENT_MONTHLY_SALES,
+            CASE 
+                WHEN TRUNC(SYSDATE) - TRUNC(CAST(p.CREATED_AT AS DATE)) &lt;= 30 THEN 'INTRODUCTION'
+                WHEN NVL(sales.TOTAL_QUANTITY_SOLD, 0) &gt;= 100 THEN 'GROWTH'
+                WHEN NVL(sales.TOTAL_QUANTITY_SOLD, 0) &gt;= 50 THEN 'MATURITY'
+                WHEN NVL(sales.TOTAL_QUANTITY_SOLD, 0) &gt; 0 THEN 'DECLINE'
+                ELSE 'DISCONTINUED'
+            END as LIFECYCLE_STAGE,
+            100 as PERFORMANCE_RATIO,
+            0 as TOTAL_REVIEWS,
+            0 as AVG_RATING
+        FROM PRODUCTS p,
+             (SELECT 
+                oi.PRODUCT_ID,
+                SUM(oi.QUANTITY) as TOTAL_QUANTITY_SOLD,
+                SUM(oi.TOTAL_PRICE) as TOTAL_REVENUE
+              FROM ORDER_ITEMS oi,
+                   ORDERS o
+              WHERE oi.ORDER_ID = o.ORDER_ID
+              AND o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY oi.PRODUCT_ID) sales
+        WHERE p.PRODUCT_ID = sales.PRODUCT_ID(+)
+        AND p.STATUS = 'ACTIVE'
+        ORDER BY DAYS_SINCE_LAUNCH DESC, TOTAL_REVENUE DESC
+    </select>
+
+    <!-- 재고 예측 분석 - 단순화된 버전 -->
+    <select id="selectInventoryForecastAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PRODUCT_ID,
+            p.PRODUCT_NAME,
+            p.SKU,
+            c.CATEGORY_NAME,
+            NVL(i.QUANTITY_AVAILABLE, 0) as CURRENT_STOCK,
+            NVL(i.REORDER_LEVEL, 10) as REORDER_POINT,
+            NVL(i.REORDER_LEVEL * 5, 50) as MAX_STOCK_LEVEL,
+            1 as DAILY_AVG_SALES,
+            7 as WEEKLY_AVG_SALES,
+            30 as MONTHLY_AVG_SALES,
+            NVL(i.QUANTITY_AVAILABLE, 0) as DAYS_OF_STOCK,
+            NVL(i.REORDER_LEVEL, 10) as REORDER_LEAD_TIME_DAYS,
+            CASE 
+                WHEN NVL(i.QUANTITY_AVAILABLE, 0) &lt;= 0 THEN 'OUT_OF_STOCK'
+                WHEN NVL(i.QUANTITY_AVAILABLE, 0) &lt;= NVL(i.REORDER_LEVEL, 10) THEN 'LOW_STOCK'
+                WHEN NVL(i.QUANTITY_AVAILABLE, 0) &gt;= NVL(i.REORDER_LEVEL * 5, 50) THEN 'OVERSTOCK'
+                ELSE 'NORMAL'
+            END as STOCK_STATUS,
+            1.0 as DEMAND_TREND,
+            'STABLE_DEMAND' as DEMAND_PATTERN
+        FROM PRODUCTS p,
+             CATEGORIES c,
+             INVENTORY i
+        WHERE p.CATEGORY_ID = c.CATEGORY_ID
+        AND p.PRODUCT_ID = i.PRODUCT_ID(+)
+        AND p.STATUS = 'ACTIVE'
+        ORDER BY 
+            CASE STOCK_STATUS 
+                WHEN 'OUT_OF_STOCK' THEN 1 
+                WHEN 'LOW_STOCK' THEN 2 
+                WHEN 'OVERSTOCK' THEN 3 
+                ELSE 4 
+            END,
+            p.PRODUCT_NAME
+    </select>
+
+</mapper>

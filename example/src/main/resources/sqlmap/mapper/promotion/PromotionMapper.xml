@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="amzn.bo.mapper.PromotionMapper">
+
+    <!-- 프로모션 효과 분석 - 실제 테이블 구조에 맞게 수정 -->
+    <select id="selectPromotionEffectivenessAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PROMOTION_ID,
+            p.PROMOTION_NAME,
+            p.PROMOTION_TYPE,
+            p.DISCOUNT_TYPE,
+            p.DISCOUNT_VALUE,
+            p.START_DATE,
+            p.END_DATE,
+            p.IS_ACTIVE,
+            p.CURRENT_USAGE_COUNT,
+            p.TOTAL_USAGE_LIMIT,
+            ROUND(p.CURRENT_USAGE_COUNT * 100.0 / GREATEST(p.TOTAL_USAGE_LIMIT, 1), 2) as USAGE_RATE_PCT,
+            CASE 
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT THEN 'FULLY_USED'
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT * 0.8 THEN 'HIGH_USAGE'
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT * 0.5 THEN 'MEDIUM_USAGE'
+                WHEN p.CURRENT_USAGE_COUNT &gt; 0 THEN 'LOW_USAGE'
+                ELSE 'NO_USAGE'
+            END as USAGE_STATUS,
+            CASE 
+                WHEN p.CURRENT_USAGE_COUNT &gt;= 100 THEN 'HIGH_IMPACT'
+                WHEN p.CURRENT_USAGE_COUNT &gt;= 50 THEN 'MEDIUM_IMPACT'
+                WHEN p.CURRENT_USAGE_COUNT &gt; 0 THEN 'LOW_IMPACT'
+                ELSE 'NO_IMPACT'
+            END as IMPACT_LEVEL
+        FROM PROMOTIONS p
+        WHERE p.IS_ACTIVE = 'Y'
+        <![CDATA[ AND p.START_DATE >= SYSDATE - 90 ]]>
+        ORDER BY p.CURRENT_USAGE_COUNT DESC
+    </select>
+
+    <!-- 쿠폰 사용 패턴 분석 - 단순화된 버전 -->
+    <select id="selectCouponUsagePatternAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PROMOTION_ID,
+            p.PROMOTION_NAME as COUPON_CODE,
+            p.PROMOTION_TYPE as COUPON_TYPE,
+            p.DISCOUNT_TYPE,
+            p.DISCOUNT_VALUE,
+            p.MIN_QUANTITY as MIN_ORDER_AMOUNT,
+            p.TOTAL_USAGE_LIMIT as MAX_USAGE_COUNT,
+            p.CURRENT_USAGE_COUNT as TOTAL_USAGE_COUNT,
+            p.START_DATE,
+            p.END_DATE,
+            ROUND(p.CURRENT_USAGE_COUNT * 100.0 / GREATEST(p.TOTAL_USAGE_LIMIT, 1), 2) as USAGE_RATE_PCT,
+            CASE 
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT THEN 'FULLY_USED'
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT * 0.8 THEN 'HIGHLY_USED'
+                WHEN p.CURRENT_USAGE_COUNT &gt;= p.TOTAL_USAGE_LIMIT * 0.5 THEN 'MODERATELY_USED'
+                WHEN p.CURRENT_USAGE_COUNT &gt; 0 THEN 'LIGHTLY_USED'
+                ELSE 'UNUSED'
+            END as USAGE_STATUS
+        FROM PROMOTIONS p
+        WHERE p.IS_ACTIVE = 'Y'
+        <![CDATA[ AND p.CREATED_AT >= SYSDATE - 90 ]]>
+        ORDER BY p.CURRENT_USAGE_COUNT DESC
+    </select>
+
+    <!-- 프로모션 A/B 테스트 분석 - 단순화된 버전 -->
+    <select id="selectPromotionABTestAnalysis" parameterType="map" resultType="map">
+        SELECT 
+            p.PROMOTION_ID,
+            p.PROMOTION_NAME,
+            p.PROMOTION_TYPE,
+            p.DISCOUNT_VALUE,
+            'A' as TEST_GROUP,
+            p.CURRENT_USAGE_COUNT as ORDER_COUNT,
+            p.CURRENT_USAGE_COUNT as CUSTOMER_COUNT,
+            p.CURRENT_USAGE_COUNT * p.DISCOUNT_VALUE as TOTAL_REVENUE,
+            p.DISCOUNT_VALUE as AVG_ORDER_VALUE,
+            ROUND(p.CURRENT_USAGE_COUNT * 100.0 / GREATEST(p.TOTAL_USAGE_LIMIT, 1), 2) as CONVERSION_RATE,
+            p.CURRENT_USAGE_COUNT * p.DISCOUNT_VALUE as TOTAL_DISCOUNT
+        FROM PROMOTIONS p
+        WHERE p.IS_ACTIVE = 'Y'
+        <![CDATA[ AND p.START_DATE >= SYSDATE - 30 ]]>
+        ORDER BY TOTAL_REVENUE DESC
+    </select>
+
+</mapper>
