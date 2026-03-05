@@ -52,20 +52,13 @@ In the orchestrator, type commands like:
 
 ## What's included
 
-10 MyBatis mapper XMLs with Oracle-specific SQL:
+3 MyBatis mapper XMLs (42 SQL statements) covering major Oracle conversion patterns:
 
-| Mapper | Features |
-|--------|----------|
-| UserMapper | `(+)` outer joins, `DECODE`, `NVL`, `CONNECT BY` hierarchy |
-| OrderMapper | `ROWNUM` pagination, window functions, `MERGE INTO` |
-| ProductMapper | `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LISTAGG` |
-| PaymentMapper | `TO_CHAR` date formatting, `DECODE`, subquery aggregation |
-| InventoryMapper | `MERGE INTO`, `BULK COLLECT` patterns, `MINUS` |
-| SellerMapper | `NVL2`, `INSTR`, `REGEXP_LIKE`, `WM_CONCAT` |
-| ShippingMapper | `ADD_MONTHS`, `MONTHS_BETWEEN`, `LAST_DAY` |
-| PromotionMapper | `DECODE` nested, `DUAL`, `SYSDATE` arithmetic |
-| CustomerServiceMapper | `XMLAGG`, `LISTAGG`, `REGEXP_SUBSTR` |
-| AnalyticsMapper | Complex analytics with `PARTITION BY`, `ROLLUP`, `CUBE` |
+| Mapper | SQL | Key Oracle Features |
+|--------|-----|---------------------|
+| UserMapper | 15 | `(+)` outer join, `NVL`, `DECODE`, `MERGE INTO`, `LISTAGG`, `CUBE`/`ROLLUP`, `ROWNUM`, window functions |
+| ProductMapper | 14 | `CONNECT BY`/`START WITH`, `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LEVEL`, sequence `NEXTVAL` |
+| OrderMapper | 13 | `MEDIAN`, `ROWNUM` pagination, `(+)` outer join, `EXTRACT` interval, window functions |
 
 ## Output
 
