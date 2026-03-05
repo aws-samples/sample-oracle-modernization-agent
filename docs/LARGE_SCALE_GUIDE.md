@@ -198,7 +198,7 @@ tail -f output/logs/transform/UserMapper.log
 ### DB 직접 조회
 
 ```bash
-sqlite3 src/config/oma_control.db
+sqlite3 output/oma_control.db    # 또는 $OMA_OUTPUT_DIR/oma_control.db
 
 -- 전체 현황
 SELECT
@@ -250,7 +250,7 @@ python3 src/run_sql_review.py --workers 3
 **대응**:
 - Worker 수 줄이기 (`--workers 4`)
 - 다른 프로세스가 DB를 점유하고 있지 않은지 확인
-- `lsof src/config/oma_control.db`로 점유 프로세스 확인
+- `lsof output/oma_control.db`로 점유 프로세스 확인
 
 ### 3. 특정 Mapper에서 반복 실패
 
@@ -262,7 +262,7 @@ python3 src/run_sql_review.py --workers 3
 cat output/logs/transform/ProblemMapper.log
 
 # DB에서 실패 SQL 확인
-sqlite3 src/config/oma_control.db \
+sqlite3 output/oma_control.db \
   "SELECT sql_id, review_result FROM transform_target_list WHERE mapper_file='ProblemMapper.xml' AND reviewed='F'"
 ```
 

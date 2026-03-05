@@ -8,7 +8,7 @@ from strands import tool
 # Add parent to path for utils import
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from utils.project_paths import get_db_path, PROJECT_ROOT, REPORTS_DIR
+from utils.project_paths import DB_PATH, PROJECT_ROOT, REPORTS_DIR
 
 
 @tool
@@ -91,8 +91,7 @@ def _extract_top_complex_sqls(report_content: str) -> list:
     entries = re.findall(r'###\s+\d+\.\s+\[([^\]]+)\]\s+-\s+([^\n]+)', section)
     
     # Get Java source folder from DB
-    db_path = get_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM properties WHERE key = 'JAVA_SOURCE_FOLDER'")
         result = cursor.fetchone()

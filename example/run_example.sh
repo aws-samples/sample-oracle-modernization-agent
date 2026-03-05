@@ -15,6 +15,9 @@ SRC_DIR="$PROJECT_ROOT/src"
 VENV_DIR="$SCRIPT_DIR/.venv"
 MAPPER_DIR="$SCRIPT_DIR/src/main/resources/sqlmap/mapper"
 
+# Example uses its own output directory (keeps src/ clean)
+export OMA_OUTPUT_DIR="${OMA_OUTPUT_DIR:-$SCRIPT_DIR/output}"
+
 # --- Functions ---
 
 setup_venv() {

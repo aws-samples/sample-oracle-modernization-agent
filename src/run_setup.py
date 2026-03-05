@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.project_paths import CONFIG_DIR, DB_PATH
+from utils.project_paths import OUTPUT_DIR, DB_PATH
 
 # Keys that contain sensitive values — masked in output, entered via getpass
 _SENSITIVE_KEYS = {'ORACLE_SVC_PASSWORD', 'PGPASSWORD'}
@@ -20,7 +20,7 @@ def init_db():
     is created upfront, including history tables, indexes, and all columns on
     transform_target_list. Existing tables are not modified (IF NOT EXISTS).
     """
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     from sqlalchemy import create_engine
     from core.models import Base
@@ -75,7 +75,10 @@ def ask_password(prompt: str, current: str = None) -> str:
 def run():
     print("🔧 OMA Environment Setup\n")
 
-    # 1. DB 생성
+    # 1. OUTPUT_DIR 안내 + DB 생성
+    print(f"  📁 작업 디렉토리: {OUTPUT_DIR}")
+    print(f"     (변경: export OMA_OUTPUT_DIR=/path/to/dir)\n")
+
     is_new = not DB_PATH.exists()
     init_db()
     if is_new:
@@ -109,18 +112,10 @@ def run():
         get_property('TARGET_DBMS_TYPE') or 'postgresql'
     )
 
-    from utils.project_paths import PROJECT_ROOT
-    default_output = str(PROJECT_ROOT / "output")
-    output_dir = ask(
-        "OMA_OUTPUT_DIR (변환 결과 출력 경로)",
-        get_property('OMA_OUTPUT_DIR') or default_output
-    )
-
     # 3. 저장
     print()
     set_property('JAVA_SOURCE_FOLDER', java_source, 'Java source code root path')
     set_property('SOURCE_DBMS_TYPE', source_dbms, 'Source database type')
-    set_property('OMA_OUTPUT_DIR', output_dir, 'Output directory for converted files')
     set_property('TARGET_DBMS_TYPE', target_dbms, 'Target database type')
 
     # 모델 설정

@@ -280,7 +280,7 @@ General Rules 중복 체크 → 중복이면 무시
 
 ## 데이터베이스 스키마
 
-### SQLite: `src/config/oma_control.db`
+### SQLite: `output/oma_control.db`
 
 #### transform_target_list (핵심 테이블)
 ```sql
