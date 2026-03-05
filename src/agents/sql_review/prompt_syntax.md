@@ -94,8 +94,10 @@ For EACH SQL ID provided:
 - Added table/subquery aliases for clarity
 
 ### Common WRONG conversions (flag as FAIL)
+- `UPPER(col) LIKE '%pattern%' OR col IS NULL` — OR IS NULL on non-outer-joined table changes semantics; NULL LIKE returns NULL (falsy) in both Oracle and PostgreSQL
 - `COALESCE(col, 'default') = #{param} OR col IS NULL` — OR IS NULL is redundant when COALESCE already handles NULL
-- `(CURRENT_DATE - col::date)::interval` — date minus date returns integer in PostgreSQL, NOT interval
+- `(CURRENT_DATE - col::date)::interval` — date minus date returns integer, `::interval` is type mismatch
+- `(CURRENT_TIMESTAMP - col)::interval` — timestamp minus timestamp already returns interval, `::interval` is redundant (WARNING, not CRITICAL)
 - `(#{param} || ' days')::interval` — should use `MAKE_INTERVAL(days => #{param}::integer)`
 - `ROUND(integer_expr, 2)` without `::numeric` — PostgreSQL ROUND requires numeric type
 - Incorrect date format strings in `to_timestamp()` / `to_date()`

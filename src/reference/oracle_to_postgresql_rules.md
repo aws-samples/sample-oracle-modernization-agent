@@ -59,13 +59,17 @@ WHERE a.id = b.id(+)
 FROM a LEFT JOIN b ON a.id = b.id
 ```
 
-**Add NULL-safety for dynamic conditions on outer-joined tables:**
+**Add NULL-safety for dynamic conditions on outer-joined tables ONLY:**
 ```sql
+-- ONLY when: t2 is an outer-joined table AND the <if> condition filters on t2's column
 <if test="param != null">
    AND (t2.column = #{param}::type OR t2.column IS NULL)
 </if>
 ```
-**Exception**: If the condition already uses COALESCE/NVL conversion (e.g., `COALESCE(t2.column, 'default') = #{param}`), do NOT add `OR t2.column IS NULL` — COALESCE already handles NULL.
+**Do NOT add `OR col IS NULL` when:**
+- The column belongs to the main table (not outer-joined) — NULL behavior is identical in Oracle and PostgreSQL
+- The condition uses LIKE/UPPER/LOWER — `NULL LIKE '%pattern%'` returns NULL (falsy) in both databases
+- The condition already uses COALESCE/NVL conversion (e.g., `COALESCE(t2.column, 'default') = #{param}`) — COALESCE already handles NULL
 
 #### 3. Subquery Alias (Mandatory in PostgreSQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
@@ -141,17 +145,34 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | LAST_DAY(date) | (DATE_TRUNC('month', date) + INTERVAL '1 month - 1 day')::date |
 | NEXT_DAY(date, 'day') | (date + (dow - EXTRACT(DOW FROM date) + 7)::int % 7 * INTERVAL '1 day') |
 
-#### 4. Date Arithmetic (CRITICAL)
-- `DATE - DATE` → Returns integer (days) in PostgreSQL. No interval cast needed.
-- `TRUNC(SYSDATE) - TRUNC(date_col)` → `(CURRENT_DATE - date_col::date)`
-- `SYSDATE - date_col` → `(CURRENT_DATE - date_col::date)`
-- `NVL(SYSDATE - date_col, default)` → `COALESCE((CURRENT_DATE - date_col::date), default)`
-- **NEVER use**: `(DATE - DATE)::interval` — causes errors
+#### 4. Date/Timestamp Arithmetic (CRITICAL)
 
-#### 5. EXTRACT with Date Arithmetic
-- `EXTRACT(DAY FROM date1 - date2)` → `EXTRACT(DAY FROM (date1 - date2)::interval)`
-- Always wrap date arithmetic in parentheses before `::interval`
-- Applies in all contexts: AVG(), CASE, SUM(), etc.
+**PostgreSQL returns DIFFERENT types depending on operand types:**
+
+| Operation | Return Type | `::interval` cast |
+|-----------|-------------|-------------------|
+| `date - date` | **integer** (days) | Do NOT add — type mismatch |
+| `timestamp - timestamp` | **interval** | Do NOT add — already interval (redundant no-op) |
+| `date - integer` | **date** | N/A |
+| `timestamp - interval` | **timestamp** | N/A |
+
+**date - date → integer:**
+- `TRUNC(SYSDATE) - TRUNC(date_col)` → `(CURRENT_DATE - date_col::date)` — returns integer
+- `SYSDATE - date_col` → `(CURRENT_DATE - date_col::date)` — returns integer
+- `NVL(SYSDATE - date_col, default)` → `COALESCE((CURRENT_DATE - date_col::date), default)`
+- **NEVER use**: `(date - date)::interval` — unnecessary type conversion
+
+**timestamp - timestamp → interval:**
+- `SYSTIMESTAMP - created_at` → `(CURRENT_TIMESTAMP - created_at)` — already returns interval
+- Do NOT add `::interval` — it is redundant (no-op, harmless but unnecessary)
+
+#### 5. EXTRACT with Date/Timestamp Arithmetic
+
+**Choose the right pattern based on operand type:**
+- `EXTRACT(DAY FROM timestamp1 - timestamp2)` → `EXTRACT(DAY FROM (timestamp1 - timestamp2))` — already interval, no cast needed
+- `EXTRACT(DAY FROM date1 - date2)` → `(date1 - date2)` — already integer days, EXTRACT not needed
+- `EXTRACT(HOUR FROM timestamp1 - timestamp2)` → `EXTRACT(HOUR FROM (timestamp1 - timestamp2))` — interval supports HOUR/MINUTE/SECOND
+- Always wrap arithmetic in parentheses for clarity
 
 #### 6. Interval Construction (PostgreSQL 9.4+)
 - `(#{param} || ' days')::interval` → `MAKE_INTERVAL(days => #{param}::integer)`
@@ -324,22 +345,35 @@ When converting comma JOINs to explicit JOINs with subqueries:
 
 These are frequently observed incorrect conversion patterns. Check your output against this list.
 
-### 1. Redundant OR IS NULL with COALESCE
+### 1. Redundant OR IS NULL
 ```sql
--- ❌ WRONG: OR IS NULL is redundant — COALESCE already handles NULL
+-- ❌ WRONG: OR IS NULL on non-outer-joined table — changes query semantics
+WHERE (UPPER(name) LIKE '%' || #{param} || '%' OR name IS NULL)
+
+-- ✅ RIGHT: NULL LIKE returns NULL (falsy) in both Oracle and PostgreSQL
+WHERE UPPER(name) LIKE '%' || #{param} || '%'
+
+-- ❌ WRONG: OR IS NULL is redundant when COALESCE already handles NULL
 WHERE COALESCE(col, 'default') = #{param} OR col IS NULL
 
 -- ✅ RIGHT: COALESCE alone is sufficient
 WHERE COALESCE(col, 'default') = #{param}
 ```
+**Rule**: `OR col IS NULL` is ONLY needed for outer-joined table columns in dynamic `<if>` blocks. Never add it to main-table columns or LIKE/UPPER patterns.
 
-### 2. Date Subtraction Cast to Interval
+### 2. Redundant or Wrong ::interval Cast
 ```sql
--- ❌ WRONG: date - date returns integer in PostgreSQL, NOT interval
+-- ❌ WRONG: date - date returns integer, NOT interval
 (CURRENT_DATE - col::date)::interval
 
 -- ✅ RIGHT: result is already integer (days)
 (CURRENT_DATE - col::date)
+
+-- ⚠️ REDUNDANT: timestamp - timestamp already returns interval
+(CURRENT_TIMESTAMP - created_at)::interval
+
+-- ✅ RIGHT: no cast needed
+(CURRENT_TIMESTAMP - created_at)
 ```
 
 ### 3. String Concatenation for Interval
