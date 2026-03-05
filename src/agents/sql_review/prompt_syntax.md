@@ -121,10 +121,10 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 ```
 
 ### Severity Levels
-- **CRITICAL**: Affects functionality — unconverted Oracle syntax, wrong function mapping, broken SQL
+- **CRITICAL**: Affects functionality — unconverted Oracle syntax, wrong function mapping, SQL that will ERROR or return wrong results
   - Examples: NVL not converted, SYSDATE remaining, (+) not converted, DECODE not rewritten, missing COALESCE for empty-string-as-NULL
 - **WARNING**: Optimization or style — does not change query results
-  - Examples: unnecessary alias, inefficient casting approach, redundant parentheses, suboptimal but functionally correct pattern
+  - Examples: unnecessary alias, redundant but harmless cast (e.g., `::interval` on already-interval value), suboptimal but functionally correct pattern
 
 ## Rules for Issues
 - **Be specific**: Include the actual Oracle syntax found and its location
@@ -133,9 +133,23 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 - Each issue should describe ONE violation with a severity level
 - Empty issues array for PASS results
 
+## Decision Flow (MANDATORY)
+
+For EACH potential issue you find, follow this exact sequence:
+
+1. **Identify** — spot a suspicious pattern
+2. **Analyze** — reason about whether it actually causes incorrect behavior
+3. **Conclude** — reach a clear verdict: "this IS a problem" or "this is NOT a problem"
+4. **Assign severity based on your conclusion**:
+   - Conclusion is "NOT a problem" → do NOT include it as CRITICAL. Either omit it or mark as WARNING if noteworthy
+   - Conclusion is "IS a problem that breaks functionality" → CRITICAL
+   - Conclusion is "IS a problem but cosmetic/optimization only" → WARNING
+
+**If you catch yourself writing "however, this is actually correct" or "this is functionally equivalent" in a CRITICAL description, STOP — your own conclusion contradicts the severity. Re-classify.**
+
 ## ABSOLUTE RULES
 1. **SILENT EXECUTION** — No text output except tool calls and final JSON
 2. **TOOL CALLS ONLY** — Think internally, then call tools
 3. **DO NOT FIX** — Only identify violations, never suggest corrections
 4. **JSON OUTPUT** — Final output must be valid JSON matching the format above
-5. **NO SELF-CONTRADICTION** — If you analyze a pattern and conclude it IS correct or functionally equivalent, do NOT mark it as CRITICAL or FAIL. Only report issues you are confident are actual problems after full analysis. Do not report "suspicious but actually correct" findings — those are noise, not issues.
+5. **CONCLUSION DRIVES SEVERITY** — Your analysis conclusion determines the severity, not initial suspicion. Never mark CRITICAL for something you concluded is correct.

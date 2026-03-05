@@ -18,9 +18,7 @@ _log_dir = LOGS_DIR / "test"
 
 
 def create_agent():
-    agent = create_sql_test_agent()
-    agent.callback_handler = None
-    return agent
+    return create_sql_test_agent(suppress_streaming=True)
 
 
 def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict, total: int) -> dict:

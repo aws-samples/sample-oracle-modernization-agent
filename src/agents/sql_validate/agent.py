@@ -27,15 +27,18 @@ def _load_system_prompt():
     return blocks
 
 
-def create_sql_validate_agent() -> Agent:
+def create_sql_validate_agent(*, suppress_streaming: bool = False) -> Agent:
     model = BedrockModel(
         model_id=MODEL_ID,
         max_tokens=64000
     )
-    return Agent(
-        name="SQLValidate",
-        model=model,
-        system_prompt=_load_system_prompt(),
-        tools=[get_pending_validations, read_sql_source, read_transform,
-               convert_sql, set_validated, lookup_column_type]
-    )
+    kwargs: dict = {
+        "name": "SQLValidate",
+        "model": model,
+        "system_prompt": _load_system_prompt(),
+        "tools": [get_pending_validations, read_sql_source, read_transform,
+                  convert_sql, set_validated, lookup_column_type],
+    }
+    if suppress_streaming:
+        kwargs["callback_handler"] = None
+    return Agent(**kwargs)

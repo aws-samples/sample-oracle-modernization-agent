@@ -18,10 +18,7 @@ _log_dir = LOGS_DIR / "validate"
 
 
 def create_agent():
-    agent = create_sql_validate_agent()
-    # Override callback_handler to suppress streaming output
-    agent.callback_handler = None
-    return agent
+    return create_sql_validate_agent(suppress_streaming=True)
 
 
 def _group_by_file_size(sql_ids: list, max_group_bytes=30000) -> list:

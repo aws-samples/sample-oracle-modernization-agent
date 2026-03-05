@@ -1,17 +1,21 @@
 """Multi-perspective SQL review: Syntax + Equivalence agents run in parallel,
-then a deterministic Facilitator merges results."""
+then an LLM Facilitator merges and validates results."""
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import boto3
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, LITE_MODEL_ID
 from agents.sql_transform.tools.load_mapper_list import read_sql_source
 from agents.sql_validate.tools.validate_tools import read_transform
+
+logger = logging.getLogger(__name__)
 
 
 def _load_prompt_with_rules(prompt_filename: str) -> list:
@@ -124,54 +128,77 @@ def _normalize_issue(issue) -> dict:
     return {"severity": "CRITICAL", "description": desc}
 
 
-# Phrases that indicate the reviewer concluded the issue is not actually a problem.
-# When these appear in a CRITICAL finding, it's a self-contradiction → downgrade to WARNING.
-_SELF_CONTRADICT_PHRASES = [
-    "actually correct",
-    "functionally correct",
-    "functionally equivalent",
-    "semantically equivalent",
-    "behaviorally equivalent",
-    "actually safe",
-    "safe and equivalent",
-    "no issue",
-    "no equivalence issue",
-    "not an issue",
-    "equivalence preserved",
-    "behavior preserved",
-    "behavioural equivalence preserved",
-    "behavioral equivalence preserved",
-    "this is correct",
-    "this cast is correct",
-    "this conversion is correct",
-    "same behavior",
-    "same behaviour",
-    "however, this is functionally",
-    "however, since coalesce",
-]
+_FACILITATOR_PROMPT = """\
+You are a SQL review facilitator. Two review agents (Syntax, Equivalence) analyzed \
+Oracle-to-PostgreSQL SQL conversions and produced CRITICAL findings.
+
+Your job: evaluate each CRITICAL finding and determine if the reviewer's own description \
+contradicts its CRITICAL severity. This happens when a reviewer:
+- Identifies a suspicious pattern, analyzes it, then concludes it's actually correct
+- Marks something CRITICAL but describes it as "functionally equivalent", "same behavior", \
+"redundant but harmless", "actually correct", etc.
+- Reports a redundant-but-harmless pattern (e.g., casting interval to interval) as CRITICAL
+
+For each finding, output: "CRITICAL" (genuine problem) or "WARNING" (self-contradicting / harmless).
+
+Output ONLY a JSON array of verdicts in the same order as the input findings.
+Example: ["CRITICAL", "WARNING", "CRITICAL"]
+"""
 
 
-def _downgrade_self_contradictions(issues: list[dict]) -> list[dict]:
-    """Downgrade CRITICAL→WARNING when the description contradicts its own severity.
+def _llm_validate_criticals(critical_issues: list[dict]) -> list[str]:
+    """Use lite LLM to evaluate whether CRITICAL findings are genuinely critical.
 
-    Review agents sometimes find a suspicious pattern, analyze it, conclude it's
-    correct, but still mark it CRITICAL. This filter catches those cases.
+    Returns a list of verdicts: "CRITICAL" or "WARNING" for each input issue.
+    Falls back to all-CRITICAL if LLM call fails.
     """
-    result = []
-    for issue in issues:
-        if issue["severity"] != "CRITICAL":
-            result.append(issue)
-            continue
+    if not critical_issues:
+        return []
 
-        desc_lower = issue["description"].lower()
-        if any(phrase in desc_lower for phrase in _SELF_CONTRADICT_PHRASES):
-            result.append({
-                **issue,
+    findings_text = "\n".join(
+        f"{i+1}. {issue['description']}"
+        for i, issue in enumerate(critical_issues)
+    )
+
+    try:
+        client = boto3.client("bedrock-runtime")
+        response = client.converse(
+            modelId=LITE_MODEL_ID,
+            messages=[{
+                "role": "user",
+                "content": [{"text": f"Evaluate these CRITICAL findings:\n\n{findings_text}"}],
+            }],
+            system=[{"text": _FACILITATOR_PROMPT}],
+            inferenceConfig={"maxTokens": 500, "temperature": 0.0},
+        )
+        output_text = response["output"]["message"]["content"][0]["text"].strip()
+        parsed = json.loads(output_text)
+        if isinstance(parsed, list) and len(parsed) == len(critical_issues):
+            return [v if v in ("CRITICAL", "WARNING") else "CRITICAL" for v in parsed]
+    except Exception as e:
+        logger.warning("Facilitator LLM call failed, keeping all CRITICALs: %s", e)
+
+    # Fallback: keep all as CRITICAL
+    return ["CRITICAL"] * len(critical_issues)
+
+
+def _apply_facilitator_judgment(issues: list[dict]) -> list[dict]:
+    """Filter CRITICAL issues through LLM facilitator for self-contradiction check."""
+    critical_indices = [i for i, issue in enumerate(issues) if issue["severity"] == "CRITICAL"]
+    if not critical_indices:
+        return issues
+
+    critical_issues = [issues[i] for i in critical_indices]
+    verdicts = _llm_validate_criticals(critical_issues)
+
+    result = list(issues)
+    for idx, verdict in zip(critical_indices, verdicts):
+        if verdict == "WARNING":
+            result[idx] = {
+                **result[idx],
                 "severity": "WARNING",
-                "description": issue["description"] + " [auto-downgraded: self-contradicting]",
-            })
-        else:
-            result.append(issue)
+                "description": result[idx]["description"] + " [facilitator: downgraded]",
+            }
     return result
 
 
@@ -249,8 +276,8 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
                 issues.append({"severity": "CRITICAL", "description": f"[Equivalence] No review result returned for {sql_id}"})
                 has_critical = True
 
-        # Downgrade self-contradicting CRITICALs before final judgment
-        issues = _downgrade_self_contradictions(issues)
+        # LLM facilitator: validate CRITICAL findings for self-contradiction
+        issues = _apply_facilitator_judgment(issues)
 
         # Re-evaluate severity after downgrade
         has_critical = any(i["severity"] == "CRITICAL" for i in issues)

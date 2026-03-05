@@ -45,21 +45,29 @@ def _load_system_prompt():
     return blocks
 
 
-def create_sql_transform_agent() -> Agent:
-    """Create and configure SQL Transform Agent."""
+def create_sql_transform_agent(*, suppress_streaming: bool = False) -> Agent:
+    """Create and configure SQL Transform Agent.
+
+    Args:
+        suppress_streaming: If True, set callback_handler=None to suppress output.
+    """
     model = BedrockModel(
         model_id=MODEL_ID,
         max_tokens=64000
     )
 
-    return Agent(
-        name="SQLTransform",
-        model=model,
-        system_prompt=_load_system_prompt(),
-        tools=[load_mapper_list, get_pending_transforms, read_sql_source, split_mapper,
-               convert_sql, assemble_mapper, save_conversion_report,
-               generate_metadata, lookup_column_type]
-    )
+    kwargs: dict = {
+        "name": "SQLTransform",
+        "model": model,
+        "system_prompt": _load_system_prompt(),
+        "tools": [load_mapper_list, get_pending_transforms, read_sql_source, split_mapper,
+                  convert_sql, assemble_mapper, save_conversion_report,
+                  generate_metadata, lookup_column_type],
+    }
+    if suppress_streaming:
+        kwargs["callback_handler"] = None
+
+    return Agent(**kwargs)
 
 
 def run_transform():

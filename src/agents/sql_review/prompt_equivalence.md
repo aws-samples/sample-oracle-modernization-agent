@@ -95,7 +95,7 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 - **CRITICAL**: Query results would differ — wrong JOIN type, missing WHERE condition, altered column output, broken MyBatis mapping
   - Examples: INNER JOIN where Oracle had outer join, missing NULL handling for empty string, changed column alias affecting MyBatis
 - **WARNING**: Theoretical edge case or negligible behavioral difference
-  - Examples: ORDER BY on already-unique column, redundant DISTINCT that doesn't change results
+  - Examples: ORDER BY on already-unique column, redundant DISTINCT that doesn't change results, redundant but harmless cast
 
 ## Rules for Issues
 - **Be specific**: Describe what behavioral difference would occur
@@ -104,10 +104,24 @@ After reviewing ALL SQL IDs, output ONLY a single JSON object (no markdown fence
 - Each issue should describe ONE equivalence violation with a severity level
 - Empty issues array for PASS results
 
+## Decision Flow (MANDATORY)
+
+For EACH potential issue you find, follow this exact sequence:
+
+1. **Identify** — spot a suspicious pattern
+2. **Analyze** — reason about whether it actually changes query results
+3. **Conclude** — reach a clear verdict: "results WILL differ" or "results will NOT differ"
+4. **Assign severity based on your conclusion**:
+   - Conclusion is "results will NOT differ" → do NOT include it as CRITICAL. Either omit it or mark as WARNING if noteworthy
+   - Conclusion is "results WILL differ" → CRITICAL
+   - Conclusion is "edge case only, negligible" → WARNING
+
+**If you catch yourself writing "however, this is equivalent" or "after analysis, same behavior" in a CRITICAL description, STOP — your own conclusion contradicts the severity. Re-classify.**
+
 ## ABSOLUTE RULES
 1. **SILENT EXECUTION** — No text output except tool calls and final JSON
 2. **TOOL CALLS ONLY** — Think internally, then call tools
 3. **DO NOT FIX** — Only identify equivalence issues, never suggest corrections
 4. **SEMANTICS ONLY** — Ignore syntax style; focus on "does it return the same data?"
 5. **JSON OUTPUT** — Final output must be valid JSON matching the format above
-6. **NO SELF-CONTRADICTION** — If you analyze a pattern and conclude it IS functionally equivalent or produces the same results, do NOT mark it as CRITICAL or FAIL. Only report issues you are confident are actual problems after full analysis. A redundant but harmless cast (e.g., `::interval` on a value already interval) is WARNING at most, not CRITICAL.
+6. **CONCLUSION DRIVES SEVERITY** — Your analysis conclusion determines the severity, not initial suspicion. Never mark CRITICAL for something you concluded produces the same results.

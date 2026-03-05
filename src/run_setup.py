@@ -116,11 +116,16 @@ def run():
     set_property('TARGET_DBMS_TYPE', target_dbms, 'Target database type')
 
     # 모델 설정
-    from utils.project_paths import DEFAULT_MODEL_ID
+    from utils.project_paths import DEFAULT_MODEL_ID, DEFAULT_LITE_MODEL_ID
     current_model = get_property('OMA_MODEL_ID') or DEFAULT_MODEL_ID
     print(f"\n  💡 추천 모델: {DEFAULT_MODEL_ID}")
     model_id = ask("OMA_MODEL_ID (Bedrock model ID)", current_model)
     set_property('OMA_MODEL_ID', model_id, 'Bedrock model ID for all agents')
+
+    current_lite = get_property('OMA_LITE_MODEL_ID') or DEFAULT_LITE_MODEL_ID
+    print(f"  💡 추천 경량 모델: {DEFAULT_LITE_MODEL_ID}")
+    lite_model_id = ask("OMA_LITE_MODEL_ID (경량 판단용 — Facilitator 등)", current_lite)
+    set_property('OMA_LITE_MODEL_ID', lite_model_id, 'Lite Bedrock model ID for facilitator/summary')
 
     # 4. DB 접속 정보 입력 여부 확인
     print("\n" + "="*70)

@@ -187,9 +187,7 @@ def _retransform_failures():
 
         feedback_text = "\n".join(feedback_lines)
 
-        # Use callback_handler=None to suppress streaming output
-        agent = create_sql_transform_agent()
-        agent.callback_handler = None
+        agent = create_sql_transform_agent(suppress_streaming=True)
         agent(
             f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
             f"These FAILED review. Here are the SPECIFIC issues found:\n"
@@ -234,8 +232,7 @@ def _refine_strategy(fail_count):
     """Run Strategy Refine Agent to learn from persistent failure patterns."""
     print(f"\n🧠 Strategy Refine: {fail_count}개 지속 실패 패턴 학습 중...", flush=True)
     from agents.strategy_refine.agent import create_strategy_refine_agent
-    agent = create_strategy_refine_agent()
-    agent.callback_handler = None
+    agent = create_strategy_refine_agent(suppress_streaming=True)
     agent("Refine: collect feedback patterns and add as Before/After examples to strategy.")
     print("✅ 전략 업데이트 완료\n", flush=True)
 
