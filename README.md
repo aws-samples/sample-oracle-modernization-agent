@@ -538,6 +538,7 @@ OMA를 실행하려면 다음 AWS 서비스에 대한 IAM 권한이 필요합니
 ## Documentation
 
 - [System Documentation](docs/SYSTEM_DOCUMENTATION.md) — Architecture, Agent details, DB schema
+- [Large-Scale Processing Guide](docs/LARGE_SCALE_GUIDE.md) — Worker tuning, cost optimization, monitoring
 - [Project Overview](PROJECT_OVERVIEW.md) — Business value and use cases
 - Agent Design Documents:
   - [Orchestrator Agent](docs/agents/ORCHESTRATOR_DESIGN.md)

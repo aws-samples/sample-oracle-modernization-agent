@@ -244,15 +244,19 @@ class StateManager:
             reviewed = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.reviewed == 'Y').scalar()
 
+            review_failed = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.reviewed == 'F').scalar()
+
             validated = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.validated == 'Y').scalar()
 
             tested = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.tested == 'Y').scalar()
 
-            # Completion flags
+            # Completion flags: step is complete when no 'N' remains
+            # (all items are either 'Y' or 'F')
             transform_complete = (extracted > 0 and transformed == extracted)
-            review_complete = (transformed > 0 and reviewed == transformed)
+            review_complete = (transformed > 0 and (reviewed + review_failed) == transformed)
             validate_complete = (reviewed > 0 and validated == reviewed)
             test_complete = (validated > 0 and tested == validated)
 
@@ -261,6 +265,7 @@ class StateManager:
                 'extracted': extracted,
                 'transformed': transformed,
                 'reviewed': reviewed,
+                'review_failed': review_failed,
                 'validated': validated,
                 'tested': tested,
                 'merged': 0,  # TODO: implement merge tracking
@@ -298,9 +303,10 @@ class StateManager:
             # Get column attribute dynamically but safely (no SQL injection risk with ORM)
             column_attr = getattr(TransformTargetList, column_name)
 
+            # Reset both 'Y' and 'F' (review FAIL) back to 'N'
             stmt = (
                 sql_update(TransformTargetList)
-                .where(column_attr == 'Y')
+                .where(column_attr.in_(['Y', 'F']))
                 .values(**{column_name: 'N', 'updated_at': func.current_timestamp()})
             )
             result = session.execute(stmt)

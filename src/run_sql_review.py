@@ -230,8 +230,28 @@ def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
         stop_event.wait(0.1)
 
 
-def run(max_workers=8, max_rounds=2):
+def _refine_strategy(fail_count):
+    """Run Strategy Refine Agent to learn from persistent failure patterns."""
+    print(f"\n🧠 Strategy Refine: {fail_count}개 지속 실패 패턴 학습 중...", flush=True)
+    from agents.strategy_refine.agent import create_strategy_refine_agent
+    agent = create_strategy_refine_agent()
+    agent.callback_handler = None
+    agent("Refine: collect feedback patterns and add as Before/After examples to strategy.")
+    print("✅ 전략 업데이트 완료\n", flush=True)
+
+
+def run(max_workers=8, max_rounds=3):
     print("🔍 SQL Review Agent 시작...\n", flush=True)
+
+    # Reset previous FAIL items so they get re-reviewed on re-run
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed = 'F'")
+        fail_count = cursor.fetchone()[0]
+        if fail_count > 0:
+            conn.execute("UPDATE transform_target_list SET reviewed = 'N' WHERE reviewed = 'F'")
+            conn.commit()
+            print(f"🔄 이전 FAIL {fail_count}개 재시도 대상으로 리셋", flush=True)
 
     for round_num in range(1, max_rounds + 1):
         if round_num > 1:
@@ -265,6 +285,15 @@ def run(max_workers=8, max_rounds=2):
         stop_monitor.set()
         monitor.join(timeout=2)
 
+        # Round 2+: persistent failures → refine strategy before re-transform
+        if round_num >= 2:
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed = 'F'")
+                persistent_fail = cursor.fetchone()[0]
+            if persistent_fail > 0:
+                _refine_strategy(persistent_fail)
+
         # Check failures and re-transform (FAIL only, not PASS_WITH_WARNINGS)
         retransformed = _retransform_failures()
         if retransformed == 0:
@@ -294,7 +323,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--workers', type=int, default=8)
-    parser.add_argument('--max-rounds', type=int, default=2, help='Max review-retransform rounds')
+    parser.add_argument('--max-rounds', type=int, default=3, help='Max review-retransform rounds')
     parser.add_argument('--reset', action='store_true', help='Reset review status')
     args = parser.parse_args()
 

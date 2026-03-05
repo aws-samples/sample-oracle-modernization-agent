@@ -209,6 +209,7 @@ def check_step_status() -> StepStatusResult:
         'extracted': counts['extracted'],
         'transformed': counts['transformed'],
         'reviewed': counts['reviewed'],
+        'review_failed': counts['review_failed'],
         'validated': counts['validated'],
         'tested': counts['tested'],
         'merged': counts['merged'],
@@ -431,6 +432,7 @@ def get_summary() -> SummaryResult:
         'total_sqls': status['extracted'],
         'transformed': status['transformed'],
         'reviewed': status['reviewed'],
+        'review_failed': status['review_failed'],
         'validated': status['validated'],
         'tested': status['tested'],
         'merged': int(files.get('merge', '0')),
@@ -439,12 +441,17 @@ def get_summary() -> SummaryResult:
     }
 
     # Print formatted summary
+    review_failed = status['review_failed']
+    review_display = f"{status['reviewed']}/{status['extracted']}"
+    if review_failed > 0:
+        review_display += f" ({review_failed} FAIL — 수동 검토 필요)"
+
     print(f"\n{'='*60}")
     print(f"📊 OMA Pipeline Summary")
     print(f"{'='*60}")
     print(f"  Source Analyzed: {'✅' if status['source_analyzed'] else '❌'}")
     print(f"  Transformed:    {status['transformed']}/{status['extracted']}")
-    print(f"  Reviewed:       {status['reviewed']}/{status['extracted']}")
+    print(f"  Reviewed:       {review_display}")
     print(f"  Validated:      {status['validated']}/{status['extracted']}")
     print(f"  Tested:         {status['tested']}/{status['extracted']}")
     print(f"  Merged:         {files.get('merge', '0')} files")

@@ -15,6 +15,7 @@ class StepStatusResult(TypedDict):
     extracted: int
     transformed: int
     reviewed: int
+    review_failed: int
     validated: int
     tested: int
     merged: int
@@ -44,6 +45,7 @@ class SummaryResult(TypedDict):
     total_sqls: int
     transformed: int
     reviewed: int
+    review_failed: int
     validated: int
     tested: int
     merged: int
