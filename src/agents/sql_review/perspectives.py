@@ -6,7 +6,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import boto3
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
@@ -161,18 +160,25 @@ def _llm_validate_criticals(critical_issues: list[dict]) -> list[str]:
     )
 
     try:
-        client = boto3.client("bedrock-runtime")
-        response = client.converse(
-            modelId=LITE_MODEL_ID,
-            messages=[{
-                "role": "user",
-                "content": [{"text": f"Evaluate these CRITICAL findings:\n\n{findings_text}"}],
-            }],
-            system=[{"text": _FACILITATOR_PROMPT}],
-            inferenceConfig={"maxTokens": 500, "temperature": 0.0},
+        model = BedrockModel(model_id=LITE_MODEL_ID, max_tokens=500)
+        agent = Agent(
+            model=model,
+            system_prompt=_FACILITATOR_PROMPT,
+            callback_handler=None,
         )
-        output_text = response["output"]["message"]["content"][0]["text"].strip()
-        parsed = json.loads(output_text)
+        result = agent(f"Evaluate these CRITICAL findings:\n\n{findings_text}")
+        output_text = str(result).strip()
+        # Extract JSON array — try raw parse, then fence extraction
+        parsed = None
+        try:
+            parsed = json.loads(output_text)
+        except (json.JSONDecodeError, ValueError):
+            fence = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", output_text, re.DOTALL)
+            if fence:
+                try:
+                    parsed = json.loads(fence.group(1).strip())
+                except (json.JSONDecodeError, ValueError):
+                    pass
         if isinstance(parsed, list) and len(parsed) == len(critical_issues):
             return [v if v in ("CRITICAL", "WARNING") else "CRITICAL" for v in parsed]
     except Exception as e:
