@@ -21,7 +21,28 @@ def get_db_path() -> Path:
 PROJECT_ROOT = find_project_root()
 SRC_DIR = PROJECT_ROOT / "src"
 CONFIG_DIR = SRC_DIR / "config"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+DB_PATH = CONFIG_DIR / "oma_control.db"
+
+
+def _load_output_dir() -> Path:
+    """Load output directory: env var > DB > default (PROJECT_ROOT/output)"""
+    env_val = os.environ.get("OMA_OUTPUT_DIR")
+    if env_val:
+        return Path(env_val)
+    if DB_PATH.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(DB_PATH))
+            row = conn.execute("SELECT value FROM properties WHERE key='OMA_OUTPUT_DIR'").fetchone()
+            conn.close()
+            if row:
+                return Path(row[0])
+        except Exception:
+            pass
+    return PROJECT_ROOT / "output"
+
+
+OUTPUT_DIR = _load_output_dir()
 REPORTS_DIR = OUTPUT_DIR / "reports"
 LOGS_DIR = OUTPUT_DIR / "logs"
 STRATEGY_DIR = OUTPUT_DIR / "strategy"
@@ -34,7 +55,6 @@ ORIGIN_DIR = XMLS_DIR / "origin"
 MERGE_DIR = XMLS_DIR / "merge"
 
 TEST_DIR = OUTPUT_DIR / "test"
-DB_PATH = CONFIG_DIR / "oma_control.db"
 
 # Model configuration
 # ⚠️ Prompt Caching 미지원 모델 사용 시 API 비용 5~10배 증가 주의

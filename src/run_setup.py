@@ -109,10 +109,18 @@ def run():
         get_property('TARGET_DBMS_TYPE') or 'postgresql'
     )
 
+    from utils.project_paths import PROJECT_ROOT
+    default_output = str(PROJECT_ROOT / "output")
+    output_dir = ask(
+        "OMA_OUTPUT_DIR (변환 결과 출력 경로)",
+        get_property('OMA_OUTPUT_DIR') or default_output
+    )
+
     # 3. 저장
     print()
     set_property('JAVA_SOURCE_FOLDER', java_source, 'Java source code root path')
     set_property('SOURCE_DBMS_TYPE', source_dbms, 'Source database type')
+    set_property('OMA_OUTPUT_DIR', output_dir, 'Output directory for converted files')
     set_property('TARGET_DBMS_TYPE', target_dbms, 'Target database type')
 
     # 모델 설정
