@@ -1,6 +1,7 @@
-"""SQL Test tools - Java executor wrapper + DB flag management"""
+"""SQL Test tools - Java executor wrapper + EXPLAIN-based DML validation"""
 import os
 import json
+import re
 import subprocess
 import sqlite3
 import time
@@ -11,6 +12,156 @@ from agents.sql_transform.tools.metadata import _get_pg_connection_vars
 
 
 REFERENCE_DIR = PROJECT_ROOT / "src" / "reference"
+
+# MyBatis dynamic tags to strip for EXPLAIN-based validation
+_MYBATIS_TAG_PATTERN = re.compile(
+    r'</?(?:if|choose|when|otherwise|where|set|trim|foreach|bind)\b[^>]*>',
+    re.IGNORECASE,
+)
+# MyBatis parameter patterns: #{param}, #{param,jdbcType=VARCHAR}, #{param}::type
+_PARAM_PATTERN = re.compile(
+    r'#\{[^}]+\}(?:::(\w+))?'
+)
+# Dollar parameter: ${param}
+_DOLLAR_PARAM_PATTERN = re.compile(r'\$\{[^}]+\}')
+# XML entities
+_XML_ENTITIES = {'&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&apos;': "'"}
+
+
+def _extract_sql_for_explain(target_file: str) -> tuple[str, str] | None:
+    """Extract SQL from converted MyBatis XML and prepare for EXPLAIN.
+
+    Returns (sql_type, prepared_sql) or None if extraction fails.
+    """
+    path = Path(target_file)
+    if not path.exists():
+        return None
+
+    content = path.read_text(encoding='utf-8')
+
+    # Extract SQL body from XML tag
+    body_match = re.search(
+        r'<(insert|update|delete)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
+        content, re.DOTALL | re.IGNORECASE,
+    )
+    if not body_match:
+        return None
+
+    sql_type = body_match.group(1).lower()
+    sql_body = body_match.group(2).strip()
+
+    # Strip CDATA wrappers
+    sql_body = re.sub(r'<!\[CDATA\[', '', sql_body)
+    sql_body = re.sub(r'\]\]>', '', sql_body)
+
+    # Strip MyBatis dynamic tags (keep inner SQL content)
+    sql_body = _MYBATIS_TAG_PATTERN.sub('', sql_body)
+
+    # Replace #{param}::type → NULL::type, #{param} → NULL
+    def _replace_param(m):
+        cast_type = m.group(1)
+        return f'NULL::{cast_type}' if cast_type else 'NULL'
+
+    sql_body = _PARAM_PATTERN.sub(_replace_param, sql_body)
+
+    # Replace ${param} → '1' (string literal safe default)
+    sql_body = _DOLLAR_PARAM_PATTERN.sub("'1'", sql_body)
+
+    # Decode XML entities
+    for entity, char in _XML_ENTITIES.items():
+        sql_body = sql_body.replace(entity, char)
+
+    # Clean up whitespace
+    sql_body = re.sub(r'\n\s*\n', '\n', sql_body).strip()
+
+    if not sql_body:
+        return None
+
+    return sql_type, sql_body
+
+
+def explain_dml_batch(dml_items: list[dict]) -> dict:
+    """Run EXPLAIN on DML statements to validate syntax without execution.
+
+    Validates: SQL syntax, table/column existence, type compatibility.
+    Does NOT: execute DML, check PK/NULL constraints, modify data.
+
+    Args:
+        dml_items: List of dicts with mapper_file, sql_id, target_file keys.
+
+    Returns:
+        Dict with passed/failed counts and failure details.
+    """
+    if not _ensure_pg_env():
+        return {'status': 'skipped', 'error': 'No PostgreSQL connection info'}
+
+    pg_env = {
+        'PGHOST': os.environ.get('PGHOST', 'localhost'),
+        'PGPORT': os.environ.get('PGPORT', '5432'),
+        'PGDATABASE': os.environ.get('PGDATABASE', 'postgres'),
+        'PGUSER': os.environ.get('PGUSER', ''),
+        'PGPASSWORD': os.environ.get('PGPASSWORD', ''),
+    }
+
+    passed = 0
+    failed = 0
+    failures = []
+
+    for item in dml_items:
+        mapper_file = item['mapper_file']
+        sql_id = item['sql_id']
+        target_file = item['target_file']
+
+        extracted = _extract_sql_for_explain(target_file)
+        if not extracted:
+            failed += 1
+            failures.append({
+                'mapper_file': mapper_file,
+                'sql_id': sql_id,
+                'error': 'Failed to extract SQL from XML',
+            })
+            continue
+
+        sql_type, sql_body = extracted
+
+        try:
+            result = subprocess.run(
+                ['psql', '-c', f'EXPLAIN {sql_body}'],
+                capture_output=True, text=True, timeout=15,
+                env={**os.environ, **pg_env},
+            )
+            if result.returncode == 0:
+                passed += 1
+                _update_tested(mapper_file, sql_id)
+            else:
+                error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
+                failed += 1
+                failures.append({
+                    'mapper_file': mapper_file,
+                    'sql_id': sql_id,
+                    'error': error_msg,
+                })
+        except subprocess.TimeoutExpired:
+            failed += 1
+            failures.append({
+                'mapper_file': mapper_file,
+                'sql_id': sql_id,
+                'error': 'EXPLAIN timeout (15s)',
+            })
+        except Exception as e:
+            failed += 1
+            failures.append({
+                'mapper_file': mapper_file,
+                'sql_id': sql_id,
+                'error': str(e),
+            })
+
+    return {
+        'status': 'completed',
+        'passed': passed,
+        'failed': failed,
+        'failures': failures,
+    }
 
 
 def _ensure_pg_env():

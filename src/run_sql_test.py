@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR
 from core.progress import drain_progress
 
-from agents.sql_test.tools.test_tools import run_bulk_test, get_test_failures
+from agents.sql_test.tools.test_tools import run_bulk_test, get_test_failures, explain_dml_batch
 from agents.sql_test.agent import create_sql_test_agent
 
 _log_dir = LOGS_DIR / "test"
@@ -144,7 +144,40 @@ def run(max_workers=8):
         f.write(f"PGPASSWORD={pg_props.get('PGPASSWORD', '')}\n")
     log_and_print(f"✅ Generated {pg_params_file}")
 
-    # Phase 1: Java bulk test
+    # Phase 0: EXPLAIN-based DML validation (no execution, no PK/NULL issues)
+    log_and_print("\nPhase 0: DML 구문 검증 (EXPLAIN)...")
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, target_file
+            FROM transform_target_list
+            WHERE validated = 'Y' AND tested = 'N'
+              AND sql_type IN ('insert', 'update', 'delete')
+            ORDER BY mapper_file, seq_no
+        """)
+        dml_rows = cursor.fetchall()
+
+    if dml_rows:
+        dml_items = [
+            {'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2], 'target_file': r[3]}
+            for r in dml_rows
+        ]
+        log_and_print(f"  📋 DML 대상: {len(dml_items)}개 (INSERT/UPDATE/DELETE)")
+        explain_result = explain_dml_batch(dml_items)
+
+        if explain_result.get('status') == 'completed':
+            log_and_print(f"  ✅ EXPLAIN PASS: {explain_result['passed']}")
+            log_and_print(f"  ❌ EXPLAIN FAIL: {explain_result['failed']}")
+            for f in explain_result.get('failures', [])[:5]:
+                log_and_print(f"    ❌ {f['mapper_file']}/{f['sql_id']}: {f['error'][:100]}")
+            if explain_result['failed'] > 5:
+                log_and_print(f"    ... and {explain_result['failed'] - 5} more")
+        elif explain_result.get('status') == 'skipped':
+            log_and_print(f"  ⚠️  DML EXPLAIN skipped: {explain_result.get('error', '')}")
+    else:
+        log_and_print("  ℹ️  DML 대상 없음")
+
+    # Phase 1: Java bulk test (SELECT + remaining untested)
     log_and_print("\nPhase 1: Java 일괄 테스트 실행...")
     bulk_result = run_bulk_test()
 
@@ -290,9 +323,9 @@ if __name__ == "__main__":
         print("🔄 Resetting test flags...", flush=True)
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE transform_target_list SET tested='N' WHERE sql_type='select'")
+            cursor.execute("UPDATE transform_target_list SET tested='N' WHERE tested='Y'")
             reset_count = cursor.rowcount
             conn.commit()
-        print(f"✅ Reset {reset_count} SQL IDs\n", flush=True)
+        print(f"✅ Reset {reset_count} SQL IDs (SELECT + DML)\n", flush=True)
 
     run(max_workers=args.workers)
