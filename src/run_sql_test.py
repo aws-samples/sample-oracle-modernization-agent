@@ -144,6 +144,14 @@ def run(max_workers=8):
         f.write(f"PGPASSWORD={pg_props.get('PGPASSWORD', '')}\n")
     log_and_print(f"✅ Generated {pg_params_file}")
 
+    # Pre-check: DB connection available?
+    from agents.sql_transform.tools.metadata import _get_pg_connection_vars
+    if not _get_pg_connection_vars():
+        log_and_print("\n⚠️  No PostgreSQL connection info")
+        log_and_print("Test 단계를 수행하려면 DB 접속 정보가 필요합니다.")
+        log_and_print("→ run_setup.py를 다시 실행하여 PostgreSQL 접속 정보를 설정하세요.")
+        return
+
     # Phase 0: EXPLAIN-based DML validation (no execution, no PK/NULL issues)
     log_and_print("\nPhase 0: DML 구문 검증 (EXPLAIN)...")
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:

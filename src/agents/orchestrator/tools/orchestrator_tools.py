@@ -378,6 +378,16 @@ def run_step(step_name: str) -> RunStepResult:
         needs_merge = False
         details = f'{step_name} step completed successfully'
 
+        # Detect skipped test (no DB connection)
+        if step_name == 'test' and 'No PostgreSQL connection info' in output:
+            result: RunStepResult = {
+                'status': 'skipped',
+                'details': 'Test skipped: PostgreSQL 접속 정보가 설정되지 않았습니다. run_setup.py에서 DB 접속 정보를 설정하세요.',
+                'needs_merge': False
+            }
+            print("⚠️  Test 단계를 건너뛰었습니다. DB 접속 정보가 필요합니다.", flush=True)
+            return result
+
         if step_name == 'test' and 'Phase 2:' in output and '건 실패 SQL 수정' in output:
             needs_merge = True
             details = 'Test Agent modified SQL files. Run merge step to apply changes to final XML.'
