@@ -28,12 +28,12 @@ class TransformTargetList(Base):
     source_file = Column(Text, nullable=False)
     target_file = Column(Text)
 
-    # Pipeline status flags
-    transformed = Column(Text, default='N')
-    reviewed = Column(Text, default='N')
-    validated = Column(Text, default='N')
-    tested = Column(Text, default='N')
-    completed = Column(Text, default='N')
+    # Pipeline status flags (server_default ensures SQL-level DEFAULT for raw INSERT)
+    transformed = Column(Text, default='N', server_default='N')
+    reviewed = Column(Text, default='N', server_default='N')
+    validated = Column(Text, default='N', server_default='N')
+    tested = Column(Text, default='N', server_default='N')
+    completed = Column(Text, default='N', server_default='N')
 
     # Timestamps
     created_at = Column(DateTime, default=func.current_timestamp())

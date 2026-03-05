@@ -154,6 +154,18 @@ def run(max_workers=8):
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
         table_exists = cursor.fetchone()
+        if table_exists:
+            # Check for NULL transformed flags (caused by missing server_default)
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed IS NULL")
+            null_count = cursor.fetchone()[0]
+            if null_count > 0:
+                cursor.execute("UPDATE transform_target_list SET transformed='N' WHERE transformed IS NULL")
+                cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE reviewed IS NULL")
+                cursor.execute("UPDATE transform_target_list SET validated='N' WHERE validated IS NULL")
+                cursor.execute("UPDATE transform_target_list SET tested='N' WHERE tested IS NULL")
+                cursor.execute("UPDATE transform_target_list SET completed='N' WHERE completed IS NULL")
+                conn.commit()
+                print(f"🔧 Fixed {null_count} rows with NULL status flags", flush=True)
 
     # Check if extract files exist
     extract_exists = (PROJECT_ROOT / "output" / "extract").exists()

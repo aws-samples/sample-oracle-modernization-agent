@@ -193,8 +193,9 @@ def split_mapper(file_path: str) -> dict:
 
             cursor.execute("""
                 INSERT INTO transform_target_list
-                (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file,
+                 transformed, reviewed, validated, tested, completed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'N', 'N', 'N', 'N', 'N')
             """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
 
             sql_ids.append({
