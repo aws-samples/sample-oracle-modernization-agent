@@ -132,7 +132,7 @@ export AWS_SESSION_TOKEN="your_session_token"  # 임시 자격 증명 사용 시
 
 ### 2. 데이터베이스 설정
 
-`./config/oma_control.db` 파일에 다음 테이블 필요:
+`$OMA_OUTPUT_DIR/oma_control.db` (기본: `output/oma_control.db`) 파일에 다음 테이블 필요:
 
 ```sql
 -- properties 테이블
@@ -150,14 +150,14 @@ VALUES ('JAVA_SOURCE_FOLDER', '/path/to/java/source');
 
 ```
 oma/
-├── config/
-│   └── oma_control.db          # 설정 DB
 ├── src/
 │   ├── utils/
 │   │   └── project_paths.py    # 경로 자동 탐지
 │   └── agents/
 │       └── source_analyzer/
-├── reports/                     # 보고서 출력 위치
+├── output/
+│   ├── oma_control.db          # 설정/상태 DB
+│   └── reports/                # 보고서 출력 위치
 └── tests/
     └── test_source_analyzer.py
 ```

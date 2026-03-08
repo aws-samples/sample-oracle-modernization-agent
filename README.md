@@ -473,11 +473,12 @@ sql-migration-assistant/
 │   │   └── strategy_refine/      # Strategy enhancement/compression
 │   ├── core/
 │   │   └── state_manager.py      # Centralized state management
-│   ├── config/oma_control.db     # SQLite (state management)
+│   ├── utils/project_paths.py    # Path constants, model IDs
 │   ├── reference/
 │   │   └── oracle_to_postgresql_rules.md  # General Rules
 │   └── run_*.py                  # Execution scripts
-├── output/                       # All artifacts
+├── output/                       # All artifacts ($OMA_OUTPUT_DIR)
+│   ├── oma_control.db            # SQLite (state management)
 │   ├── transform/                # Converted SQL
 │   ├── strategy/                 # Project-specific strategy
 │   ├── merge/                    # Final Mapper XML

@@ -1,6 +1,12 @@
 """OMA Orchestrator - Interactive chatbot mode"""
+import os
 import sys
 from pathlib import Path
+
+# Ensure UTF-8 for Korean input/output
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if hasattr(sys.stdin, "reconfigure") and sys.stdin.encoding and sys.stdin.encoding.lower() != "utf-8":
+    sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -46,6 +52,9 @@ def run():
     while True:
         try:
             user_input = input("\n🧑 > ").strip()
+        except UnicodeDecodeError:
+            print("⚠️  입력 인코딩 오류 — 한영 전환 후 다시 입력해주세요.")
+            continue
         except (KeyboardInterrupt, EOFError):
             print("\n👋 종료합니다.")
             break

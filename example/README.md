@@ -3,8 +3,6 @@
 This folder contains a sample Spring Boot + MyBatis application with Oracle SQL mapper XMLs.
 Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
 
-> For application details (API endpoints, project structure), see [APPLICATION.md](APPLICATION.md).
-
 ## Prerequisites
 
 - Python 3.11+
@@ -14,14 +12,9 @@ Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
 
 ```bash
 cd example
-./run_example.sh
+./setup.sh    # 1회: venv 생성 + 의존성 설치 + 프로젝트 설정
+./run.sh      # 이후: 오케스트레이터 실행
 ```
-
-This single script will:
-1. Create a Python virtual environment (`.venv/`)
-2. Install dependencies from `requirements.txt`
-3. Run `run_setup.py` — enter project settings when prompted
-4. Run `run_orchestrator.py` — interactive migration pipeline
 
 ### Setup hints
 
@@ -42,13 +35,6 @@ In the orchestrator, type commands like:
 - `리뷰 시작` — multi-perspective review
 - `검증 시작` — functional equivalence validation
 - `종료` — exit
-
-### Run steps separately
-
-```bash
-./run_example.sh setup    # Setup only (venv + configuration)
-./run_example.sh run      # Orchestrator only (after setup)
-```
 
 ## What's included
 
