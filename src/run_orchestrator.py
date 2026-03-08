@@ -61,7 +61,7 @@ def run():
 
         if not user_input:
             continue
-        if user_input.lower() in ('quit', 'exit', 'q'):
+        if user_input.lower().strip('/') in ('quit', 'exit', 'q'):
             print("👋 종료합니다.")
             break
 
