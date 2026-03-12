@@ -1,0 +1,81 @@
+spring:
+  application:
+    name: amzn-backoffice
+  
+  # 데이터베이스 설정 (환경변수 사용)
+  datasource:
+    driver-class-name: oracle.jdbc.OracleDriver
+    jdbc-url: jdbc:oracle:thin:@${ORACLE_HOST}:${ORACLE_PORT}/ORCLPDB1
+    username: ${ORACLE_SVC_USER}
+    password: ${ORACLE_SVC_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+
+  # JPA 설정 (필요시)
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.Oracle12cDialect
+        format_sql: true
+
+# MyBatis 설정
+mybatis:
+  mapper-locations: classpath:sqlmap/mapper/**/*.xml
+  type-aliases-package: amzn.bo.dto
+  configuration:
+    map-underscore-to-camel-case: true
+    call-setters-on-nulls: true
+    jdbc-type-for-null: 'NULL'
+
+# 서버 설정
+server:
+  port: 8080
+  servlet:
+    context-path: /amzn-bo
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+# 로깅 설정
+logging:
+  level:
+    amzn.bo: DEBUG
+    org.springframework.jdbc: DEBUG
+    org.mybatis: TRACE
+    amzn.bo.mapper: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/amzn-backoffice.log
+    max-size: 100MB
+    max-history: 30
+
+# 관리 엔드포인트 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# 커스텀 설정
+amzn:
+  bo:
+    version: 1.0.0
+    environment: development
+    features:
+      analytics-enabled: true
+      batch-processing-enabled: true
+      notification-enabled: true

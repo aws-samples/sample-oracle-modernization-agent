@@ -1,0 +1,637 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="amzn.bo.mapper.UserMapper">
+
+    <!-- 사용자 목록 조회 (복합 검색, 고급 필터링) -->
+    <select id="selectUserList" parameterType="map" resultType="amzn.bo.dto.UserDto">
+        SELECT * FROM (
+            SELECT 
+                u.USER_ID,
+                u.EMAIL,
+                u.FIRST_NAME,
+                u.LAST_NAME,
+                u.PHONE,
+                u.STATUS,
+                u.CREATED_AT,
+                u.UPDATED_AT,
+                NVL(order_stats.ORDER_COUNT, 0) as ORDER_COUNT,
+                NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+                NVL(order_stats.AVG_ORDER_VALUE, 0) as AVG_ORDER_VALUE,
+                DECODE(u.STATUS, 'ACTIVE', 1, 'INACTIVE', 2, 'SUSPENDED', 3, 4) as STATUS_PRIORITY,
+                DENSE_RANK() OVER (ORDER BY NVL(order_stats.TOTAL_SPENT, 0) DESC) as SPENDING_RANK,
+                <![CDATA[
+                CASE 
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                    WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                    ELSE 'NEW'
+                END as USER_GRADE,
+                ]]>
+                TRUNC(SYSDATE) - TRUNC(u.CREATED_AT) as DAYS_SINCE_REGISTRATION,
+                ROW_NUMBER() OVER (ORDER BY u.CREATED_AT DESC) as RN
+            FROM USERS u,
+                 (SELECT 
+                    o.USER_ID,
+                    COUNT(*) as ORDER_COUNT,
+                    SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT,
+                    ROUND(AVG(o.TOTAL_AMOUNT), 2) as AVG_ORDER_VALUE,
+                    MAX(o.ORDERED_AT) as LAST_ORDER_DATE
+                  FROM ORDERS o
+                  WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                  GROUP BY o.USER_ID) order_stats
+            WHERE u.USER_ID = order_stats.USER_ID(+)
+            <if test="email != null and email != ''">
+                AND UPPER(u.EMAIL) LIKE '%' || UPPER(#{email}) || '%'
+            </if>
+            <if test="status != null and status != ''">
+                AND u.STATUS = #{status}
+            </if>
+            <if test="userGrade != null and userGrade != ''">
+                AND CASE 
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                    WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                    ELSE 'NEW'
+                END = #{userGrade}
+            </if>
+            <if test="startDate != null and startDate != ''">
+                <![CDATA[ AND u.CREATED_AT >= TO_DATE(#{startDate}, 'YYYY-MM-DD') ]]>
+            </if>
+            <if test="endDate != null and endDate != ''">
+                <![CDATA[ AND u.CREATED_AT <= TO_DATE(#{endDate}, 'YYYY-MM-DD') ]]>
+            </if>
+            <if test="minSpent != null and minSpent != ''">
+                <![CDATA[ AND NVL(order_stats.TOTAL_SPENT, 0) >= #{minSpent} ]]>
+            </if>
+            <if test="maxSpent != null and maxSpent != ''">
+                <![CDATA[ AND NVL(order_stats.TOTAL_SPENT, 0) <= #{maxSpent} ]]>
+            </if>
+        )
+        <if test="limit != null and limit != '' and offset != null and offset != ''">
+            <![CDATA[ WHERE ROWNUM <= #{offset} + #{limit} ]]>
+            AND RN > #{offset}
+        </if>
+        ORDER BY STATUS_PRIORITY, SPENDING_RANK
+    </select>
+
+    <!-- 사용자 총 개수 조회 -->
+    <select id="selectUserCount" parameterType="map" resultType="long">
+        SELECT COUNT(*) as count
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                COUNT(*) as ORDER_COUNT,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY o.USER_ID) order_stats
+        WHERE u.USER_ID = order_stats.USER_ID(+)
+        <if test="email != null and email != ''">
+            AND UPPER(u.EMAIL) LIKE '%' || UPPER(#{email}) || '%'
+        </if>
+        <if test="status != null and status != ''">
+            AND u.STATUS = #{status}
+        </if>
+        <if test="userGrade != null and userGrade != ''">
+            AND CASE 
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                ELSE 'NEW'
+            END = #{userGrade}
+        </if>
+        <if test="startDate != null and startDate != ''">
+            <![CDATA[ AND u.CREATED_AT >= TO_DATE(#{startDate}, 'YYYY-MM-DD') ]]>
+        </if>
+        <if test="endDate != null and endDate != ''">
+            <![CDATA[ AND u.CREATED_AT <= TO_DATE(#{endDate}, 'YYYY-MM-DD') ]]>
+        </if>
+        <if test="minSpent != null and minSpent != ''">
+            <![CDATA[ AND NVL(order_stats.TOTAL_SPENT, 0) >= #{minSpent} ]]>
+        </if>
+        <if test="maxSpent != null and maxSpent != ''">
+            <![CDATA[ AND NVL(order_stats.TOTAL_SPENT, 0) <= #{maxSpent} ]]>
+        </if>
+    </select>
+
+    <!-- 사용자 상세 정보 조회 -->
+    <select id="selectUserDetail" parameterType="long" resultType="amzn.bo.dto.UserDto">
+        SELECT 
+            u.USER_ID,
+            u.EMAIL,
+            u.FIRST_NAME,
+            u.LAST_NAME,
+            u.PHONE,
+            u.STATUS,
+            u.CREATED_AT,
+            u.UPDATED_AT,
+            NVL(order_stats.ORDER_COUNT, 0) as ORDER_COUNT,
+            NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+            NVL(order_stats.AVG_ORDER_VALUE, 0) as AVG_ORDER_VALUE,
+            CASE 
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                ELSE 'NEW'
+            END as USER_GRADE,
+            TRUNC(SYSDATE) - TRUNC(u.CREATED_AT) as DAYS_SINCE_REGISTRATION
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                COUNT(*) as ORDER_COUNT,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT,
+                ROUND(AVG(o.TOTAL_AMOUNT), 2) as AVG_ORDER_VALUE
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY o.USER_ID) order_stats
+        WHERE u.USER_ID = order_stats.USER_ID(+)
+        AND u.USER_ID = #{userId}
+    </select>
+
+    <!-- 사용자 활동 통계 조회 -->
+    <select id="selectUserActivityStats" parameterType="long" resultType="map">
+        SELECT 
+            u.USER_ID,
+            u.EMAIL,
+            u.FIRST_NAME || ' ' || u.LAST_NAME as FULL_NAME,
+            TO_CHAR(u.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') as REGISTRATION_DATE,
+            NVL(order_stats.TOTAL_ORDERS, 0) as TOTAL_ORDERS,
+            NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+            NVL(order_stats.AVG_ORDER_VALUE, 0) as AVG_ORDER_VALUE,
+            TO_CHAR(NVL(order_stats.LAST_ORDER_DATE, u.CREATED_AT), 'YYYY-MM-DD HH24:MI:SS') as LAST_ORDER_DATE,
+            NVL(TRUNC(SYSDATE) - TRUNC(order_stats.LAST_ORDER_DATE), 999) as DAYS_SINCE_LAST_ORDER,
+            CASE 
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                WHEN NVL(order_stats.TOTAL_ORDERS, 0) > 0 THEN 'REGULAR'
+                ELSE 'NEW'
+            END as USER_GRADE,
+            TRUNC(SYSDATE) - TRUNC(u.CREATED_AT) as DAYS_SINCE_REGISTRATION,
+            'N/A' as FAVORITE_CATEGORY,
+            0 as FAVORITE_CATEGORY_ORDERS,
+            'N/A' as PREFERRED_PAYMENT_METHOD,
+            0 as PAYMENT_METHOD_USAGE_COUNT
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                COUNT(*) as TOTAL_ORDERS,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT,
+                ROUND(AVG(o.TOTAL_AMOUNT), 2) as AVG_ORDER_VALUE,
+                MAX(o.ORDERED_AT) as LAST_ORDER_DATE
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY o.USER_ID) order_stats
+        WHERE u.USER_ID = order_stats.USER_ID(+)
+        AND u.USER_ID = #{userId}
+    </select>
+
+    <!-- 사용자 주문 이력 조회 -->
+    <select id="selectUserOrderHistory" parameterType="map" resultType="map">
+        SELECT 
+            o.ORDER_ID,
+            o.ORDER_NUMBER,
+            o.ORDER_STATUS,
+            o.TOTAL_AMOUNT,
+            o.CURRENCY,
+            o.PAYMENT_METHOD,
+            TO_CHAR(o.ORDERED_AT, 'YYYY-MM-DD HH24:MI:SS') as ORDERED_AT,
+            TO_CHAR(o.SHIPPED_AT, 'YYYY-MM-DD HH24:MI:SS') as SHIPPED_AT,
+            TO_CHAR(o.DELIVERED_AT, 'YYYY-MM-DD HH24:MI:SS') as DELIVERED_AT,
+            COUNT(oi.ORDER_ITEM_ID) as ITEM_COUNT,
+            COUNT(DISTINCT oi.PRODUCT_ID) as UNIQUE_PRODUCTS,
+            LISTAGG(p.PRODUCT_NAME, ', ') WITHIN GROUP (ORDER BY p.PRODUCT_NAME) as PRODUCT_NAMES
+        FROM ORDERS o,
+             ORDER_ITEMS oi,
+             PRODUCTS p
+        WHERE o.ORDER_ID = oi.ORDER_ID(+)
+        AND oi.PRODUCT_ID = p.PRODUCT_ID(+)
+        AND o.USER_ID = #{userId}
+        GROUP BY o.ORDER_ID, o.ORDER_NUMBER, o.ORDER_STATUS, o.TOTAL_AMOUNT, 
+                 o.CURRENCY, o.PAYMENT_METHOD, o.ORDERED_AT, o.SHIPPED_AT, o.DELIVERED_AT
+        <choose>
+            <when test="limit != null and limit != ''">
+                ORDER BY o.ORDERED_AT DESC
+                FETCH FIRST #{limit} ROWS ONLY
+            </when>
+            <otherwise>
+                ORDER BY o.ORDERED_AT DESC
+            </otherwise>
+        </choose>
+    </select>
+
+    <!-- 사용자 가입 추이 분석 -->
+    <select id="selectUserRegistrationTrend" parameterType="map" resultType="map">
+        <choose>
+            <when test="groupBy == 'DAY'">
+                SELECT 
+                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD') as PERIOD,
+                    COUNT(*) as REGISTRATION_COUNT,
+                    COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD')) as GROWTH,
+                    ROUND(
+                        CASE 
+                            WHEN LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD')) = 0 THEN 0
+                            ELSE ((COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD'))) * 100.0 / 
+                                  LAG(COUNT(*), 1, 1) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD')))
+                        END, 2
+                    ) as GROWTH_RATE,
+                    SUM(COUNT(*)) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD')) as CUMULATIVE_COUNT
+                FROM USERS
+                WHERE 1=1
+                <if test="startDate != null and startDate != ''">
+                    AND CREATED_AT >= TO_DATE(#{startDate}, 'YYYY-MM-DD')
+                </if>
+                <if test="endDate != null and endDate != ''">
+                    <![CDATA[ AND CREATED_AT <= TO_DATE(#{endDate}, 'YYYY-MM-DD') + 1 ]]>
+                </if>
+                GROUP BY TO_CHAR(CREATED_AT, 'YYYY-MM-DD')
+                ORDER BY PERIOD
+            </when>
+            <when test="groupBy == 'WEEK'">
+                SELECT 
+                    TO_CHAR(CREATED_AT, 'YYYY-IW') as PERIOD,
+                    COUNT(*) as REGISTRATION_COUNT,
+                    COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-IW')) as GROWTH,
+                    ROUND(
+                        CASE 
+                            WHEN LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-IW')) = 0 THEN 0
+                            ELSE ((COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-IW'))) * 100.0 / 
+                                  LAG(COUNT(*), 1, 1) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-IW')))
+                        END, 2
+                    ) as GROWTH_RATE,
+                    SUM(COUNT(*)) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-IW')) as CUMULATIVE_COUNT
+                FROM USERS
+                WHERE 1=1
+                <if test="startDate != null and startDate != ''">
+                    AND CREATED_AT >= TO_DATE(#{startDate}, 'YYYY-MM-DD')
+                </if>
+                <if test="endDate != null and endDate != ''">
+                    <![CDATA[ AND CREATED_AT <= TO_DATE(#{endDate}, 'YYYY-MM-DD') + 1 ]]>
+                </if>
+                GROUP BY TO_CHAR(CREATED_AT, 'YYYY-IW')
+                ORDER BY PERIOD
+            </when>
+            <otherwise>
+                SELECT 
+                    TO_CHAR(CREATED_AT, 'YYYY-MM') as PERIOD,
+                    COUNT(*) as REGISTRATION_COUNT,
+                    COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM')) as GROWTH,
+                    ROUND(
+                        CASE 
+                            WHEN LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM')) = 0 THEN 0
+                            ELSE ((COUNT(*) - LAG(COUNT(*), 1, 0) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM'))) * 100.0 / 
+                                  LAG(COUNT(*), 1, 1) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM')))
+                        END, 2
+                    ) as GROWTH_RATE,
+                    SUM(COUNT(*)) OVER (ORDER BY TO_CHAR(CREATED_AT, 'YYYY-MM')) as CUMULATIVE_COUNT
+                FROM USERS
+                WHERE 1=1
+                <if test="startDate != null and startDate != ''">
+                    AND CREATED_AT >= TO_DATE(#{startDate}, 'YYYY-MM-DD')
+                </if>
+                <if test="endDate != null and endDate != ''">
+                    <![CDATA[ AND CREATED_AT <= TO_DATE(#{endDate}, 'YYYY-MM-DD') + 1 ]]>
+                </if>
+                GROUP BY TO_CHAR(CREATED_AT, 'YYYY-MM')
+                ORDER BY PERIOD
+            </otherwise>
+        </choose>
+    </select>
+
+    <!-- 사용자 정보 업데이트 -->
+    <update id="updateUserInfo" parameterType="amzn.bo.dto.UserDto">
+        UPDATE USERS 
+        SET 
+            <if test="firstName != null and firstName != ''">
+                FIRST_NAME = #{firstName},
+            </if>
+            <if test="lastName != null and lastName != ''">
+                LAST_NAME = #{lastName},
+            </if>
+            <if test="email != null and email != ''">
+                EMAIL = #{email},
+            </if>
+            <if test="phone != null and phone != ''">
+                PHONE = #{phone},
+            </if>
+            UPDATED_AT = SYSDATE
+        WHERE USER_ID = #{userId}
+    </update>
+
+    <!-- 사용자 삭제 (소프트 삭제) -->
+    <update id="deleteUser" parameterType="long">
+        UPDATE USERS 
+        SET STATUS = 'DELETED', 
+            UPDATED_AT = SYSDATE
+        WHERE USER_ID = #{userId}
+    </update>
+
+    <!-- 사용자 등급별 통계 -->
+    <select id="selectUserGradeStatistics" resultType="map">
+        SELECT 
+            user_grade,
+            COUNT(*) as USER_COUNT,
+            SUM(total_spent) as TOTAL_REVENUE,
+            ROUND(AVG(total_spent), 2) as AVG_REVENUE_PER_USER,
+            SUM(order_count) as TOTAL_ORDERS,
+            ROUND(AVG(order_count), 2) as AVG_ORDERS_PER_USER,
+            ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as USER_PERCENTAGE,
+            ROUND(SUM(total_spent) * 100.0 / SUM(SUM(total_spent)) OVER(), 2) as REVENUE_PERCENTAGE
+        FROM (
+            SELECT 
+                CASE 
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                    WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                    ELSE 'NEW'
+                END as user_grade,
+                NVL(order_stats.TOTAL_SPENT, 0) as total_spent,
+                NVL(order_stats.ORDER_COUNT, 0) as order_count
+            FROM USERS u,
+                 (SELECT 
+                    o.USER_ID,
+                    COUNT(*) as ORDER_COUNT,
+                    SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT
+                  FROM ORDERS o
+                  WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                  GROUP BY o.USER_ID) order_stats
+            WHERE u.USER_ID = order_stats.USER_ID(+)
+        )
+        GROUP BY user_grade
+        ORDER BY 
+            CASE user_grade 
+                WHEN 'VIP' THEN 1 
+                WHEN 'PREMIUM' THEN 2 
+                WHEN 'REGULAR' THEN 3 
+                WHEN 'NEW' THEN 4 
+            END
+    </select>
+
+    <!-- 사용자 계층 분석 및 통계 (ROLLUP, CUBE 활용) -->
+    <select id="selectUserHierarchyStats" parameterType="map" resultType="amzn.bo.dto.UserHierarchyStatsDto">
+        SELECT 
+            user_grade,
+            status,
+            country,
+            COUNT(*) as USER_COUNT,
+            SUM(total_spent) as TOTAL_REVENUE,
+            ROUND(AVG(total_spent), 2) as AVG_REVENUE_PER_USER,
+            SUM(order_count) as TOTAL_ORDERS,
+            ROUND(AVG(order_count), 2) as AVG_ORDERS_PER_USER,
+            GROUPING(user_grade) as GRADE_GROUPING,
+            GROUPING(status) as STATUS_GROUPING,
+            GROUPING(country) as COUNTRY_GROUPING
+        FROM (
+            SELECT 
+                u.STATUS as status,
+                NVL(ua.COUNTRY, 'UNKNOWN') as country,
+                CASE 
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                    WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                    ELSE 'NEW'
+                END as user_grade,
+                NVL(order_stats.TOTAL_SPENT, 0) as total_spent,
+                NVL(order_stats.ORDER_COUNT, 0) as order_count
+            FROM USERS u,
+                 USER_ADDRESSES ua,
+                 (SELECT 
+                    o.USER_ID,
+                    COUNT(*) as ORDER_COUNT,
+                    SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT
+                  FROM ORDERS o
+                  WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                  GROUP BY o.USER_ID) order_stats
+            WHERE u.USER_ID = ua.USER_ID(+)
+            AND ua.ADDRESS_TYPE(+) = 'SHIPPING'
+            AND ua.IS_DEFAULT(+) = 'Y'
+            AND u.USER_ID = order_stats.USER_ID(+)
+        )
+        GROUP BY CUBE(user_grade, status, country)
+        ORDER BY 
+            GROUPING(user_grade), 
+            GROUPING(status), 
+            GROUPING(country),
+            USER_COUNT DESC
+    </select>
+
+    <!-- 사용자 행동 패턴 분석 (윈도우 함수 활용) -->
+    <select id="selectUserBehaviorPattern" parameterType="map" resultType="amzn.bo.dto.UserBehaviorPatternDto">
+        SELECT 
+            u.USER_ID,
+            u.EMAIL,
+            u.FIRST_NAME || ' ' || u.LAST_NAME as FULL_NAME,
+            NVL(order_stats.TOTAL_ORDERS, 0) as TOTAL_ORDERS,
+            NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+            NVL(order_stats.AVG_ORDER_VALUE, 0) as AVG_ORDER_VALUE,
+            NVL(order_stats.DAYS_SINCE_LAST_ORDER, 999) as DAYS_SINCE_LAST_ORDER,
+            0 as PURCHASE_FREQUENCY,
+            'UNKNOWN' as FAVORITE_CATEGORY,
+            'UNKNOWN' as PREFERRED_PAYMENT_METHOD,
+            'UNKNOWN' as SEASONAL_PATTERN,
+            50 as LOYALTY_SCORE,
+            30 as CHURN_PROBABILITY,
+            TO_DATE('2025-10-25 00:00:00', 'YYYY-MM-DD HH24:MI:SS') as NEXT_PURCHASE_PREDICTION,
+            'REGULAR' as CUSTOMER_SEGMENT
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                COUNT(*) as TOTAL_ORDERS,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT,
+                ROUND(AVG(o.TOTAL_AMOUNT), 2) as AVG_ORDER_VALUE,
+                TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) as DAYS_SINCE_LAST_ORDER
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY o.USER_ID) order_stats
+        WHERE u.USER_ID = order_stats.USER_ID(+)
+        ORDER BY TOTAL_SPENT DESC
+    </select>
+
+    <!-- 지역별/연령대별 통계 (ROLLUP 활용) -->
+    <select id="selectUserDemographicStats" resultType="amzn.bo.dto.UserDemographicStatsDto">
+        SELECT 
+            country,
+            age_group,
+            COUNT(*) as USER_COUNT,
+            SUM(total_spent) as TOTAL_REVENUE,
+            ROUND(AVG(total_spent), 2) as AVG_REVENUE_PER_USER,
+            ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as USER_PERCENTAGE,
+            ROUND(SUM(total_spent) * 100.0 / SUM(SUM(total_spent)) OVER(), 2) as REVENUE_PERCENTAGE,
+            GROUPING(country) as COUNTRY_GROUPING,
+            GROUPING(age_group) as AGE_GROUPING
+        FROM (
+            SELECT 
+                NVL(ua.COUNTRY, 'UNKNOWN') as country,
+                <![CDATA[
+                CASE 
+                    WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, u.DATE_OF_BIRTH) / 12) < 25 THEN 'UNDER_25'
+                    WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, u.DATE_OF_BIRTH) / 12) BETWEEN 25 AND 34 THEN '25_34'
+                    ELSE 'OVER_35'
+                END as age_group,
+                ]]>
+                NVL(order_stats.TOTAL_SPENT, 0) as total_spent
+            FROM USERS u,
+                 USER_ADDRESSES ua,
+                 (SELECT USER_ID, SUM(TOTAL_AMOUNT) as TOTAL_SPENT 
+                  FROM ORDERS 
+                  WHERE ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                  GROUP BY USER_ID) order_stats
+            WHERE u.USER_ID = ua.USER_ID(+)
+            AND ua.ADDRESS_TYPE(+) = 'SHIPPING'
+            AND ua.IS_DEFAULT(+) = 'Y'
+            AND u.USER_ID = order_stats.USER_ID(+)
+        )
+        GROUP BY ROLLUP(country, age_group)
+        ORDER BY GROUPING(country), GROUPING(age_group), USER_COUNT DESC
+    </select>
+
+    <!-- 사용자 생명주기 분석 -->
+    <select id="selectUserLifecycleAnalysis" parameterType="map" resultType="amzn.bo.dto.UserLifecycleDto">
+        SELECT 
+            u.USER_ID,
+            u.EMAIL,
+            u.CREATED_AT as REGISTRATION_DATE,
+            order_stats.FIRST_ORDER_DATE,
+            order_stats.LAST_ORDER_DATE,
+            NVL(TRUNC(order_stats.FIRST_ORDER_DATE) - TRUNC(u.CREATED_AT), 999) as DAYS_TO_FIRST_ORDER,
+            NVL(TRUNC(TO_DATE('2025-08-27', 'YYYY-MM-DD')) - TRUNC(order_stats.LAST_ORDER_DATE), 999) as DAYS_SINCE_LAST_ORDER,
+            NVL(order_stats.TOTAL_ORDERS, 0) as TOTAL_ORDERS,
+            NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+            'ACTIVE' as LIFECYCLE_STAGE,
+            50 as ACTIVITY_SCORE,
+            TO_DATE('2025-09-26 00:00:00', 'YYYY-MM-DD HH24:MI:SS') as PREDICTED_NEXT_ORDER,
+            80 as RETENTION_PROBABILITY
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                MIN(o.ORDERED_AT) as FIRST_ORDER_DATE,
+                MAX(o.ORDERED_AT) as LAST_ORDER_DATE,
+                COUNT(*) as TOTAL_ORDERS,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              GROUP BY o.USER_ID) order_stats
+        WHERE u.USER_ID = order_stats.USER_ID(+)
+        ORDER BY ACTIVITY_SCORE DESC
+    </select>
+
+    <!-- 휴면 사용자 관리 및 재활성화 분석 -->
+    <select id="selectDormantUserAnalysis" parameterType="map" resultType="amzn.bo.dto.DormantUserDto">
+        SELECT 
+            u.USER_ID,
+            u.EMAIL,
+            u.FIRST_NAME || ' ' || u.LAST_NAME as FULL_NAME,
+            u.CREATED_AT as REGISTRATION_DATE,
+            dormant_stats.LAST_ORDER_DATE,
+            dormant_stats.DAYS_DORMANT,
+            dormant_stats.TOTAL_ORDERS,
+            dormant_stats.TOTAL_SPENT,
+            dormant_stats.AVG_ORDER_VALUE,
+            dormant_stats.FAVORITE_CATEGORY,
+            dormant_stats.LAST_VIEWED_PRODUCT,
+            dormant_stats.REACTIVATION_PROBABILITY,
+            dormant_stats.RECOMMENDED_INCENTIVE,
+            RANK() OVER (ORDER BY dormant_stats.REACTIVATION_PROBABILITY DESC, dormant_stats.TOTAL_SPENT DESC) as REACTIVATION_PRIORITY
+        FROM USERS u,
+             (SELECT 
+                o.USER_ID,
+                MAX(o.ORDERED_AT) as LAST_ORDER_DATE,
+                TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) as DAYS_DORMANT,
+                COUNT(*) as TOTAL_ORDERS,
+                SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT,
+                ROUND(AVG(o.TOTAL_AMOUNT), 2) as AVG_ORDER_VALUE,
+                -- 가장 많이 구매한 카테고리
+                (SELECT c.CATEGORY_NAME 
+                 FROM (SELECT p.CATEGORY_ID, COUNT(*) as cnt
+                       FROM ORDER_ITEMS oi, PRODUCTS p
+                       WHERE oi.PRODUCT_ID = p.PRODUCT_ID
+                       AND oi.ORDER_ID IN (SELECT ORDER_ID FROM ORDERS WHERE USER_ID = o.USER_ID)
+                       GROUP BY p.CATEGORY_ID
+                       ORDER BY cnt DESC, p.CATEGORY_ID ASC
+                       FETCH FIRST 1 ROWS ONLY) top_cat, CATEGORIES c
+                 WHERE top_cat.CATEGORY_ID = c.CATEGORY_ID) as FAVORITE_CATEGORY,
+                -- 마지막으로 본 상품
+                (SELECT p.PRODUCT_NAME
+                 FROM PRODUCT_VIEWS pv, PRODUCTS p
+                 WHERE pv.PRODUCT_ID = p.PRODUCT_ID
+                 AND pv.USER_ID = o.USER_ID
+                 AND pv.VIEWED_AT = (SELECT MAX(VIEWED_AT) FROM PRODUCT_VIEWS WHERE USER_ID = o.USER_ID)) as LAST_VIEWED_PRODUCT,
+                -- 재활성화 확률 계산
+                <![CDATA[
+                CASE 
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) BETWEEN 90 AND 180 AND COUNT(*) >= 3 THEN 75
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) BETWEEN 90 AND 180 AND COUNT(*) >= 1 THEN 60
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) BETWEEN 181 AND 365 AND SUM(o.TOTAL_AMOUNT) >= 500 THEN 45
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) BETWEEN 181 AND 365 THEN 30
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) > 365 AND SUM(o.TOTAL_AMOUNT) >= 1000 THEN 25
+                    ELSE 15
+                END as REACTIVATION_PROBABILITY,
+                ]]>
+                -- 추천 인센티브
+                <![CDATA[
+                CASE 
+                    WHEN ROUND(AVG(o.TOTAL_AMOUNT), 2) >= 200 THEN 'PREMIUM_DISCOUNT'
+                    WHEN COUNT(*) >= 5 THEN 'LOYALTY_BONUS'
+                    WHEN TRUNC(SYSDATE) - TRUNC(MAX(o.ORDERED_AT)) > 365 THEN 'WELCOME_BACK_OFFER'
+                    ELSE 'STANDARD_COUPON'
+                END as RECOMMENDED_INCENTIVE
+                ]]>
+              FROM ORDERS o
+              WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+              <![CDATA[ AND TRUNC(SYSDATE) - TRUNC(o.ORDERED_AT) >= #{minDormantDays} ]]>
+              GROUP BY o.USER_ID
+              <![CDATA[ HAVING MAX(o.ORDERED_AT) < SYSDATE - #{minDormantDays}) dormant_stats, ]]>
+             CATEGORIES c
+        WHERE u.USER_ID = dormant_stats.USER_ID
+        AND dormant_stats.FAVORITE_CATEGORY = c.CATEGORY_ID(+)
+        <if test="minReactivationProbability != null">
+            <![CDATA[ AND dormant_stats.REACTIVATION_PROBABILITY >= #{minReactivationProbability} ]]>
+        </if>
+        ORDER BY REACTIVATION_PRIORITY
+    </select>
+
+    <!-- 사용자 상태 변경 -->
+    <update id="updateUserStatus" parameterType="map">
+        UPDATE USERS 
+        SET STATUS = #{status}, 
+            UPDATED_AT = SYSDATE
+        WHERE USER_ID = #{userId}
+    </update>
+
+    <!-- 사용자 등급 업데이트 (배치용) -->
+    <update id="updateUserGrades">
+        MERGE INTO USER_GRADES ug
+        USING (
+            SELECT 
+                u.USER_ID,
+                CASE 
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 10000 THEN 'VIP'
+                    WHEN NVL(order_stats.TOTAL_SPENT, 0) >= 1000 THEN 'PREMIUM'
+                    WHEN NVL(order_stats.ORDER_COUNT, 0) > 0 THEN 'REGULAR'
+                    ELSE 'NEW'
+                END as NEW_GRADE,
+                NVL(order_stats.TOTAL_SPENT, 0) as TOTAL_SPENT,
+                NVL(order_stats.ORDER_COUNT, 0) as ORDER_COUNT
+            FROM USERS u,
+                 (SELECT 
+                    o.USER_ID,
+                    COUNT(*) as ORDER_COUNT,
+                    SUM(o.TOTAL_AMOUNT) as TOTAL_SPENT
+                  FROM ORDERS o
+                  WHERE o.ORDER_STATUS NOT IN ('CANCELLED', 'REFUNDED')
+                  GROUP BY o.USER_ID) order_stats
+            WHERE u.USER_ID = order_stats.USER_ID(+)
+        ) new_grades
+        ON (ug.USER_ID = new_grades.USER_ID)
+        WHEN MATCHED THEN
+            UPDATE SET 
+                ug.USER_GRADE = new_grades.NEW_GRADE,
+                ug.TOTAL_SPENT = new_grades.TOTAL_SPENT,
+                ug.ORDER_COUNT = new_grades.ORDER_COUNT,
+                ug.UPDATED_AT = SYSDATE
+        WHEN NOT MATCHED THEN
+            INSERT (USER_ID, USER_GRADE, TOTAL_SPENT, ORDER_COUNT, CREATED_AT, UPDATED_AT)
+            VALUES (new_grades.USER_ID, new_grades.NEW_GRADE, new_grades.TOTAL_SPENT, 
+                   new_grades.ORDER_COUNT, SYSDATE, SYSDATE)
+    </update>
+
+</mapper>
