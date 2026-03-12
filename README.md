@@ -1,0 +1,607 @@
+# Application SQL Transform Agent
+
+> Part of **OMA (Oracle Modernization Agent)** — an AI-powered Oracle to PostgreSQL modernization toolkit.
+
+> ⚠️ Sample code for educational purposes. Not for production use without review. See [Disclaimer](#disclaimer).
+
+## What is this?
+
+**Application SQL Transform Agent** is a sub-module of OMA that automatically transforms Oracle SQL to PostgreSQL in MyBatis Mapper XML files. It converts, validates, and tests hundreds to thousands of SQL statements, reducing migration time from months to days.
+
+Instead of DBAs and developers manually converting and testing SQL, AI Agents automatically handle the process and complete validation against real databases.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+**Application SQL Transform Agent**는 OMA의 서브 모듈로, MyBatis Mapper XML 내 Oracle SQL을 PostgreSQL로 자동 변환합니다.
+수백~수천 개의 SQL을 AI가 자동으로 변환, 검증, 테스트하여 마이그레이션 기간을 수개월에서 수일로 단축합니다.
+
+DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI Agent가 자동으로 처리하고 실제 DB에서 검증까지 완료합니다.
+
+</details>
+
+## Input → Output
+
+```
+┌─────────────────────┐         ┌──────────────────────────────┐         ┌─────────────────────────┐
+│                     │         │                              │         │                         │
+│   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
+│                     │  ────▶  │                              │  ────▶  │                         │
+│  MyBatis Mapper XML │         │  Orchestrator (Control Hub)  │         │  PostgreSQL Mapper XML  │
+│  (Oracle SQL)       │         │   ├─ Single SQL Processing   │         │  (Validated)            │
+│                     │         │   └─ Pipeline Control        │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  ReviewManager (Review Hub)  │         │                         │
+│                     │         │   └─ Diff Tools (compare)    │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  6 Pipeline Agents           │         │                         │
+│                     │         │   ├─ Source Analyzer         │         │                         │
+│                     │         │   ├─ Transform Agent         │         │                         │
+│                     │         │   ├─ Review Agent            │         │                         │
+│                     │         │   ├─ Validate Agent          │         │                         │
+│                     │         │   ├─ Test Agent              │         │                         │
+│                     │         │   └─ Strategy Refine         │         │                         │
+└─────────────────────┘         └──────────────────────────────┘         └─────────────────────────┘
+
+   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (PostgreSQL)
+   • OrderMapper.xml           • Source Analyzer            ✅ Rule Compliance Verified
+   • ProductMapper.xml         • Transform Agent            ✅ Functional Equivalence Verified
+   • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Passed
+                               • Validate Agent             ✅ Fix History (3-way diff)
+                               • Test Agent                 ✅ Learned Conversion Strategy
+                               • Strategy Refine
+
+                               Orchestrator:
+                               • Pipeline Control
+                               • Single SQL Processing
+
+                               ReviewManager:
+                               • Diff Tools (compare/approve)
+                               • Conversion Review
+
+```
+See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크플로우) for detailed workflow.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+```
+┌─────────────────────┐         ┌──────────────────────────────┐         ┌─────────────────────────┐
+│                     │         │                              │         │                         │
+│   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
+│                     │  ────▶  │                              │  ────▶  │                         │
+│  MyBatis Mapper XML │         │  Orchestrator (Control)      │         │  PostgreSQL Mapper XML  │
+│  (Oracle SQL)       │         │   ├─ Single SQL Process      │         │  (Validated)            │
+│                     │         │   └─ Pipeline Control        │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  ReviewManager (Review)      │         │                         │
+│                     │         │   └─ Diff Tools              │         │                         │
+│                     │         │                              │         │                         │
+│                     │         │  6 Pipeline Agents           │         │                         │
+│                     │         │   ├─ Source Analyzer         │         │                         │
+│                     │         │   ├─ Transform Agent         │         │                         │
+│                     │         │   ├─ Review Agent            │         │                         │
+│                     │         │   ├─ Validate Agent          │         │                         │
+│                     │         │   ├─ Test Agent              │         │                         │
+│                     │         │   └─ Strategy Refine         │         │                         │
+└─────────────────────┘         └──────────────────────────────┘         └─────────────────────────┘
+
+   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (PostgreSQL)
+   • OrderMapper.xml           • Source Analyzer            ✅ Rule Compliance Check
+   • ProductMapper.xml         • Transform Agent            ✅ Functional Equivalence
+   • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Pass
+                               • Validate Agent             ✅ Fix History (3-way diff)
+                               • Test Agent                 ✅ Learned Strategy
+                               • Strategy Refine
+
+                               Orchestrator:
+                               • Pipeline Control
+                               • Single SQL Processing
+
+                               ReviewManager:
+                               • Diff Tools (compare)
+                               • Conversion Review
+
+```
+
+</details>
+
+## Why OMA?
+
+| Manual Migration | With OMA |
+|-----------------|----------|
+| DBAs manually fix SQL one by one | AI automatically converts |
+| Takes months | Completes in days |
+| Manual verification, risk of omissions | 4-stage automated quality assurance |
+| Repetitive work, no learning | Automatic learning from failures |
+| Post-migration feedback | "Let's use OMA for the next project" |
+| Cost | 80% API cost reduction (Prompt Caching) |
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+| 기존 수작업 마이그레이션 | OMA 적용 후 |
+|------------------------|------------|
+| DBA가 SQL 하나씩 수정 | AI가 자동 변환 |
+| 수개월 소요 | 수일 내 완료 |
+| 수작업 검증, 누락 위험 | 4단계 자동 품질 보증 |
+| 반복 작업, 학습 없음 | 실패 패턴 자동 학습 |
+| 마이그레이션 후 반응 | "다음 프로젝트도 OMA로" |
+| 비용 | API 비용 80% 절감 (Prompt Caching) |
+
+</details>
+
+## Try It — Example
+
+Want to try OMA quickly? The `example/` folder has a sample Spring Boot app with 3 Oracle MyBatis mapper XMLs:
+
+```bash
+cd example && ./setup.sh && ./run.sh
+```
+
+See [example/README.md](example/README.md) for details.
+
+## How It Works
+
+### Step 1 — Setup (~5 minutes)
+
+```bash
+# 1. Install uv (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Install dependencies
+uv sync
+
+# 3. AWS credentials
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_DEFAULT_REGION="us-east-1"
+
+# 4. Configure environment
+#    Optional: export OMA_LITE_MODEL_ID="us.anthropic.claude-haiku-4-5-20250929-v1:0"
+#    Optional: export OMA_OUTPUT_DIR="/path/to/output"
+python3 src/run_setup.py
+```
+
+### Step 2 — Run Pipeline (Automated)
+
+Control the entire pipeline with conversational Orchestrator:
+
+```bash
+python3 src/run_orchestrator.py
+```
+
+```
+⚛️  > Run the entire pipeline
+
+🤖 > Checking setup...
+     ✅ Java path: /usr/lib/jvm/java-11
+     ✅ PostgreSQL connection: OK
+     
+     Step 1: Starting source analysis...
+     ✅ Scanned 11 Mappers
+     ✅ Extracted 127 SQL IDs
+     ✅ Generated conversion strategy
+     
+     Step 2: Starting SQL transformation (8 parallel workers)...
+     [  5%] [UserMapper] selectUserList - 🔄 Converting
+     [ 12%] [UserMapper] selectUserList - ✅ Done
+     ...
+     ✅ Converted 127 SQLs
+     
+     Step 3: Rule compliance review...
+     ✅ 125 PASS, 2 re-converted → PASS
+     
+     Step 4: Functional equivalence validation...
+     ✅ 127 validated
+     
+     Step 5: DB execution test...
+     ✅ 120 PASS, 7 auto-fixed → PASS
+     
+     Step 6: XML reassembly...
+     ✅ Final Mapper XML generated
+     
+     🎉 Pipeline completed!
+```
+
+<details>
+<summary><b>한글 대화 예시 보기</b></summary>
+
+```
+⚛️  > 전체 파이프라인 실행해줘
+
+� > Setup 확인 중...
+     ✅ Java 경로: /usr/lib/jvm/java-11
+     ✅ PostgreSQL 접속: 정상
+     
+     Step 1: 소스 분석 시작...
+     ✅ 11개 Mapper 스캔 완료
+     ✅ 127개 SQL ID 추출
+     ✅ 변환 전략 생성 완료
+     
+     Step 2: SQL 변환 시작 (병렬 8개)...
+     [  5%] [UserMapper] selectUserList - 🔄 변환중
+     [ 12%] [UserMapper] selectUserList - ✅ 완료
+     ...
+     ✅ 127개 SQL 변환 완료
+     
+     Step 3: 규칙 준수 리뷰...
+     ✅ 125개 PASS, 2개 재변환 → PASS
+     
+     Step 4: 기능 동등성 검증...
+     ✅ 127개 검증 완료
+     
+     Step 5: DB 실행 테스트...
+     ✅ 120개 PASS, 7개 자동 수정 → PASS
+     
+     Step 6: XML 재조립...
+     ✅ 최종 Mapper XML 생성 완료
+     
+     🎉 전체 파이프라인 완료!
+```
+
+</details>
+
+### Step 3 — Generated Assets
+
+| Asset | Description | Location |
+|-------|-------------|----------|
+| **PostgreSQL SQL** | Converted SQL (127 statements) | `output/transform/` |
+| **Conversion Strategy** | Project-specific patterns | `output/strategy/transform_strategy.md` |
+| **Final Mapper XML** | Deployable XML files | `output/merge/` |
+| **Fix History** | 3-way diff (ORIGINAL/BEFORE/AFTER) | `output/logs/fix_history/` |
+| **Conversion Report** | Overall conversion summary | `output/reports/` |
+| **Execution Logs** | Detailed logs per stage | `output/logs/` |
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+| 생성 에셋 | 설명 | 위치 |
+|----------|------|------|
+| **PostgreSQL SQL** | 변환된 SQL (127개) | `output/transform/` |
+| **변환 전략** | 프로젝트 특화 패턴 | `output/strategy/transform_strategy.md` |
+| **최종 Mapper XML** | 배포 가능한 XML | `output/merge/` |
+| **수정 이력** | 3단 비교 (ORIGINAL/BEFORE/AFTER) | `output/logs/fix_history/` |
+| **변환 리포트** | 전체 변환 요약 | `output/reports/` |
+| **실행 로그** | 단계별 상세 로그 | `output/logs/` |
+
+</details>
+
+### Step 4 — Review & Approval (Optional)
+
+Review and approve conversion results with Diff Tools:
+
+```
+⚛️  > Compare conversion for selectUserList in UserMapper.xml
+
+🤖 > [Displays Oracle original vs PostgreSQL converted side-by-side]
+
+⚛️  > Approve it
+
+🤖 > ✅ Approved. Review note recorded.
+```
+
+<details>
+<summary><b>한글 대화 예시 보기</b></summary>
+
+```
+⚛️  > UserMapper.xml의 selectUserList 변환 비교해줘
+
+🤖 > [Oracle 원본 vs PostgreSQL 변환본 표시]
+
+⚛️  > 승인해줘
+
+🤖 > ✅ 승인 완료. 리뷰 노트 기록됨.
+```
+
+</details>
+
+## Pipeline Architecture
+
+```
+Setup → Analyze → Transform → Review (multi-perspective) → Validate → Test → Merge
+                                ↓ FAIL (specific feedback)
+                          Re-convert (max 3 rounds)
+```
+
+| Stage | Agent | Role | Output |
+|-------|-------|------|--------|
+| **Analyze** | Source Analyzer | Scan Mappers, extract SQL, analyze patterns | Conversion strategy |
+| **Transform** | Transform Agent | Oracle → PostgreSQL conversion | Converted SQL |
+| **Review** | Review Agent | Multi-perspective review: Syntax + Equivalence (FAIL → re-convert with specific feedback) | PASS/FAIL + feedback |
+| **Validate** | Validate Agent | Functional equivalence verification | Validated |
+| **Test** | Test Agent | Phase 0: EXPLAIN-based DML validation (no DB execution). Phase 1: DB execution test, error fixing | Test passed |
+| **Merge** | - | XML reassembly | Final Mapper |
+
+See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크플로우) for detailed workflow.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+| 단계 | Agent | 역할 | 출력 |
+|-----|-------|------|------|
+| **Analyze** | Source Analyzer | Mapper 스캔, SQL 추출, 패턴 분석 | 변환 전략 |
+| **Transform** | Transform Agent | Oracle → PostgreSQL 변환 | 변환된 SQL |
+| **Review** | Review Agent | 다관점 리뷰: Syntax + Equivalence (FAIL → 구체적 피드백과 재변환) | PASS/FAIL + 피드백 |
+| **Validate** | Validate Agent | 기능 동등성 검증 | 검증 완료 |
+| **Test** | Test Agent | Phase 0: EXPLAIN 기반 DML 검증 (DB 실행 없음). Phase 1: DB 실행 테스트, 에러 수정 | 테스트 통과 |
+| **Merge** | - | XML 재조립 | 최종 Mapper |
+
+</details>
+
+## Key Features
+
+### 1. Conversational Pipeline Control
+```
+⚛️  > Run the entire pipeline
+⚛️  > Check current status
+⚛️  > Re-run transform stage
+```
+
+### 2. SQL Comparison & Review (Diff Tools)
+```
+⚛️  > Compare conversion for selectUserList in UserMapper.xml
+⚛️  > Approve it
+⚛️  > Generate full conversion report
+```
+
+### 3. Single SQL Processing
+```
+⚛️  > Re-convert selectUserList in UserMapper.xml
+⚛️  > Re-validate selectOrderDetail
+⚛️  > Re-test selectProduct
+```
+
+### 4. Automated Quality Assurance
+- **Review**: Multi-perspective review (Syntax + Equivalence) → Auto re-convert with specific feedback on FAIL (max 3 rounds)
+- **Validate**: Functional equivalence verification → Auto fix on FAIL
+- **Test**: DB execution test → Error analysis and auto fix on FAIL (skipped if PostgreSQL is not configured)
+- **Learning**: Automatically reflect fix patterns into strategy
+
+### 5. Sample Transform
+```
+⚛️  > 샘플 변환 5개
+```
+Run a representative subset before full pipeline — picks one per SQL type (SELECT/INSERT/UPDATE/DELETE), fills remaining slots by mapper round-robin. Verify strategy quality without full cost.
+
+### 6. Rich Progress UI & Colored Diff
+- Real-time progress bar per pipeline step (Rich library)
+- Structured pipeline status table
+- Git-like colored diff for SQL comparison (red/green)
+- All fix history in 3-way diff format (ORIGINAL/BEFORE/AFTER)
+
+See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+### 1. 대화형 파이프라인 제어
+```
+⚛️  > 전체 파이프라인 실행해줘
+⚛️  > 현재 상태 확인해줘
+⚛️  > 변환 단계 재수행해줘
+```
+
+### 2. SQL 비교 및 검토 (Diff Tools)
+```
+⚛️  > UserMapper.xml의 selectUserList 변환 비교해줘
+⚛️  > 승인해줘
+⚛️  > 전체 변환 리포트 만들어줘
+```
+
+### 3. 단일 SQL 처리
+```
+⚛️  > UserMapper.xml의 selectUserList 재변환해줘
+⚛️  > selectOrderDetail 재검증해줘
+⚛️  > selectProduct 재테스트해줘
+```
+
+### 4. 자동 품질 보증
+- **Review**: 다관점 리뷰 (Syntax + Equivalence) → FAIL 시 구체적 피드백과 자동 재변환 (최대 3라운드)
+- **Validate**: 기능 동등성 검증 → FAIL 시 자동 수정
+- **Test**: DB 실행 테스트 → FAIL 시 에러 분석 및 자동 수정 (PostgreSQL 미설정 시 skip)
+- **Learning**: 수정 패턴을 전략에 자동 반영
+
+### 5. 샘플 변환
+```
+⚛️  > 샘플 변환 5개
+```
+전체 실행 전에 대표 SQL 몇 개만 먼저 변환 — SQL type별 1개 보장 + mapper별 균등 분배. 전략 품질을 빠르게 검증할 수 있습니다.
+
+### 6. Rich 진행률 UI & 컬러 Diff
+- 파이프라인 단계별 실시간 progress bar (Rich 라이브러리)
+- 구조화된 파이프라인 상태 테이블
+- Git-like 컬러 diff로 SQL 비교 (빨강/초록)
+- 모든 수정 이력을 3단 비교(ORIGINAL/BEFORE/AFTER)로 기록
+
+</details>
+
+## Cost
+
+| Item | Cost |
+|------|------|
+| **SQL Conversion** | ~$0.01 per SQL (with Prompt Caching) |
+| **100 SQL Project** | ~$1-2 (full pipeline) |
+| **Infrastructure** | AWS Bedrock usage-based (serverless) |
+
+80% API cost reduction with Prompt Caching (90%+ cache hit rate)
+
+> **Warning: Model Selection**
+> OMA relies on **Prompt Caching** (3-Block strategy) for cost optimization.
+> Only use models that support Bedrock Prompt Caching (e.g. Claude Sonnet 4.5).
+> Models without caching support (e.g. Claude Sonnet 4.6, Opus 4.6) will result in **5-10x higher API costs**.
+> Check [AWS Bedrock Prompt Caching docs](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html) before changing `OMA_MODEL_ID`.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+| 항목 | 비용 |
+|------|------|
+| **SQL 변환** | ~$0.01 per SQL (Prompt Caching 적용) |
+| **100개 SQL 프로젝트** | ~$1-2 (전체 파이프라인) |
+| **인프라** | AWS Bedrock 사용량 기반 (서버리스) |
+
+Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
+
+> **경고: 모델 선택 주의**
+> OMA는 **Prompt Caching** (3-Block 전략)에 의존하여 비용을 최적화합니다.
+> 반드시 Bedrock Prompt Caching을 지원하는 모델(예: Claude Sonnet 4.5)을 사용하세요.
+> 캐싱 미지원 모델(예: Claude Sonnet 4.6, Opus 4.6)을 사용하면 **API 비용이 5~10배 증가**합니다.
+> `OMA_MODEL_ID` 변경 전 [AWS Bedrock Prompt Caching 문서](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)를 확인하세요.
+
+</details>
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
+| **Runtime** | Python 3.11 · uv (package manager) · ThreadPoolExecutor (8 parallel) |
+| **DB** | SQLite (state management) · PostgreSQL (target DB) |
+| **UI** | Rich (progress bar · tables · colored diff) |
+| **External** | AWS Bedrock · Java MyBatis |
+| **Dependencies** | boto3 · defusedxml · rich · sqlalchemy |
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+| 레이어 | 기술 |
+|--------|------|
+| **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
+| **Runtime** | Python 3.11 · uv (패키지 관리) · ThreadPoolExecutor (병렬 8) |
+| **DB** | SQLite (상태 관리) · PostgreSQL (타겟 DB) |
+| **UI** | Rich (progress bar · 테이블 · 컬러 diff) |
+| **외부 연동** | AWS Bedrock · Java MyBatis |
+| **Dependencies** | boto3 · defusedxml · rich · sqlalchemy |
+
+</details>
+
+## Project Structure
+
+```
+oma/
+├── src/
+│   ├── agents/                   # 8 Expert Agents
+│   │   ├── orchestrator/         # Pipeline control (14 tools)
+│   │   ├── review_manager/       # Diff tools + conversion review
+│   │   ├── source_analyzer/      # Source analysis + strategy generation
+│   │   ├── sql_transform/        # SQL transformation + sample transform
+│   │   ├── sql_review/           # Multi-perspective review (Syntax + Equivalence)
+│   │   ├── sql_validate/         # Functional equivalence validation
+│   │   ├── sql_test/             # DB execution test
+│   │   └── strategy_refine/      # Strategy enhancement/compression
+│   ├── mcp_server/               # MCP orchestration (18 tools)
+│   ├── skills/                   # Skill definitions (symlinked)
+│   ├── core/
+│   │   ├── state_manager.py      # Centralized state management (SQLAlchemy)
+│   │   └── display.py            # Rich UI (progress bar, tables, diff)
+│   ├── utils/project_paths.py    # Path constants, model IDs
+│   ├── reference/
+│   │   └── oracle_to_postgresql_rules.md  # General Rules
+│   └── run_*.py                  # Execution scripts
+├── output/                       # All artifacts ($OMA_OUTPUT_DIR)
+│   ├── oma_control.db            # SQLite (state management)
+│   ├── transform/                # Converted SQL
+│   ├── strategy/                 # Project-specific strategy
+│   ├── merge/                    # Final Mapper XML
+│   └── logs/fix_history/         # Fix history
+└── docs/                         # Detailed documentation
+```
+
+## Requirements
+
+- Python 3.10+ (recommended 3.11)
+- AWS credentials (Bedrock access)
+- Java 11+ (for SQL testing)
+- psql (for PostgreSQL metadata collection)
+
+## AWS Permissions
+
+OMA requires an IAM identity (user or role) with access to the following AWS services:
+
+| Service | Actions | Purpose |
+|---------|---------|---------|
+| **Amazon Bedrock** | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | LLM inference (all Agents) |
+| **SSM Parameter Store** | `ssm:PutParameter` | Save DB connection info during setup |
+| | `ssm:GetParametersByPath` (with `WithDecryption`) | Read DB connection info at runtime |
+
+### Minimum IAM Policy
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+    },
+    {
+      "Sid": "SSMParameterStore",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": "arn:aws:ssm:*:*:parameter/oma/*"
+    }
+  ]
+}
+```
+
+> **Note**: If using [cross-region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html), the Bedrock resource ARN may need adjustment (e.g. `arn:aws:bedrock:us-east-1:*:inference-profile/*`). SSM Parameter Store paths default to `/oma/source_oracle/*` and `/oma/target_postgres/*`.
+
+<details>
+<summary><b>한글 설명 보기</b></summary>
+
+OMA를 실행하려면 다음 AWS 서비스에 대한 IAM 권한이 필요합니다:
+
+| 서비스 | 권한 | 용도 |
+|--------|------|------|
+| **Amazon Bedrock** | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | LLM 추론 (모든 Agent) |
+| **SSM Parameter Store** | `ssm:PutParameter` | Setup 시 DB 접속 정보 저장 |
+| | `ssm:GetParametersByPath` (복호화 포함) | Runtime 시 DB 접속 정보 조회 |
+
+> **참고**: Cross-region inference 사용 시 Bedrock 리소스 ARN 조정이 필요할 수 있습니다. SSM 경로 기본값은 `/oma/source_oracle/*`, `/oma/target_postgres/*` 입니다.
+
+</details>
+
+## Documentation
+
+- [System Documentation](docs/SYSTEM_DOCUMENTATION.md) — Architecture, Agent details, DB schema
+- [Large-Scale Processing Guide](docs/LARGE_SCALE_GUIDE.md) — Worker tuning, cost optimization, monitoring
+- [Project Overview](PROJECT_OVERVIEW.md) — Business value and use cases
+- Agent Design Documents:
+  - [Orchestrator Agent](docs/agents/ORCHESTRATOR_DESIGN.md)
+  - [Source Analyzer Agent](docs/agents/SOURCE_ANALYZER_DESIGN.md)
+  - [Transform Agent](docs/agents/TRANSFORM_DESIGN.md)
+  - [Review Agent](docs/agents/REVIEW_DESIGN.md)
+  - [Validate Agent](docs/agents/VALIDATE_DESIGN.md)
+  - [Test Agent](docs/agents/TEST_DESIGN.md)
+- Per-Agent README: `src/agents/*/README.md`
+
+## Disclaimer
+
+This code is provided as a sample for educational and demonstration purposes only.
+
+- **NOT FOR PRODUCTION USE**: Do not deploy without additional security testing.
+- **AI-Generated Output**: SQL transformations must be reviewed before execution.
+- **No Warranty**: Provided "AS IS" without warranty of any kind.
+
+## License
+
+This project is distributed under an appropriate license. See [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions to improve the project are welcome. Refer to Agent design documents when developing new Agents.
+
+---
+
+**Last Updated**: 2026-03-13
+**Version**: 4.0
+**Status**: Production Ready
