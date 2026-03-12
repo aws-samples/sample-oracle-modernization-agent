@@ -135,7 +135,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 Want to try OMA quickly? The `example/` folder has a sample Spring Boot app with 3 Oracle MyBatis mapper XMLs:
 
 ```bash
-cd example && ./run_example.sh
+cd example && ./setup.sh && ./run.sh
 ```
 
 See [example/README.md](example/README.md) for details.
@@ -145,13 +145,11 @@ See [example/README.md](example/README.md) for details.
 ### Step 1 — Setup (~5 minutes)
 
 ```bash
-# 1. Virtual environment
-# sudo dnf install -y python3.11 python3.11-pip 
-python3.11 -m venv .venv
-source .venv/bin/activate
+# 1. Install uv (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Install dependencies
-pip install -r requirements.txt
+uv sync
 
 # 3. AWS credentials
 export AWS_ACCESS_KEY_ID="..."

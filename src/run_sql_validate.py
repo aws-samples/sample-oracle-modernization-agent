@@ -43,26 +43,19 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
     log_path = _log_dir / f"{Path(mapper_file).stem}.log"
     log_path.write_text('', encoding='utf-8')
 
-    # Progress log for console display
-    progress_log = _log_dir.parent / "validate_progress.log"
+    progress = progress_counter.get('progress')
+    task_id = progress_counter.get('task_id')
 
     def log(msg):
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
 
-    def console(sql_id, status):
-        """Print real-time status with progress"""
+    def advance_progress(count, last_sql_id=""):
         with progress_counter['lock']:
-            if status == "🔍 검증중":
-                progress_counter['started'] += 1
-            elif status in ["✅ PASS", "🔧 FIXED"]:
-                progress_counter['done'] += 1
-            current = progress_counter['started']
-            pct = int(current * 100 / total) if total > 0 else 0
-            msg = f"[{pct:3d}%] [{Path(mapper_file).stem}] {sql_id} - {status}"
-            # Write to progress log instead of stderr
-            with open(progress_log, 'a', encoding='utf-8') as f:
-                f.write(f"{msg}\n")
+            progress_counter['done'] += count
+            if progress and task_id is not None:
+                desc = f"Validate: {Path(mapper_file).stem}:{last_sql_id}" if last_sql_id else "Validate"
+                progress.update(task_id, advance=count, description=desc)
 
     try:
         log(f"🔍 시작: {len(sql_ids)} SQL IDs")
@@ -73,10 +66,6 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
             log(f"📦 Group {g_num}/{len(groups)}: {len(group)} SQLs")
             log(f"   SQL IDs: {ids_str}")
 
-            # Show each SQL ID starting
-            for s in group:
-                console(s['sql_id'], "🔍 검증중")
-
             # Run agent (callback_handler=None suppresses streaming output)
             agent = create_agent()
             agent(
@@ -85,49 +74,20 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
                 f"If PASS: call set_validated. If FAIL: fix with convert_sql then call set_validated."
             )
 
-            # Read completion events from thread-safe queue
-            for event in drain_progress():
-                sig_sql_id = event["sql_id"]
-                sig_result = event.get("status", "")
-                sig_notes = event.get("notes", "")
-                for s in group:
-                    if s['sql_id'] == sig_sql_id:
-                        if sig_result == 'PASS':
-                            reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
-                            console(s['sql_id'], f"✅ PASS - {reason}" if reason else "✅ PASS")
-                        else:
-                            reason = sig_notes.strip()[:60] if sig_notes.strip() else ""
-                            console(s['sql_id'], f"🔧 FIXED - {reason}" if reason else "🔧 FIXED")
-                        break
-
-            # Log errors from agent output if any
-            # (Agent output no longer captured via stdout; errors logged by agent tools)
+            # Drain queue (best-effort) but advance by group size regardless
+            drain_progress()
+            advance_progress(len(group), group[-1]['sql_id'])
 
         log(f"✅ {mapper_file} 검증 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
     except Exception as e:
         log(f"❌ {mapper_file}: {e}")
-        console("ERROR", f"❌ {str(e)}")
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
 
 
-def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
-    """Tail progress log file and display to console"""
-    last_pos = 0
-    while not stop_event.is_set():
-        if progress_log.exists():
-            with open(progress_log, 'r', encoding='utf-8') as f:
-                f.seek(last_pos)
-                new_lines = f.read()
-                if new_lines:
-                    stderr.write(new_lines)
-                    stderr.flush()
-                last_pos = f.tell()
-        stop_event.wait(0.1)
-
-
 def run(max_workers=8):
-    print("🔍 SQL Validate Agent 시작...\n", flush=True)
+    from core.display import console_err
+    console_err.print("[bold]SQL Validate Agent[/bold]")
 
     pending = get_pending_validations()
     if pending['total'] == 0:
@@ -135,30 +95,22 @@ def run(max_workers=8):
         return
 
     mapper_list = list(pending['pending'].items())
-    print(f"🔍 Pending: {pending['total']} SQL IDs across {len(mapper_list)} mappers (workers={max_workers})", flush=True)
-    print(f"📁 Logs: {_log_dir}/\n", flush=True)
+    console_err.print(f"  Pending: {pending['total']} SQL IDs / {len(mapper_list)} mappers / workers={max_workers}")
 
-    # Initialize progress log
-    progress_log = _log_dir.parent / "validate_progress.log"
-    progress_log.write_text('', encoding='utf-8')
-
-    # Start tail monitor with original stderr
-    original_stderr = sys.stderr
-    stop_monitor = threading.Event()
-    monitor = threading.Thread(target=_tail_progress_log, args=(progress_log, stop_monitor, original_stderr), daemon=True)
-    monitor.start()
-
-    progress_counter = {'started': 0, 'done': 0, 'lock': threading.Lock()}
-    total_sql_count = pending['total']
+    from core.display import create_step_progress
 
     results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(validate_mapper, m, s, progress_counter, total_sql_count): m for m, s in mapper_list}
-        for future in as_completed(futures):
-            results.append(future.result())
+    with create_step_progress() as progress:
+        task_id = progress.add_task("Validate", total=pending['total'])
+        progress_counter = {
+            'started': 0, 'done': 0, 'lock': threading.Lock(),
+            'progress': progress, 'task_id': task_id,
+        }
 
-    stop_monitor.set()
-    monitor.join(timeout=2)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(validate_mapper, m, s, progress_counter, pending['total']): m for m, s in mapper_list}
+            for future in as_completed(futures):
+                results.append(future.result())
 
     # 결과
     with sqlite3.connect(str(DB_PATH)) as conn:
@@ -168,27 +120,25 @@ def run(max_workers=8):
         cursor.execute("SELECT COUNT(*) FROM transform_target_list")
         total = cursor.fetchone()[0]
 
-    print(f"\n{'='*60}", flush=True)
-    print(f"📊 결과: {validated}/{total} SQL IDs validated", flush=True)
+    from core.display import print_step_result
+
+    rows = [("Validated", f"{validated}/{total} SQL IDs")]
 
     failed = [r for r in results if r['status'] != 'success']
     if failed:
         for r in failed:
-            print(f"  ❌ {r['mapper']}: {r.get('error', 'unknown')}", flush=True)
+            rows.append(("Failed", f"[red]{r['mapper']}: {r.get('error', 'unknown')}[/red]"))
 
     remaining = total - validated
     if remaining > 0:
-        print(f"⚠️  미완료: {remaining}개 SQL IDs", flush=True)
+        rows.append(("Remaining", f"[yellow]{remaining} SQL IDs[/yellow]"))
     else:
-        print(f"✅ 전체 검증 완료!", flush=True)
-
-        # 전략 보강: FIXED 패턴 수집
+        rows.append(("Status", "[green]All validated[/green]"))
         if _refine_strategy_from_logs():
-            # 압축 제안
             _suggest_compaction()
 
-    print(f"📁 Logs: {_log_dir}/", flush=True)
-    print(f"{'='*60}", flush=True)
+    rows.append(("Logs", str(_log_dir)))
+    print_step_result("Validate Result", rows)
 
 
 def _refine_strategy_from_logs():

@@ -8,6 +8,31 @@ from strands import tool
 from utils.project_paths import DB_PATH, PROJECT_ROOT, REPORTS_DIR
 
 
+def _print_rich_diff(mapper_file: str, sql_id: str, diff_text: str):
+    """Display unified diff with git-like coloring on stderr."""
+    from rich.console import Console
+    from rich.text import Text
+    from rich.panel import Panel
+
+    console = Console(stderr=True)
+    colored = Text()
+    for line in diff_text.splitlines():
+        if line.startswith('---'):
+            colored.append(line + "\n", style="bold red")
+        elif line.startswith('+++'):
+            colored.append(line + "\n", style="bold green")
+        elif line.startswith('@@'):
+            colored.append(line + "\n", style="bold cyan")
+        elif line.startswith('-'):
+            colored.append(line + "\n", style="red")
+        elif line.startswith('+'):
+            colored.append(line + "\n", style="green")
+        else:
+            colored.append(line + "\n")
+
+    console.print(Panel(colored, title=f"[bold]{mapper_file} / {sql_id}[/bold]", border_style="blue"))
+
+
 def _extract_sql(content):
     """Extract SQL body from XML"""
     sql = re.sub(r'<\?xml.*?\?>', '', content)
@@ -91,6 +116,11 @@ def show_sql_diff(mapper_file: str, sql_id: str) -> dict:
     result = _get_sql_diff_internal(row[0], row[1])
     result['mapper_file'] = mapper_file
     result['sql_id'] = sql_id
+
+    # Display colored diff to terminal (stderr)
+    if result.get('status') == 'success' and result.get('diff', '') != 'No changes':
+        _print_rich_diff(mapper_file, sql_id, result['diff'])
+
     return result
 
 

@@ -10,25 +10,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_DIR="$PROJECT_ROOT/src"
-VENV_DIR="$SCRIPT_DIR/.venv"
 MAPPER_DIR="$SCRIPT_DIR/src/main/resources/sqlmap/mapper"
 
 # Example uses its own output directory (keeps src/ clean)
 export OMA_OUTPUT_DIR="${OMA_OUTPUT_DIR:-$SCRIPT_DIR/output}"
 
-# --- venv ---
-
-if [ ! -d "$VENV_DIR" ]; then
-    echo "=== Creating Python virtual environment ==="
-    python3 -m venv "$VENV_DIR"
-    echo "Created: $VENV_DIR"
-fi
-
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+# --- Install dependencies via uv ---
 
 echo "=== Installing dependencies ==="
-pip install -q -r "$PROJECT_ROOT/requirements.txt"
+uv sync --project "$PROJECT_ROOT"
 echo "Done."
 echo ""
 
@@ -45,4 +35,4 @@ echo "      (Transform, Review, Validate steps work without DB)"
 echo ""
 
 cd "$SRC_DIR"
-python run_setup.py
+uv run --project "$PROJECT_ROOT" python run_setup.py

@@ -268,13 +268,20 @@ class StateManager:
                 'review_failed': review_failed,
                 'validated': validated,
                 'tested': tested,
-                'merged': 0,  # TODO: implement merge tracking
+                'merged': self._count_merge_files(),
                 'transform_complete': transform_complete,
                 'review_complete': review_complete,
                 'validate_complete': validate_complete,
                 'test_complete': test_complete,
-                'merge_complete': False  # TODO: implement merge tracking
+                'merge_complete': self._count_merge_files() > 0,
             }
+
+    @staticmethod
+    def _count_merge_files() -> int:
+        from utils.project_paths import MERGE_DIR
+        if MERGE_DIR.exists():
+            return len(list(MERGE_DIR.rglob("*.xml")))
+        return 0
 
     def reset_step_status(self, step: str) -> int:
         """

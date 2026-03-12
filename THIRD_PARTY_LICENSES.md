@@ -66,7 +66,7 @@ This document lists the third-party software dependencies used in OMA (Oracle Mi
 | MPL 2.0 | 1 | certifi |
 | Dual License | 3 | python-dateutil, packaging, cryptography |
 
-## Runtime Dependencies (Not in requirements.txt)
+## Runtime Dependencies (Not in pyproject.toml)
 
 | Name | License | Description |
 |------|---------|-------------|

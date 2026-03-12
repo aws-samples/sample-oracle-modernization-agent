@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR
 from core.progress import drain_progress
 
-from agents.sql_test.tools.test_tools import run_bulk_test, get_test_failures, explain_dml_batch
+from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch
 from agents.sql_test.agent import create_sql_test_agent
 
 _log_dir = LOGS_DIR / "test"
@@ -27,30 +27,18 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
     log_path = _log_dir / f"{Path(mapper_file).stem}.log"
     log_path.write_text('', encoding='utf-8')
 
-    # Progress log for console display
-    progress_log = _log_dir.parent / "test_progress.log"
-    reported = set()
-
     def log(msg):
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
 
-    def console(sql_id, status):
-        key = f"{sql_id}:{status}"
-        if key in reported:
-            return
-        reported.add(key)
-
+    def advance_progress(count, last_sql_id=""):
         with progress_counter['lock']:
-            if status == "🔧 수정중":
-                progress_counter['started'] += 1
-            elif status in ["✅ PASS"]:
-                progress_counter['done'] += 1
-            current = progress_counter['started']
-            pct = int(current * 100 / total) if total > 0 else 0
-            msg = f"[{pct:3d}%] [{Path(mapper_file).stem}] {sql_id} - {status}"
-            with open(progress_log, 'a', encoding='utf-8') as f:
-                f.write(f"{msg}\n")
+            progress_counter['done'] += count
+            progress_obj = progress_counter.get('progress')
+            tid = progress_counter.get('task_id')
+            if progress_obj and tid is not None:
+                desc = f"Test fix: {Path(mapper_file).stem}:{last_sql_id}" if last_sql_id else "Test fix"
+                progress_obj.update(tid, advance=count, description=desc)
 
     try:
         ids_str = ", ".join(f['sql_id'] for f in failures)
@@ -63,15 +51,11 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
 
         if connection_errors:
             log(f"⚠️  {len(connection_errors)} DB 연결 오류 (인프라 문제, 스킵)")
-            for f in connection_errors:
-                console(f['sql_id'], "⚠️  DB 연결 오류")
+            advance_progress(len(connection_errors))
 
         if not sql_errors:
             log("✅ SQL 구문 오류 없음 (모두 DB 연결 오류)")
             return {'mapper': mapper_file, 'status': 'skipped', 'count': 0}
-
-        for f in sql_errors:
-            console(f['sql_id'], "🔧 수정중")
 
         errors_str = "\n\n".join(
             f"SQL ID: {f['sql_id']}\n"
@@ -94,13 +78,9 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             f"6. If still fails, try once more. After 2 attempts, skip with MANUAL_REVIEW note.\n"
         )
 
-        # Read completion events from thread-safe queue
-        for event in drain_progress():
-            sig_sql_id = event["sql_id"]
-            for f in sql_errors:
-                if f['sql_id'] == sig_sql_id:
-                    console(f['sql_id'], "✅ PASS")
-                    break
+        # Drain queue and advance by total sql_errors count
+        drain_progress()
+        advance_progress(len(sql_errors), sql_errors[-1]['sql_id'])
 
         log(f"✅ {mapper_file} 수정 완료")
         return {'mapper': mapper_file, 'status': 'success'}
@@ -110,7 +90,8 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
 
 
 def run(max_workers=8):
-    print("🧪 SQL Test 시작...\n", flush=True)
+    from core.display import console_err
+    console_err.print("[bold]SQL Test Agent[/bold]")
 
     TRANSFORM_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -212,11 +193,12 @@ def run(max_workers=8):
             cursor.execute("SELECT COUNT(*) FROM transform_target_list")
             total_sql = cursor.fetchone()[0]
 
-        log_and_print(f"\n{'='*60}")
-        log_and_print(f"📊 결과: {tested}/{total_sql} SQL IDs tested (select+DML)")
-        log_and_print(f"✅ 전체 테스트 완료!")
-        log_and_print(f"📁 Log: {test_log_file}")
-        log_and_print(f"{'='*60}")
+        from core.display import print_step_result
+        print_step_result("Test Result", [
+            ("Tested", f"{tested}/{total_sql} SQL IDs"),
+            ("Status", "[green]All tests passed[/green]"),
+            ("Log", str(test_log_file)),
+        ])
         return
 
     # Phase 2: Agent fixes failures
@@ -229,39 +211,20 @@ def run(max_workers=8):
             mapper_failures[mapper] = []
         mapper_failures[mapper].append(f)
 
-    # Initialize progress log
-    progress_log = _log_dir.parent / "test_progress.log"
-    progress_log.write_text('', encoding='utf-8')
-
-    original_stderr = sys.stderr
-    def tail_progress_log(progress_log_path: Path, stop_event: threading.Event, stderr):
-        last_pos = 0
-        while not stop_event.is_set():
-            if progress_log_path.exists():
-                with open(progress_log_path, 'r', encoding='utf-8') as fh:
-                    fh.seek(last_pos)
-                    new_lines = fh.read()
-                    if new_lines:
-                        stderr.write(new_lines)
-                        stderr.flush()
-                    last_pos = fh.tell()
-            stop_event.wait(0.1)
-
-    stop_monitor = threading.Event()
-    monitor = threading.Thread(target=tail_progress_log, args=(progress_log, stop_monitor, original_stderr), daemon=True)
-    monitor.start()
-
-    progress_counter = {'started': 0, 'done': 0, 'lock': threading.Lock()}
-    total_failures = len(failures)
+    from core.display import create_step_progress
 
     results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(fix_mapper_failures, m, f, progress_counter, total_failures): m for m, f in mapper_failures.items()}
-        for future in as_completed(futures):
-            results.append(future.result())
+    with create_step_progress() as progress:
+        task_id = progress.add_task("Test Fix", total=len(failures))
+        progress_counter = {
+            'started': 0, 'done': 0, 'lock': threading.Lock(),
+            'progress': progress, 'task_id': task_id,
+        }
 
-    stop_monitor.set()
-    monitor.join(timeout=2)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fix_mapper_failures, m, f, progress_counter, len(failures)): m for m, f in mapper_failures.items()}
+            for future in as_completed(futures):
+                results.append(future.result())
 
     # Final status
     with sqlite3.connect(str(DB_PATH)) as conn:
@@ -271,20 +234,20 @@ def run(max_workers=8):
         cursor.execute("SELECT COUNT(*) FROM transform_target_list")
         total_sql = cursor.fetchone()[0]
 
-    log_and_print(f"\n{'='*60}")
-    log_and_print(f"📊 결과: {tested}/{total_sql} SQL IDs tested (select+DML)")
+    from core.display import print_step_result
+
+    rows = [("Tested", f"{tested}/{total_sql} SQL IDs")]
     remaining = total_sql - tested
     if remaining > 0:
-        log_and_print(f"⚠️  미완료: {remaining}개 SQL IDs")
+        rows.append(("Remaining", f"[yellow]{remaining} SQL IDs[/yellow]"))
     else:
-        log_and_print(f"✅ 전체 테스트 완료!")
-
+        rows.append(("Status", "[green]All tests passed[/green]"))
         if _refine_strategy_from_logs():
             _suggest_compaction()
 
-    log_and_print(f"📁 Logs: {_log_dir}/")
-    log_and_print(f"📁 Execution log: {test_log_file}")
-    log_and_print(f"{'='*60}")
+    rows.append(("Logs", str(_log_dir)))
+    rows.append(("Execution log", str(test_log_file)))
+    print_step_result("Test Result", rows)
 
 
 def _refine_strategy_from_logs():

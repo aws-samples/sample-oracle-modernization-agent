@@ -6,13 +6,14 @@ Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
 ## Prerequisites
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - AWS credentials configured (`aws configure`) with Bedrock access
 
 ## Run
 
 ```bash
 cd example
-./setup.sh    # 1회: venv 생성 + 의존성 설치 + 프로젝트 설정
+./setup.sh    # 1회: 의존성 설치 (uv) + 프로젝트 설정
 ./run.sh      # 이후: 오케스트레이터 실행
 ```
 
@@ -48,7 +49,7 @@ In the orchestrator, type commands like:
 
 ## Output
 
-After running, check `output/` in the project root:
-- `output/xmls/transform/` — converted PostgreSQL mapper XMLs
-- `output/reports/` — diff reports (original vs converted)
-- `output/strategy/` — learned conversion patterns
+After running, check `example/output/`:
+- `example/output/xmls/transform/` — converted PostgreSQL mapper XMLs
+- `example/output/reports/` — diff reports (original vs converted)
+- `example/output/strategy/` — learned conversion patterns

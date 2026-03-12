@@ -1,5 +1,4 @@
 """Orchestrator tools - pipeline status check and step execution"""
-import sys
 from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH, OUTPUT_DIR, STRATEGY_DIR
@@ -66,7 +65,13 @@ def check_setup() -> SetupCheckResult:
         }
         return result
 
-    print(f"✅ Setup OK: {values}")
+    from core.display import print_step_result
+    print_step_result("Setup Check", [
+        ("Status", "[green]Ready[/green]"),
+        ("Source DBMS", values.get('SOURCE_DBMS_TYPE', '-')),
+        ("Target DBMS", values.get('TARGET_DBMS_TYPE', '-')),
+        ("Source Path", values.get('JAVA_SOURCE_FOLDER', '-')),
+    ])
     result: SetupCheckResult = {
         'ready': True,
         'missing': None,
@@ -93,7 +98,8 @@ def generate_project_strategy() -> str:
     """
     import json
     
-    print("🔍 Generating project strategy...")
+    from core.display import console_err
+    console_err.rule("[bold blue]Generating project strategy[/bold blue]")
     
     import io, contextlib
     buf = io.StringIO()
@@ -135,7 +141,8 @@ def refine_project_strategy(feedback_type: str = "validation_failures") -> str:
     Returns:
         Success message
     """
-    print(f"🔄 Refining strategy with {feedback_type}...")
+    from core.display import console_err
+    console_err.print(f"[blue]Refining strategy with {feedback_type}...[/blue]")
 
     state = StateManager(DB_PATH)
     feedback = {'type': feedback_type, 'cases': []}
@@ -220,6 +227,9 @@ def check_step_status() -> StepStatusResult:
         'merge_complete': bool(counts['merge_complete'])
     }
 
+    from core.display import print_pipeline_status
+    print_pipeline_status(result)
+
     return result
 
 
@@ -300,7 +310,7 @@ def reset_step(step_name: str) -> ResetStepResult:
 
 
 @tool
-def run_step(step_name: str) -> RunStepResult:
+def run_step(step_name: str, sample: int = 0) -> RunStepResult:
     """Execute a pipeline step via direct Agent invocation (importlib).
 
     Uses importlib.import_module() to directly invoke pipeline step modules
@@ -315,6 +325,8 @@ def run_step(step_name: str) -> RunStepResult:
             - 'validate': Functional equivalence validation
             - 'test': Database execution testing
             - 'merge': XML reassembly
+        sample: If > 0, transform only N representative SQLs (transform step only).
+                Selects one per sql_type first, then fills remaining by mapper round-robin.
 
     Returns:
         RunStepResult with status, details, and needs_merge flag
@@ -338,20 +350,16 @@ def run_step(step_name: str) -> RunStepResult:
         return result
 
     module_name, func_name = modules[step_name]
-    print(f"\n🚀 Running: {step_name} ({module_name})...\n", flush=True)
+    from core.display import console_err
+    console_err.rule(f"[bold blue]Running: {step_name}[/bold blue]")
 
     import io, contextlib, importlib
 
     output_lines = []
 
-    class TeeStream(io.TextIOBase):
-        """Write to both real stdout and capture buffer."""
-        def __init__(self, real_stdout):
-            self._real = real_stdout
-
+    class CaptureStream(io.TextIOBase):
+        """Capture stdout to buffer (discard from terminal — rich stderr is the display channel)."""
         def write(self, s):
-            self._real.write(s)
-            self._real.flush()
             output_lines.append(s)
             return len(s)
 
@@ -360,19 +368,18 @@ def run_step(step_name: str) -> RunStepResult:
         mod = importlib.import_module(module_name)
         func = getattr(mod, func_name)
 
-        # Capture output while displaying in real-time
-        tee = TeeStream(sys.stdout)
-        with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
-            func()
+        # Capture stdout silently; stderr (rich output) goes to terminal directly
+        capture = CaptureStream()
+        with contextlib.redirect_stdout(capture):
+            if step_name == 'transform' and sample > 0:
+                func(sample=sample)
+            else:
+                func()
 
         # Keep last 100 lines if output is large
         output = ''.join(output_lines[-100:]) if len(output_lines) > 100 else ''.join(output_lines)
 
-        print(f"\n✅ {step_name} 완료\n", flush=True)
-
-        # Show helpful tips
-        if step_name == 'transform':
-            print("💡 Tip: 변환 결과를 확인하려면 → 'diff 리포트 생성' 또는 '[SQL ID] 비교해줘'", flush=True)
+        console_err.rule(f"[bold green]{step_name} completed[/bold green]")
 
         # Check if merge is needed (test step may modify SQL files)
         needs_merge = False
@@ -385,7 +392,7 @@ def run_step(step_name: str) -> RunStepResult:
                 'details': 'Test skipped: PostgreSQL 접속 정보가 설정되지 않았습니다. run_setup.py에서 DB 접속 정보를 설정하세요.',
                 'needs_merge': False
             }
-            print("⚠️  Test 단계를 건너뛰었습니다. DB 접속 정보가 필요합니다.", flush=True)
+            console_err.print("[yellow]Test skipped: DB connection info required[/yellow]")
             return result
 
         if step_name == 'test' and 'Phase 2:' in output and '건 실패 SQL 수정' in output:
@@ -401,7 +408,7 @@ def run_step(step_name: str) -> RunStepResult:
 
     except Exception as e:
         output = ''.join(output_lines)
-        print(f"\n❌ {step_name} 실패: {e}\n", flush=True)
+        console_err.rule(f"[bold red]{step_name} failed: {e}[/bold red]")
 
         result: RunStepResult = {
             'status': 'error',
@@ -450,23 +457,22 @@ def get_summary() -> SummaryResult:
         'completion_status': completion
     }
 
-    # Print formatted summary
-    review_failed = status['review_failed']
-    review_display = f"{status['reviewed']}/{status['extracted']}"
-    if review_failed > 0:
-        review_display += f" ({review_failed} FAIL — 수동 검토 필요)"
-
-    print(f"\n{'='*60}")
-    print(f"📊 OMA Pipeline Summary")
-    print(f"{'='*60}")
-    print(f"  Source Analyzed: {'✅' if status['source_analyzed'] else '❌'}")
-    print(f"  Transformed:    {status['transformed']}/{status['extracted']}")
-    print(f"  Reviewed:       {review_display}")
-    print(f"  Validated:      {status['validated']}/{status['extracted']}")
-    print(f"  Tested:         {status['tested']}/{status['extracted']}")
-    print(f"  Merged:         {files.get('merge', '0')} files")
-    print(f"  Output:         {files}")
-    print(f"  Complete:       {'✅ All steps complete' if all(completion.values()) else '❌ Pipeline in progress'}")
-    print(f"{'='*60}")
+    # Print formatted summary (rich table to stderr)
+    from core.display import print_pipeline_status
+    print_pipeline_status({
+        'extracted': status['extracted'],
+        'transformed': status['transformed'],
+        'reviewed': status['reviewed'],
+        'review_failed': status['review_failed'],
+        'validated': status['validated'],
+        'tested': status['tested'],
+        'merged': int(files.get('merge', '0')),
+        'source_analyzed': status['source_analyzed'],
+        'transform_complete': completion['transform_complete'],
+        'review_complete': completion['review_complete'],
+        'validate_complete': completion['validate_complete'],
+        'test_complete': completion['test_complete'],
+        'merge_complete': completion['merge_complete'],
+    })
 
     return result

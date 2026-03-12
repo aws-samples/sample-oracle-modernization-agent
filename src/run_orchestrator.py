@@ -51,7 +51,7 @@ def run():
 
     while True:
         try:
-            user_input = input("\n🧑 > ").strip()
+            user_input = input("\n⚛️  ").strip()
         except UnicodeDecodeError:
             print("⚠️  입력 인코딩 오류 — 한영 전환 후 다시 입력해주세요.")
             continue

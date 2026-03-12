@@ -142,9 +142,6 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
 
     _db_execute_with_retry(_update_db)
 
-    flag = f" ⚠️ {notes}" if notes else ""
-    print(f"  💾 {mapper_file}/{sql_id} → {target_path.name} [transformed=Y]{flag}")
-
     # Emit progress event via thread-safe queue
     from core.progress import emit_progress
     emit_progress(mapper_file, sql_id, "DONE", notes)

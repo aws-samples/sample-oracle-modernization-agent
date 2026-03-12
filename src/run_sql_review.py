@@ -43,7 +43,6 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
     _log_dir.mkdir(parents=True, exist_ok=True)
     log_path = _log_dir / f"{Path(mapper_file).stem}.log"
     log_path.write_text('', encoding='utf-8')
-    progress_log = _log_dir.parent / "review_progress.log"
 
     def log(msg):
         with open(log_path, 'a', encoding='utf-8') as f:
@@ -51,14 +50,13 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
 
     def console(sql_id, status):
         with progress_counter['lock']:
-            if status == "🔍 리뷰중":
-                progress_counter['started'] += 1
-            elif "✅" in status or "❌" in status or "⚠️" in status:
+            if "✅" in status or "❌" in status or "⚠️" in status:
                 progress_counter['done'] += 1
-            pct = int(progress_counter['started'] * 100 / total) if total > 0 else 0
-            msg = f"[{pct:3d}%] [{Path(mapper_file).stem}] {sql_id} - {status}"
-            with open(progress_log, 'a', encoding='utf-8') as f:
-                f.write(f"{msg}\n")
+                progress_obj = progress_counter.get('progress')
+                tid = progress_counter.get('task_id')
+                if progress_obj and tid is not None:
+                    progress_obj.update(tid, advance=1,
+                                        description=f"Review: {Path(mapper_file).stem}:{sql_id}")
 
     try:
         log(f"🔍 시작: {len(sql_ids)} SQL IDs (multi-perspective review)")
@@ -214,19 +212,6 @@ def _retransform_failures():
     return fixed
 
 
-def _tail_progress_log(progress_log: Path, stop_event: threading.Event, stderr):
-    last_pos = 0
-    while not stop_event.is_set():
-        if progress_log.exists():
-            with open(progress_log, 'r', encoding='utf-8') as f:
-                f.seek(last_pos)
-                new_lines = f.read()
-                if new_lines:
-                    stderr.write(new_lines)
-                    stderr.flush()
-                last_pos = f.tell()
-        stop_event.wait(0.1)
-
 
 def _refine_strategy(fail_count):
     """Run Strategy Refine Agent to learn from persistent failure patterns."""
@@ -238,7 +223,8 @@ def _refine_strategy(fail_count):
 
 
 def run(max_workers=8, max_rounds=3):
-    print("🔍 SQL Review Agent 시작...\n", flush=True)
+    from core.display import console_err
+    console_err.print("[bold]SQL Review Agent[/bold]")
 
     # Reset previous FAIL items so they get re-reviewed on re-run
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
@@ -260,27 +246,23 @@ def run(max_workers=8, max_rounds=3):
             break
 
         mapper_list = list(pending['pending'].items())
-        print(f"📋 Pending: {pending['total']} SQL IDs across {len(mapper_list)} mappers (workers={max_workers})", flush=True)
+        console_err.print(f"  Pending: {pending['total']} SQL IDs / {len(mapper_list)} mappers / workers={max_workers}")
 
-        progress_log = _log_dir.parent / "review_progress.log"
         _log_dir.parent.mkdir(parents=True, exist_ok=True)
-        progress_log.write_text('', encoding='utf-8')
-
-        original_stderr = sys.stderr
-        stop_monitor = threading.Event()
-        monitor = threading.Thread(target=_tail_progress_log, args=(progress_log, stop_monitor, original_stderr), daemon=True)
-        monitor.start()
-
-        progress_counter = {'started': 0, 'done': 0, 'lock': threading.Lock()}
+        from core.display import create_step_progress
 
         results = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(review_mapper, m, s, progress_counter, pending['total']): m for m, s in mapper_list}
-            for future in as_completed(futures):
-                results.append(future.result())
+        with create_step_progress() as progress:
+            task_id = progress.add_task(f"Review R{round_num}", total=pending['total'])
+            progress_counter = {
+                'started': 0, 'done': 0, 'lock': threading.Lock(),
+                'progress': progress, 'task_id': task_id,
+            }
 
-        stop_monitor.set()
-        monitor.join(timeout=2)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(review_mapper, m, s, progress_counter, pending['total']): m for m, s in mapper_list}
+                for future in as_completed(futures):
+                    results.append(future.result())
 
         # Round 2+: persistent failures → refine strategy before re-transform
         if round_num >= 2:
@@ -306,14 +288,18 @@ def run(max_workers=8, max_rounds=3):
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
         total = cursor.fetchone()[0]
 
-    print(f"\n{'='*60}", flush=True)
-    print(f"📊 Review 결과: {passed} PASS / {failed} FAIL / {total} total", flush=True)
+    from core.display import print_step_result
+    rows = [
+        ("Passed", str(passed)),
+        ("Failed", f"[red]{failed}[/red]" if failed > 0 else "0"),
+        ("Total", str(total)),
+    ]
     if failed > 0:
-        print(f"⚠️  {failed}개 SQL은 수동 검토 필요", flush=True)
+        rows.append(("Note", f"[yellow]{failed} SQL require manual review[/yellow]"))
     else:
-        print(f"✅ 전체 리뷰 통과!", flush=True)
-    print(f"📁 Logs: {_log_dir}/", flush=True)
-    print(f"{'='*60}", flush=True)
+        rows.append(("Status", "[green]All passed[/green]"))
+    rows.append(("Logs", str(_log_dir)))
+    print_step_result("Review Result", rows)
 
 
 if __name__ == "__main__":
