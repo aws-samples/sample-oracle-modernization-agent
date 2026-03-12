@@ -123,7 +123,7 @@ This code is provided as a sample for educational and demonstration purposes onl
 
 ## License
 
-This project is distributed under the MIT-0 License. See [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT-0 License. See [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
