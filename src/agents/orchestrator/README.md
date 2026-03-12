@@ -1,6 +1,6 @@
 # Orchestrator Agent
 
-The Orchestrator Agent is an interactive AI assistant that manages and controls the OMA (Oracle Migration Assistant) pipeline for Oracle to PostgreSQL database migrations. It provides a conversational interface to monitor pipeline status, execute steps, and manage the entire migration workflow.
+The Orchestrator Agent is an interactive AI assistant that manages and controls the OMA (Oracle Modernization Agent) pipeline for Oracle to PostgreSQL database migrations. It provides a conversational interface to monitor pipeline status, execute steps, and manage the entire migration workflow.
 
 ## Overview
 
@@ -50,11 +50,11 @@ Resets a pipeline step by clearing completion flags in DB.
 - Allows re-running steps from scratch
 - Returns reset count
 
-### `run_step(step_name)`
+### `run_step(step_name, sample=0)`
 Executes individual pipeline steps with real-time feedback.
 - Supported steps: `analyze`, `transform`, `review`, `validate`, `test`, `merge`
-- Runs corresponding Python scripts with timeout protection
-- Captures output and error information
+- `sample`: If > 0, transform only N representative SQLs (transform step only). Picks one per sql_type, fills remaining by mapper round-robin. Re-transform without full reset.
+- Displays Rich progress bar during execution
 - Returns execution status and results
 - For test step: returns `needs_merge=True` if SQL files were modified
 
@@ -188,42 +188,49 @@ python3 src/run_orchestrator.py
 
 ### Interactive Session Example
 ```
-🎯 OMA Orchestrator
-   Oracle → PostgreSQL 마이그레이션 파이프라인 제어
-   'quit' 또는 'exit'로 종료
+──────────────────────── OMA Orchestrator ────────────────────────
+              Oracle → PostgreSQL Migration Pipeline
 
-📊 Status: analyzed=True, transformed=5/10, validated=3/10, tested=0/10, merged=0
-➡️  Next: transform
+  Category    Command
+  Pipeline    변환 수행 · 리뷰 수행 · 전체 수행 · 테스트 재수행
+  Sample      샘플 변환 5개 · 샘플 변환 10개
+  Compare     UserMapper selectUserList 비교
+  Status      진행 단계 확인 · 상태확인
+  Exit        quit · exit · q
 
-🧑 > 다음 단계 실행해줘
+⚛️  >  샘플 변환 5개
 
-🚀 Running: transform (src/run_sql_transform.py)...
-✅ transform 완료
+───────────── Running: transform ─────────────
+SQL Transform Agent (sample=5)
+  Pending: 5 SQL IDs / 3 mappers / workers=8
+Transform: UserMapper:updateUser ━━━━━━ 5/5 100.0% 0:00:31
+╭──────── Transform Result ────────╮
+│   Transformed    5/44 SQL IDs    │
+│   Remaining      39 SQL IDs      │
+╰──────────────────────────────────╯
+───────────── transform completed ────────────
 
-🧑 > 전체 상태 보여줘
+⚛️  >  진행 단계 확인
 
-============================================================
-📊 OMA Pipeline Summary
-============================================================
-  Source Analyzed: ✅
-  Transformed:    10/10
-  Validated:      3/10
-  Tested:         0/10
-  Merged:         0 files
-  Output:         {'origin': 15, 'extract': 10, 'transform': 10, 'merge': 0}
-  Complete:       ❌ Next: validate
-============================================================
+         OMA Pipeline Summary
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┓
+┃ Step           ┃ Progress ┃ Status  ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━┩
+│ Transform      │     5/44 │ In Prog │
+│ Review         │     0/44 │ Pending │
+│ ...            │          │         │
+└────────────────┴──────────┴─────────┘
 
-🧑 > quit
+⚛️  >  quit
 👋 종료합니다.
 ```
 
 ## Exit Commands
 
 To exit the interactive session, use any of:
-- `quit`
-- `exit` 
-- `q`
+- `quit` / `/quit`
+- `exit`
+- `q` / `/q`
 - `Ctrl+C`
 
 The agent will gracefully terminate and display a farewell message.

@@ -1,13 +1,15 @@
-# OMA - Oracle Migration Assistant
+# OMA - Oracle Modernization Agent
 
 ## Project Description
 
-OMA (Oracle Migration Assistant) is an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
+OMA (Oracle Modernization Agent) is an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
 
 - **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to PostgreSQL syntax
 - **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review [multi-perspective: Syntax + Equivalence] → Validate → Test) ensures conversion accuracy
+- **Sample Transform**: Run representative subset (N SQLs with type coverage + mapper round-robin) to verify strategy quality before full pipeline
 - **Intelligent Pattern Learning**: Dynamic strategy generation adapts to project-specific SQL patterns and automatically learns from failures
 - **Real Database Testing**: Validates converted SQL against actual PostgreSQL instances to ensure functional equivalence
+- **Rich Progress UI**: Real-time progress bars, structured pipeline status tables, git-like colored diff display
 - **Batch Processing Optimization**: Groups related SQL statements for efficient processing with prompt caching, reducing API costs by ~80%
 
 The system combines rule-based transformation with AI-powered expert judgment to handle complex Oracle-specific constructs, providing diagnosis, analysis, and migration best practices to accelerate real workload migration from Oracle to AWS open-source databases.
@@ -50,8 +52,8 @@ This successful implementation validates the potential of GenAI technology to tr
 - **Framework**: Strands Agents SDK (v1.24.0+) - Multi-agent orchestration
 - **Target Database**: PostgreSQL
 - **Source Framework**: MyBatis (XML Mapper files)
-- **Programming Language**: Python 3.10+ (recommended 3.11)
-- **Key Dependencies**: boto3, defusedxml
+- **Programming Language**: Python 3.11+ (uv package manager)
+- **Key Dependencies**: boto3, defusedxml, rich, sqlalchemy
 
 ## Architecture Highlights
 
@@ -64,6 +66,6 @@ This successful implementation validates the potential of GenAI technology to tr
 
 ---
 
-**Last Updated**: 2026-02-20
-**Version**: 3.0
+**Last Updated**: 2026-03-13
+**Version**: 4.0
 **Status**: Production Ready

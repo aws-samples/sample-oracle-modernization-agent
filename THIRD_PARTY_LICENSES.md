@@ -1,6 +1,6 @@
 # Third Party Licenses
 
-This document lists the third-party software dependencies used in OMA (Oracle Migration Assistant) and their respective licenses.
+This document lists the third-party software dependencies used in OMA (Oracle Modernization Agent) and their respective licenses.
 
 ## All Dependencies (Installed)
 

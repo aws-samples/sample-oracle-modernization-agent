@@ -1,6 +1,6 @@
 # OMA System Documentation
 
-**Oracle Migration Assistant - 시스템 전체 문서**
+**Oracle Modernization Agent - 시스템 전체 문서**
 
 **버전**: 3.4
 **최종 업데이트**: 2026-03-05
