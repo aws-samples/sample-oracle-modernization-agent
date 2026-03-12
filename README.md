@@ -139,6 +139,8 @@ Want to try OMA quickly? The `example/` folder has a sample Spring Boot app with
 cd example && ./setup.sh && ./run.sh
 ```
 
+![Demo](docs/demo.gif)
+
 See [example/README.md](example/README.md) for details.
 
 ## How It Works
