@@ -25,6 +25,9 @@ venv/
 # Project specific
 output/
 example/output/
+example/.mcp.json
+example/AGENT.md
+example/skills
 src/config/
 src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
