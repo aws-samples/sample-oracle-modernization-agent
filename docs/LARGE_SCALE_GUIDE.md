@@ -61,13 +61,17 @@ aws service-quotas get-service-quota \
 | **Orchestrator** | 소~중규모, 처음 실행 | `python3 src/run_orchestrator.py` |
 | **개별 단계** | 대규모, 세밀한 제어 필요 | 아래 참조 |
 
-대규모(300+ SQL)에서는 **단계별 개별 실행**을 권장한다:
+대규모(300+ SQL)에서는 **샘플 변환으로 검증 후 전체 실행**을 권장한다:
 
 ```bash
 # 1. Setup (1회)
 python3 src/run_setup.py
 
-# 2. Transform — 가장 오래 걸림, worker 조절 중요
+# 2-a. Sample Transform — 전략 품질 사전 검증 (5~10개)
+python3 src/run_sql_transform.py --sample 10 --workers 4
+# 결과 확인 후 문제 없으면 전체 실행
+
+# 2-b. Transform — 가장 오래 걸림, worker 조절 중요
 python3 src/run_sql_transform.py --workers 6
 
 # 3. Review — 내부 병렬(Syntax+Equiv) 고려하여 worker 절반
@@ -268,7 +272,7 @@ sqlite3 output/oma_control.db \
 
 **대응**: Orchestrator로 개별 SQL 재처리:
 ```
-🧑 > ProblemMapper.xml의 selectComplexQuery 재변환해줘
+⚛️  > ProblemMapper.xml의 selectComplexQuery 재변환해줘
 ```
 
 ### 4. Prompt Caching 미작동 (비용 급증)

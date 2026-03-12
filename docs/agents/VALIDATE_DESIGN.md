@@ -429,7 +429,7 @@ def validate_sql_batch(group_id: str, sqls: List[dict]) -> dict:
 # Orchestrator를 통한 실행
 python3 src/run_orchestrator.py
 
-🧑 > 검증 단계 실행해줘
+⚛️  > 검증 단계 실행해줘
 🤖 > [run_step('validate')]
      
      📊 검증 진행 상황:
@@ -458,7 +458,7 @@ python3 src/run_sql_validate.py --retry-failed
 
 ```bash
 # Orchestrator를 통한 개별 검증
-🧑 > UserMapper.xml의 selectUserList 검증해봐
+⚛️  > UserMapper.xml의 selectUserList 검증해봐
 🤖 > [validate_single_sql("UserMapper.xml", "selectUserList")]
      
      검증 결과:
@@ -466,7 +466,7 @@ python3 src/run_sql_validate.py --retry-failed
      
      자동 수정을 시도하시겠습니까? (y/n)
 
-🧑 > y
+⚛️  > y
 🤖 > [fix_validation_errors("selectUserList", ["NVL2 conversion error"])]
      
      ✅ 자동 수정 완료

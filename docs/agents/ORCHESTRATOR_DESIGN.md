@@ -619,7 +619,7 @@ python3 src/run_orchestrator.py
 🤖 OMA Orchestrator에 오신 것을 환영합니다!
    Oracle → PostgreSQL 마이그레이션을 도와드리겠습니다.
 
-🧑 > 전체 파이프라인 실행해줘
+⚛️  > 전체 파이프라인 실행해줘
 
 🤖 > 환경 설정을 확인하겠습니다...
    ✅ setup.json 존재
@@ -665,7 +665,7 @@ python3 src/run_orchestrator.py
    - 변환된 XML: output/mapper/
    - 상세 보고서: reports/migration_report.md
 
-🧑 > 수동 검토 필요한 SQL들 보여줘
+⚛️  > 수동 검토 필요한 SQL들 보여줘
 
 🤖 > 수동 검토가 필요한 5개 SQL을 확인했습니다:
    
@@ -685,7 +685,7 @@ python3 src/run_orchestrator.py
 ### 6.2 단계별 제어
 
 ```
-🧑 > 현재 상태 확인해줘
+⚛️  > 현재 상태 확인해줘
 
 🤖 > 📊 현재 파이프라인 상태:
    
@@ -698,7 +698,7 @@ python3 src/run_orchestrator.py
    
    전체 진행률: 35%
 
-🧑 > 변환 단계 재수행해줘
+⚛️  > 변환 단계 재수행해줘
 
 🤖 > Transform 단계를 초기화하고 재실행하겠습니다.
    
@@ -711,7 +711,7 @@ python3 src/run_orchestrator.py
    
    다음 단계(Validate)를 실행하시겠습니까?
 
-🧑 > 네, 계속 진행해줘
+⚛️  > 네, 계속 진행해줘
 
 🤖 > ✅ Validate 단계를 시작합니다...
 ```
@@ -719,7 +719,7 @@ python3 src/run_orchestrator.py
 ### 6.3 SQL 검색 및 테스트
 
 ```
-🧑 > User 관련 SQL 테스트해봐
+⚛️  > User 관련 SQL 테스트해봐
 
 🤖 > "User" 키워드로 검색한 결과:
    
@@ -735,7 +735,7 @@ python3 src/run_orchestrator.py
    
    어떤 SQL을 테스트하시겠습니까? (번호 또는 SQL ID 입력)
 
-🧑 > selectUserList
+⚛️  > selectUserList
 
 🤖 > UserMapper.xml의 selectUserList를 테스트하겠습니다...
    
@@ -756,7 +756,7 @@ python3 src/run_orchestrator.py
    
    다른 SQL도 테스트하시겠습니까?
 
-🧑 > OrderMapper.xml의 selectOrderByUser도 테스트해봐
+⚛️  > OrderMapper.xml의 selectOrderByUser도 테스트해봐
 
 🤖 > OrderMapper.xml의 selectOrderByUser를 테스트하겠습니다...
    
@@ -786,7 +786,7 @@ python3 src/run_orchestrator.py
 ### 6.4 전략 관리
 
 ```
-🧑 > 전략 압축해줘
+⚛️  > 전략 압축해줘
 
 🤖 > 전략 파일 상태를 확인하겠습니다...
    
@@ -813,7 +813,7 @@ python3 src/run_orchestrator.py
    
    압축된 전략이 더 효율적으로 Transform Agent에 적용됩니다.
 
-🧑 > 전략 상태 확인해줘
+⚛️  > 전략 상태 확인해줘
 
 🤖 > 📋 전략 상태 요약:
    

@@ -530,7 +530,7 @@ if not metadata_exists:
 ```bash
 # 자동 실행 (Orchestrator)
 python3 src/run_orchestrator.py
-🧑 > 전체 파이프라인 실행해줘
+⚛️  > 전체 파이프라인 실행해줘
 
 # 수동 실행
 python3 src/run_sql_transform.py --workers 8

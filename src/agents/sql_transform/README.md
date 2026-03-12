@@ -42,8 +42,12 @@ sql_transform/
 Loads mapper file list from database (`source_xml_list` table).
 - **Returns:** `{mappers: [{file_path, file_name, relative_path}]}`
 
-#### `get_pending_transforms()`
+#### `get_pending_transforms(sample=0)`
 Gets SQL IDs where `transformed='N'` from `transform_target_list`.
+- **`sample`**: If > 0, returns at most N items using representative sampling:
+  1. One per sql_type (SELECT > INSERT > UPDATE > DELETE), spread across mappers
+  2. Remaining slots filled by mapper round-robin
+  3. If no pending items exist, picks N from all items and resets only those
 - **Returns:** `{total, pending: {mapper_file: [{sql_id, sql_type, source_file, target_file}]}}`
 
 #### `read_sql_source(mapper_file, sql_id)`
@@ -191,6 +195,7 @@ python3 src/run_sql_transform.py --reset --workers 8
 
 - `--reset`: Full reset - drops database tables and clears output folders
 - `--workers N`: Number of parallel workers (default: 8)
+- `--sample N`: Transform only N representative SQLs (0 = all)
 
 ### Execution Examples
 
@@ -198,11 +203,11 @@ python3 src/run_sql_transform.py --reset --workers 8
 # Full reset and conversion with 8 workers
 python3 src/run_sql_transform.py --reset --workers 8
 
+# Sample transform: 5 representative SQLs to verify strategy quality
+python3 src/run_sql_transform.py --sample 5
+
 # Resume interrupted conversion with 4 workers
 python3 src/run_sql_transform.py --workers 4
-
-# Single-threaded processing
-python3 src/run_sql_transform.py --workers 1
 ```
 
 ## Model Configuration
@@ -219,20 +224,10 @@ python3 src/run_sql_transform.py --workers 1
 - **Format:** One log file per mapper (`{mapper_name}.log`)
 - **Real-time:** Console monitoring shows key activities
 
-### Log Indicators
-- `🔄 group`: Processing group of SQL IDs
-- `💾`: SQL conversion saved
-- `✅`: Mapper completion
-- `❌`: Error occurred
-- `📦`: Assembly operation
-
-### Status Reporting
-Final report includes:
-- Total SQL IDs processed
-- Conversion success rate
-- Merge file count
-- Failed mappers with error details
-- Resume instructions for incomplete conversions
+### Progress Display
+- **Rich progress bar**: Real-time bar with SQL count, percentage, elapsed time
+- **Result panel**: Rich panel with transformed/remaining/failed summary
+- Log files per mapper in `logs/transform/`
 
 ## Error Handling
 
