@@ -1,8 +1,10 @@
-# OMA - Oracle Modernization Agent
+# Application SQL Transform Agent
+
+> Part of **OMA (Oracle Modernization Agent)**
 
 ## Project Description
 
-OMA (Oracle Modernization Agent) is an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
+Application SQL Transform Agent is a sub-module of OMA, an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
 
 - **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to PostgreSQL syntax
 - **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review [multi-perspective: Syntax + Equivalence] → Validate → Test) ensures conversion accuracy

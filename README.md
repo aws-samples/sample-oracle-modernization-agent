@@ -1,19 +1,20 @@
-# OMA - Oracle Modernization Agent
+# Application SQL Transform Agent
+
+> Part of **OMA (Oracle Modernization Agent)** — an AI-powered Oracle to PostgreSQL modernization toolkit.
 
 > ⚠️ Sample code for educational purposes. Not for production use without review. See [Disclaimer](#disclaimer).
 
-## What is OMA?
+## What is this?
 
-OMA is an AI-powered Multi-Agent system that automatically transforms Oracle SQL to PostgreSQL.
-It converts, validates, and tests hundreds to thousands of SQL statements in MyBatis Mapper XML files, reducing migration time from months to days.
+**Application SQL Transform Agent** is a sub-module of OMA that automatically transforms Oracle SQL to PostgreSQL in MyBatis Mapper XML files. It converts, validates, and tests hundreds to thousands of SQL statements, reducing migration time from months to days.
 
 Instead of DBAs and developers manually converting and testing SQL, AI Agents automatically handle the process and complete validation against real databases.
 
 <details>
 <summary><b>한글 설명 보기</b></summary>
 
-OMA는 Oracle SQL을 PostgreSQL로 자동 변환하는 AI 기반 Multi-Agent 시스템입니다.
-MyBatis Mapper XML 내 수백~수천 개의 SQL을 AI가 자동으로 변환, 검증, 테스트하여 마이그레이션 기간을 수개월에서 수일로 단축합니다.
+**Application SQL Transform Agent**는 OMA의 서브 모듈로, MyBatis Mapper XML 내 Oracle SQL을 PostgreSQL로 자동 변환합니다.
+수백~수천 개의 SQL을 AI가 자동으로 변환, 검증, 테스트하여 마이그레이션 기간을 수개월에서 수일로 단축합니다.
 
 DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI Agent가 자동으로 처리하고 실제 DB에서 검증까지 완료합니다.
 

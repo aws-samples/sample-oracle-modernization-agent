@@ -1,6 +1,6 @@
 # Orchestrator Agent
 
-The Orchestrator Agent is an interactive AI assistant that manages and controls the OMA (Oracle Modernization Agent) pipeline for Oracle to PostgreSQL database migrations. It provides a conversational interface to monitor pipeline status, execute steps, and manage the entire migration workflow.
+The Orchestrator Agent is an interactive AI assistant that manages and controls the Application SQL Transform Agent pipeline for Oracle to PostgreSQL database migrations. It provides a conversational interface to monitor pipeline status, execute steps, and manage the entire migration workflow.
 
 ## Overview
 

@@ -1,6 +1,6 @@
-# OMA System Documentation
+# Application SQL Transform Agent — System Documentation
 
-**Oracle Modernization Agent - 시스템 전체 문서**
+**OMA 서브 모듈: Application SQL Transform Agent 시스템 문서**
 
 **버전**: 4.0
 **최종 업데이트**: 2026-03-13
