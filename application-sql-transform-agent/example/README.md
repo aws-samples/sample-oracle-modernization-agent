@@ -7,7 +7,9 @@ Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- AWS credentials configured (`aws configure`) with Bedrock access
+- AWS credentials configured (`aws configure`) with **Bedrock access only**
+
+> **Note:** PostgreSQL (target DB) is NOT required for this example. All pipeline steps except Test work without a database. During setup, skip the DB connection prompt (`n`). Only Bedrock API access is needed.
 
 ## Run
 
@@ -31,11 +33,20 @@ cd example
 ### After setup
 
 In the orchestrator, type commands like:
-- `분석 시작` — analyze mapper XMLs
-- `변환 시작` — transform Oracle SQL to PostgreSQL
-- `리뷰 시작` — multi-perspective review
-- `검증 시작` — functional equivalence validation
-- `종료` — exit
+
+| Command | Description |
+|---------|-------------|
+| `전체 수행` | Run full pipeline (Analyze → Transform → Review → Validate → Merge) |
+| `분석 수행` | Analyze only — scan mappers, extract SQLs, generate strategy |
+| `변환 수행` | Transform only — Oracle → PostgreSQL conversion |
+| `샘플 변환 5개` | Sample transform — 5 representative SQLs first |
+| `리뷰 수행` | Review only — multi-perspective rule compliance check |
+| `검증 수행` | Validate only — functional equivalence verification |
+| `병합 수행` | Merge only — reassemble final mapper XMLs |
+| `진행 단계 확인` | Check pipeline status |
+| `종료` | Exit |
+
+> Test step is automatically skipped when no DB is configured. All other steps work without a database.
 
 ## What's included
 
