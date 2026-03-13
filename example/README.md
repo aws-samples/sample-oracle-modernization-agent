@@ -15,20 +15,11 @@ Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
 
 ```bash
 cd example
-./setup.sh    # 1회: 의존성 설치 (uv) + 프로젝트 설정
+./setup.sh    # 1회: 의존성 설치 + 자동 설정 (프롬프트 없음)
 ./run.sh      # 이후: 오케스트레이터 실행
 ```
 
-### Setup hints
-
-| Prompt | What to enter |
-|--------|---------------|
-| `JAVA_SOURCE_FOLDER` | The script prints the path — just copy and paste it |
-| `SOURCE_DBMS_TYPE` | `oracle` (default) |
-| `TARGET_DBMS_TYPE` | `postgresql` (default) |
-| `OMA_MODEL_ID` | Press Enter for default (Sonnet 4.5) |
-| `OMA_LITE_MODEL_ID` | Press Enter for default (Haiku 4.5) |
-| `DB 접속 정보 설정?` | **`n`** — not needed for this example |
+> `setup.sh` uses default values automatically. For manual configuration, use `./setup.sh --interactive`.
 
 ### After setup
 

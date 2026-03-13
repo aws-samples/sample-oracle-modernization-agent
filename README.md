@@ -1,5 +1,10 @@
 # Application SQL Transform Agent
 
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![AWS](https://img.shields.io/badge/AWS-Bedrock-orange)
+![Agents](https://img.shields.io/badge/agents-8-purple)
+
 > Part of **OMA (Oracle Modernization Agent)** — an AI-powered Oracle to PostgreSQL modernization toolkit.
 
 > ⚠️ Sample code for educational purposes. Not for production use without review. See [Disclaimer](#disclaimer).
@@ -19,6 +24,25 @@ Instead of DBAs and developers manually converting and testing SQL, AI Agents au
 DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI Agent가 자동으로 처리하고 실제 DB에서 검증까지 완료합니다.
 
 </details>
+
+### Before → After
+
+```sql
+-- Oracle (Before)
+SELECT NVL(u.name, '없음'), DECODE(u.status, 'A', '활성', '비활성')
+FROM users u, orders o
+WHERE u.id = o.user_id(+)
+  AND ROWNUM <= 10
+```
+```sql
+-- PostgreSQL (After)
+SELECT COALESCE(u.name, '없음'), CASE u.status WHEN 'A' THEN '활성' ELSE '비활성' END
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+LIMIT 10
+```
+
+> 42 SQLs across 3 mappers — 100% transformed, 100% review passed (example project)
 
 ## Input → Output
 
