@@ -33,12 +33,20 @@ cd example
 ### After setup
 
 In the orchestrator, type commands like:
-- `전체 수행` — run full pipeline (Analyze → Transform → Review → Validate → Merge)
-- `샘플 변환 5개` — sample transform 5 representative SQLs first
-- `진행 단계 확인` — check pipeline status
-- `종료` — exit
 
-> Test step is automatically skipped when no DB is configured.
+| Command | Description |
+|---------|-------------|
+| `전체 수행` | Run full pipeline (Analyze → Transform → Review → Validate → Merge) |
+| `분석 수행` | Analyze only — scan mappers, extract SQLs, generate strategy |
+| `변환 수행` | Transform only — Oracle → PostgreSQL conversion |
+| `샘플 변환 5개` | Sample transform — 5 representative SQLs first |
+| `리뷰 수행` | Review only — multi-perspective rule compliance check |
+| `검증 수행` | Validate only — functional equivalence verification |
+| `병합 수행` | Merge only — reassemble final mapper XMLs |
+| `진행 단계 확인` | Check pipeline status |
+| `종료` | Exit |
+
+> Test step is automatically skipped when no DB is configured. All other steps work without a database.
 
 ## What's included
 
