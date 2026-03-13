@@ -252,5 +252,40 @@ def run():
     print("🚀 이제 run_source_analyzer.py를 실행하세요.")
 
 
+def run_defaults(java_source_folder: str):
+    """Non-interactive setup with default values (for example/CI)."""
+    print("🔧 OMA Environment Setup (non-interactive)\n")
+
+    print(f"  📁 작업 디렉토리: {OUTPUT_DIR}")
+    init_db()
+    print(f"  ✅ DB: {DB_PATH}")
+
+    if not Path(java_source_folder).exists():
+        print(f"  ❌ 경로 없음: {java_source_folder}")
+        sys.exit(1)
+
+    set_property('JAVA_SOURCE_FOLDER', java_source_folder, 'Java source code root path')
+    set_property('SOURCE_DBMS_TYPE', 'oracle', 'Source database type')
+    set_property('TARGET_DBMS_TYPE', 'postgresql', 'Target database type')
+
+    from utils.project_paths import DEFAULT_MODEL_ID, DEFAULT_LITE_MODEL_ID
+    set_property('OMA_MODEL_ID', DEFAULT_MODEL_ID, 'Bedrock model ID for all agents')
+    set_property('OMA_LITE_MODEL_ID', DEFAULT_LITE_MODEL_ID, 'Lite Bedrock model ID')
+
+    print(f"  ✅ Source: {java_source_folder}")
+    print(f"  ✅ Model: {DEFAULT_MODEL_ID}")
+    print(f"  ⏭️  DB 접속 정보: 건너뜀 (Test 단계 제외 모두 수행 가능)")
+    print("\n✅ 설정 완료")
+
+
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--defaults', metavar='JAVA_SOURCE_FOLDER',
+                        help='Non-interactive setup with defaults')
+    args = parser.parse_args()
+
+    if args.defaults:
+        run_defaults(args.defaults)
+    else:
+        run()

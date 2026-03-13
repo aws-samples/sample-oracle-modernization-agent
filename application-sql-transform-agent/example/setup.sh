@@ -1,9 +1,10 @@
 #!/bin/bash
-# OMA Example — Setup (venv + dependencies + interactive config)
+# OMA Example — Setup (dependencies + config)
 #
 # Usage:
 #   cd example
-#   ./setup.sh
+#   ./setup.sh             # non-interactive (recommended)
+#   ./setup.sh --interactive   # manual config
 
 set -e
 
@@ -24,15 +25,16 @@ echo ""
 
 # --- OMA Setup ---
 
-echo "=== OMA Setup ==="
-echo ""
-echo "Mapper XML location (copy this when prompted for JAVA_SOURCE_FOLDER):"
-echo "  $MAPPER_DIR"
-echo ""
-echo "NOTE: This is an example run. DB connection info is NOT required."
-echo "      When asked 'DB 접속 정보를 지금 설정하시겠습니까?', enter 'n'."
-echo "      (Transform, Review, Validate steps work without DB)"
-echo ""
-
 cd "$SRC_DIR"
-uv run --project "$PROJECT_ROOT" python run_setup.py
+
+if [ "$1" = "--interactive" ]; then
+    echo "=== OMA Setup (interactive) ==="
+    echo ""
+    echo "Mapper XML location (copy this when prompted for JAVA_SOURCE_FOLDER):"
+    echo "  $MAPPER_DIR"
+    echo ""
+    uv run --project "$PROJECT_ROOT" python run_setup.py
+else
+    echo "=== OMA Setup (auto) ==="
+    uv run --project "$PROJECT_ROOT" python run_setup.py --defaults "$MAPPER_DIR"
+fi
