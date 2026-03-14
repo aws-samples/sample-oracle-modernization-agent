@@ -157,7 +157,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 cmd = ['psql', '-c', f'EXPLAIN {sql_body}']
                 run_env = {**os.environ, **db_env}
 
-            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — cmd is a fixed list, no shell=True
+            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit, dangerous-subprocess-use-tainted-env-args — EXPLAIN on converted SQL, no shell=True, env from trusted DB config
                 cmd,
                 capture_output=True, text=True, timeout=15,
                 env=run_env,
