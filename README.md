@@ -5,23 +5,23 @@
 ![AWS](https://img.shields.io/badge/AWS-Bedrock-orange)
 ![Agents](https://img.shields.io/badge/agents-8-purple)
 
-> Part of **OMA (Oracle Modernization Agent)** — an AI-powered Oracle to PostgreSQL modernization toolkit.
+> Part of **OMA (Oracle Modernization Agent)** — an AI-powered Oracle to PostgreSQL/MySQL modernization toolkit.
 
 > ⚠️ Sample code for educational purposes. Not for production use without review. See [Disclaimer](#disclaimer).
 
 ## What is this?
 
-**Application SQL Transform Agent** is a sub-module of OMA that automatically transforms Oracle SQL to PostgreSQL in MyBatis Mapper XML files. It converts, validates, and tests hundreds to thousands of SQL statements, reducing migration time from months to days.
+**Application SQL Transform Agent** is a sub-module of OMA that automatically transforms Oracle SQL to PostgreSQL/MySQL in MyBatis Mapper XML files. It converts, validates, and tests hundreds to thousands of SQL statements, reducing migration time from months to days.
 
-Instead of DBAs and developers manually converting and testing SQL, AI Agents automatically handle the process and complete validation against real databases.
+Instead of DBAs and developers manually converting and testing SQL, AI Agents automatically handle the process and complete validation against the target database.
 
 <details>
 <summary><b>한글 설명 보기</b></summary>
 
-**Application SQL Transform Agent**는 OMA의 서브 모듈로, MyBatis Mapper XML 내 Oracle SQL을 PostgreSQL로 자동 변환합니다.
+**Application SQL Transform Agent**는 OMA의 서브 모듈로, MyBatis Mapper XML 내 Oracle SQL을 PostgreSQL/MySQL로 자동 변환합니다.
 수백~수천 개의 SQL을 AI가 자동으로 변환, 검증, 테스트하여 마이그레이션 기간을 수개월에서 수일로 단축합니다.
 
-DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI Agent가 자동으로 처리하고 실제 DB에서 검증까지 완료합니다.
+DBA/개발팀이 수작업으로 SQL을 변환하고 테스트하는 대신, AI Agent가 자동으로 처리하고 타겟 DB에서 검증까지 완료합니다.
 
 </details>
 
@@ -51,7 +51,7 @@ LIMIT 10
 │                     │         │                              │         │                         │
 │   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
 │                     │  ────▶  │                              │  ────▶  │                         │
-│  MyBatis Mapper XML │         │  Orchestrator (Control Hub)  │         │  PostgreSQL Mapper XML  │
+│  MyBatis Mapper XML │         │  Orchestrator (Control Hub)  │         │  Target DB Mapper XML   │
 │  (Oracle SQL)       │         │   ├─ Single SQL Processing   │         │  (Validated)            │
 │                     │         │   └─ Pipeline Control        │         │                         │
 │                     │         │                              │         │                         │
@@ -67,7 +67,7 @@ LIMIT 10
 │                     │         │   └─ Strategy Refine         │         │                         │
 └─────────────────────┘         └──────────────────────────────┘         └─────────────────────────┘
 
-   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (PostgreSQL)
+   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (Target DB)
    • OrderMapper.xml           • Source Analyzer            ✅ Rule Compliance Verified
    • ProductMapper.xml         • Transform Agent            ✅ Functional Equivalence Verified
    • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Passed
@@ -94,7 +94,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 │                     │         │                              │         │                         │
 │   📂 Input          │         │  🤖 OMA                      │         │   ✅ Output             │
 │                     │  ────▶  │                              │  ────▶  │                         │
-│  MyBatis Mapper XML │         │  Orchestrator (Control)      │         │  PostgreSQL Mapper XML  │
+│  MyBatis Mapper XML │         │  Orchestrator (Control)      │         │  Target DB Mapper XML   │
 │  (Oracle SQL)       │         │   ├─ Single SQL Process      │         │  (Validated)            │
 │                     │         │   └─ Pipeline Control        │         │                         │
 │                     │         │                              │         │                         │
@@ -110,7 +110,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 │                     │         │   └─ Strategy Refine         │         │                         │
 └─────────────────────┘         └──────────────────────────────┘         └─────────────────────────┘
 
-   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (PostgreSQL)
+   • UserMapper.xml           Pipeline Agents:              ✅ Converted SQL (Target DB)
    • OrderMapper.xml           • Source Analyzer            ✅ Rule Compliance Check
    • ProductMapper.xml         • Transform Agent            ✅ Functional Equivalence
    • 100+ SQL Statements       • Review Agent               ✅ DB Execution Test Pass
@@ -202,7 +202,7 @@ python3 src/run_orchestrator.py
 
 🤖 > Checking setup...
      ✅ Java path: /usr/lib/jvm/java-11
-     ✅ PostgreSQL connection: OK
+     ✅ Target DB connection: OK
      
      Step 1: Starting source analysis...
      ✅ Scanned 11 Mappers
@@ -238,7 +238,7 @@ python3 src/run_orchestrator.py
 
 � > Setup 확인 중...
      ✅ Java 경로: /usr/lib/jvm/java-11
-     ✅ PostgreSQL 접속: 정상
+     ✅ 타겟 DB 접속: 정상
      
      Step 1: 소스 분석 시작...
      ✅ 11개 Mapper 스캔 완료
@@ -272,7 +272,7 @@ python3 src/run_orchestrator.py
 
 | Asset | Description | Location |
 |-------|-------------|----------|
-| **PostgreSQL SQL** | Converted SQL (127 statements) | `output/transform/` |
+| **Target DB SQL** | Converted SQL (127 statements) | `output/transform/` |
 | **Conversion Strategy** | Project-specific patterns | `output/strategy/transform_strategy.md` |
 | **Final Mapper XML** | Deployable XML files | `output/merge/` |
 | **Fix History** | 3-way diff (ORIGINAL/BEFORE/AFTER) | `output/logs/fix_history/` |
@@ -284,7 +284,7 @@ python3 src/run_orchestrator.py
 
 | 생성 에셋 | 설명 | 위치 |
 |----------|------|------|
-| **PostgreSQL SQL** | 변환된 SQL (127개) | `output/transform/` |
+| **Target DB SQL** | 변환된 SQL (127개) | `output/transform/` |
 | **변환 전략** | 프로젝트 특화 패턴 | `output/strategy/transform_strategy.md` |
 | **최종 Mapper XML** | 배포 가능한 XML | `output/merge/` |
 | **수정 이력** | 3단 비교 (ORIGINAL/BEFORE/AFTER) | `output/logs/fix_history/` |
@@ -300,7 +300,7 @@ Review and approve conversion results with Diff Tools:
 ```
 ⚛️  > Compare conversion for selectUserList in UserMapper.xml
 
-🤖 > [Displays Oracle original vs PostgreSQL converted side-by-side]
+🤖 > [Displays Oracle original vs target DB converted side-by-side]
 
 ⚛️  > Approve it
 
@@ -313,7 +313,7 @@ Review and approve conversion results with Diff Tools:
 ```
 ⚛️  > UserMapper.xml의 selectUserList 변환 비교해줘
 
-🤖 > [Oracle 원본 vs PostgreSQL 변환본 표시]
+🤖 > [Oracle 원본 vs 타겟 DB 변환본 표시]
 
 ⚛️  > 승인해줘
 
@@ -333,7 +333,7 @@ Setup → Analyze → Transform → Review (multi-perspective) → Validate → 
 | Stage | Agent | Role | Output |
 |-------|-------|------|--------|
 | **Analyze** | Source Analyzer | Scan Mappers, extract SQL, analyze patterns | Conversion strategy |
-| **Transform** | Transform Agent | Oracle → PostgreSQL conversion | Converted SQL |
+| **Transform** | Transform Agent | Oracle → PostgreSQL/MySQL conversion | Converted SQL |
 | **Review** | Review Agent | Multi-perspective review: Syntax + Equivalence (FAIL → re-convert with specific feedback) | PASS/FAIL + feedback |
 | **Validate** | Validate Agent | Functional equivalence verification | Validated |
 | **Test** | Test Agent | Phase 0: EXPLAIN-based DML validation (no DB execution). Phase 1: DB execution test, error fixing | Test passed |
@@ -347,7 +347,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 | 단계 | Agent | 역할 | 출력 |
 |-----|-------|------|------|
 | **Analyze** | Source Analyzer | Mapper 스캔, SQL 추출, 패턴 분석 | 변환 전략 |
-| **Transform** | Transform Agent | Oracle → PostgreSQL 변환 | 변환된 SQL |
+| **Transform** | Transform Agent | Oracle → PostgreSQL/MySQL 변환 | 변환된 SQL |
 | **Review** | Review Agent | 다관점 리뷰: Syntax + Equivalence (FAIL → 구체적 피드백과 재변환) | PASS/FAIL + 피드백 |
 | **Validate** | Validate Agent | 기능 동등성 검증 | 검증 완료 |
 | **Test** | Test Agent | Phase 0: EXPLAIN 기반 DML 검증 (DB 실행 없음). Phase 1: DB 실행 테스트, 에러 수정 | 테스트 통과 |
@@ -381,7 +381,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 ### 4. Automated Quality Assurance
 - **Review**: Multi-perspective review (Syntax + Equivalence) → Auto re-convert with specific feedback on FAIL (max 3 rounds)
 - **Validate**: Functional equivalence verification → Auto fix on FAIL
-- **Test**: DB execution test → Error analysis and auto fix on FAIL (skipped if PostgreSQL is not configured)
+- **Test**: DB execution test → Error analysis and auto fix on FAIL (skipped if target database is not configured)
 - **Learning**: Automatically reflect fix patterns into strategy
 
 ### 5. Sample Transform
@@ -425,7 +425,7 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
 ### 4. 자동 품질 보증
 - **Review**: 다관점 리뷰 (Syntax + Equivalence) → FAIL 시 구체적 피드백과 자동 재변환 (최대 3라운드)
 - **Validate**: 기능 동등성 검증 → FAIL 시 자동 수정
-- **Test**: DB 실행 테스트 → FAIL 시 에러 분석 및 자동 수정 (PostgreSQL 미설정 시 skip)
+- **Test**: DB 실행 테스트 → FAIL 시 에러 분석 및 자동 수정 (타겟 DB 미설정 시 skip)
 - **Learning**: 수정 패턴을 전략에 자동 반영
 
 ### 5. 샘플 변환
@@ -483,7 +483,7 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 |-------|-----------|
 | **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
 | **Runtime** | Python 3.11 · uv (package manager) · ThreadPoolExecutor (8 parallel) |
-| **DB** | SQLite (state management) · PostgreSQL (target DB) |
+| **DB** | SQLite (state management) · PostgreSQL/MySQL (target DB) |
 | **UI** | Rich (progress bar · tables · colored diff) |
 | **External** | AWS Bedrock · Java MyBatis |
 | **Dependencies** | boto3 · defusedxml · rich · sqlalchemy |
@@ -495,7 +495,7 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 |--------|------|
 | **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
 | **Runtime** | Python 3.11 · uv (패키지 관리) · ThreadPoolExecutor (병렬 8) |
-| **DB** | SQLite (상태 관리) · PostgreSQL (타겟 DB) |
+| **DB** | SQLite (상태 관리) · PostgreSQL/MySQL (타겟 DB) |
 | **UI** | Rich (progress bar · 테이블 · 컬러 diff) |
 | **외부 연동** | AWS Bedrock · Java MyBatis |
 | **Dependencies** | boto3 · defusedxml · rich · sqlalchemy |
@@ -539,7 +539,7 @@ oma/
 - Python 3.10+ (recommended 3.11)
 - AWS credentials (Bedrock access)
 - Java 11+ (for SQL testing)
-- psql (for PostgreSQL metadata collection)
+- psql/mysql (for target DB metadata collection)
 
 ## AWS Permissions
 

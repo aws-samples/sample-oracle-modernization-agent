@@ -23,7 +23,7 @@ def _print_banner():
     # Title
     c.print()
     c.rule("[bold cyan]OMA · SQL Transform Agent[/bold cyan]")
-    c.print("[dim]Oracle → PostgreSQL Migration Pipeline[/dim]", justify="center")
+    c.print("[dim]Oracle SQL Migration Pipeline[/dim]", justify="center")
     c.print()
 
     # Command reference table

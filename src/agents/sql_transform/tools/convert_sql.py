@@ -59,12 +59,12 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
 def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = "") -> dict:
     """Save a converted SQL result to file and update DB flag.
 
-    The LLM performs the actual Oracle→PostgreSQL conversion.
+    The LLM performs the actual Oracle→Target DB conversion.
     This tool saves the converted result to the target file and sets transformed='Y'.
 
     Args:
         sql_id: SQL statement ID
-        converted_sql: Converted PostgreSQL SQL
+        converted_sql: Converted target DB SQL
         mapper_file: Source mapper file name
         notes: Conversion notes (e.g. 'MANUAL_REVIEW')
     """

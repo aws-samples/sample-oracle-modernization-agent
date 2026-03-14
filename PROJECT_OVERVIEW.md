@@ -4,13 +4,13 @@
 
 ## Project Description
 
-Application SQL Transform Agent is a sub-module of OMA, an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
+Application SQL Transform Agent is a sub-module of OMA, an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL/MySQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
 
-- **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to PostgreSQL syntax
+- **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to target database syntax (PostgreSQL or MySQL)
 - **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review [multi-perspective: Syntax + Equivalence] → Validate → Test) ensures conversion accuracy
 - **Sample Transform**: Run representative subset (N SQLs with type coverage + mapper round-robin) to verify strategy quality before full pipeline
 - **Intelligent Pattern Learning**: Dynamic strategy generation adapts to project-specific SQL patterns and automatically learns from failures
-- **Real Database Testing**: Validates converted SQL against actual PostgreSQL instances to ensure functional equivalence
+- **Real Database Testing**: Validates converted SQL against actual target database instances to ensure functional equivalence
 - **Rich Progress UI**: Real-time progress bars, structured pipeline status tables, git-like colored diff display
 - **Batch Processing Optimization**: Groups related SQL statements for efficient processing with prompt caching, reducing API costs by ~80%
 
@@ -34,7 +34,7 @@ OMA has demonstrated significant business value for enterprise database migratio
 
 ### Technical Advantages
 - **AWS Native Integration**: Seamless integration with AWS Bedrock and cloud-native services
-- **Open Source Foundation**: Built on PostgreSQL, eliminating vendor lock-in and enabling cloud-native architectures
+- **Open Source Foundation**: Built on PostgreSQL/MySQL, eliminating vendor lock-in and enabling cloud-native architectures
 - **Extensibility**: Multi-agent architecture allows easy addition of new validation stages or database targets
 - **Learning Capability**: Automatic pattern learning from failures improves conversion accuracy over time
 
@@ -43,7 +43,7 @@ This successful implementation validates the potential of GenAI technology to tr
 ## Target Use Cases
 
 - Enterprise applications with extensive MyBatis-based data access layers
-- Oracle to PostgreSQL migration projects requiring high conversion accuracy
+- Oracle to PostgreSQL/MySQL migration projects requiring high conversion accuracy
 - Organizations seeking to reduce Oracle licensing costs through open-source adoption
 - Teams needing automated validation and testing for database migrations
 - Large-scale migrations with hundreds or thousands of SQL statements
@@ -52,7 +52,7 @@ This successful implementation validates the potential of GenAI technology to tr
 
 - **AI Model**: Claude Sonnet 4.5 (AWS Bedrock)
 - **Framework**: Strands Agents SDK (v1.24.0+) - Multi-agent orchestration
-- **Target Database**: PostgreSQL
+- **Target Database**: PostgreSQL, MySQL
 - **Source Framework**: MyBatis (XML Mapper files)
 - **Programming Language**: Python 3.11+ (uv package manager)
 - **Key Dependencies**: boto3, defusedxml, rich, sqlalchemy

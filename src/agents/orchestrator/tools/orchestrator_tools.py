@@ -320,7 +320,7 @@ def run_step(step_name: str, sample: int = 0) -> RunStepResult:
     Args:
         step_name: Pipeline step to execute
             - 'analyze': Source analysis and strategy generation
-            - 'transform': SQL transformation (Oracle → PostgreSQL)
+            - 'transform': SQL transformation (Oracle → Target DB)
             - 'review': Rule compliance check
             - 'validate': Functional equivalence validation
             - 'test': Database execution testing
