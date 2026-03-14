@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
-from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, OUTPUT_DIR, MODEL_ID
+from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, OUTPUT_DIR, MODEL_ID, get_rules_path, get_target_db_display_name, load_prompt_text
 from core.progress import drain_progress
 
 from agents.sql_transform.tools.load_mapper_list import load_mapper_list, get_pending_transforms, read_sql_source
@@ -31,9 +31,9 @@ def load_prompt():
     global _prompt_cache
     if _prompt_cache is None:
         base_dir = Path(__file__).parent
-        prompt_text = (base_dir / "agents" / "sql_transform" / "prompt.md").read_text(encoding='utf-8')
+        prompt_text = load_prompt_text(base_dir / "agents" / "sql_transform" / "prompt.md")
 
-        rules_path = base_dir / "reference" / "oracle_to_postgresql_rules.md"
+        rules_path = get_rules_path()
         rules_text = rules_path.read_text(encoding='utf-8') if rules_path.exists() else ""
 
         strategy_path = base_dir.parent / "output" / "strategy" / "transform_strategy.md"
@@ -114,7 +114,7 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
             # Run agent (callback_handler=None suppresses streaming output)
             agent = create_agent()
             agent(
-                f"{mapper_file}의 다음 SQL ID들을 PostgreSQL로 변환해줘: {ids_str}\n"
+                f"{mapper_file}의 다음 SQL ID들을 {get_target_db_display_name()}로 변환해줘: {ids_str}\n"
                 f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
             )
 

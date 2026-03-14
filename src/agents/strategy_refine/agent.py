@@ -1,4 +1,4 @@
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, get_rules_path, load_prompt_text
 """Strategy Refine Agent — pattern addition, dedup, compaction"""
 from pathlib import Path
 from strands import Agent
@@ -10,9 +10,9 @@ from .tools.refine_tools import read_strategy, get_feedback_patterns, append_pat
 
 def _load_system_prompt():
     prompt_path = Path(__file__).parent / "prompt.md"
-    rules_path = Path(__file__).parents[2] / "reference" / "oracle_to_postgresql_rules.md"
+    rules_path = get_rules_path()
     return [
-        SystemContentBlock(text=prompt_path.read_text(encoding='utf-8')),
+        SystemContentBlock(text=load_prompt_text(prompt_path)),
         SystemContentBlock(cachePoint={"type": "default"}),
         SystemContentBlock(text=rules_path.read_text(encoding='utf-8')),
         SystemContentBlock(cachePoint={"type": "default"}),

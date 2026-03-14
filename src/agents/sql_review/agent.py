@@ -4,7 +4,7 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, get_rules_path, load_prompt_text
 from .tools.review_tools import get_pending_reviews, set_reviewed
 from agents.sql_transform.tools.load_mapper_list import read_sql_source
 from agents.sql_validate.tools.validate_tools import read_transform
@@ -19,9 +19,9 @@ from .perspectives import (
 
 def _load_system_prompt():
     prompt_path = Path(__file__).parent / "prompt.md"
-    rules_path = Path(__file__).parents[2] / "reference" / "oracle_to_postgresql_rules.md"
+    rules_path = get_rules_path()
     blocks = [
-        SystemContentBlock(text=prompt_path.read_text(encoding='utf-8')),
+        SystemContentBlock(text=load_prompt_text(prompt_path)),
         SystemContentBlock(cachePoint={"type": "default"}),
         SystemContentBlock(text=rules_path.read_text(encoding='utf-8')),
         SystemContentBlock(cachePoint={"type": "default"}),

@@ -1,4 +1,4 @@
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, load_prompt_text
 """OMA Orchestrator Agent - Pipeline controller"""
 from pathlib import Path
 from strands import Agent, tool
@@ -17,7 +17,7 @@ from agents.sql_validate.tools.single_validate import validate_single_sql
 
 def _load_system_prompt():
     prompt_path = Path(__file__).parent / "prompt.md"
-    text = prompt_path.read_text(encoding='utf-8')
+    text = load_prompt_text(prompt_path)
     return [
         SystemContentBlock(text=text),
         SystemContentBlock(cachePoint={"type": "default"})
