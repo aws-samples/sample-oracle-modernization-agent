@@ -320,7 +320,7 @@ def run_step(step_name: str, sample: int = 0) -> RunStepResult:
     Args:
         step_name: Pipeline step to execute
             - 'analyze': Source analysis and strategy generation
-            - 'transform': SQL transformation (Oracle → PostgreSQL)
+            - 'transform': SQL transformation (Oracle → Target DB)
             - 'review': Rule compliance check
             - 'validate': Functional equivalence validation
             - 'test': Database execution testing
@@ -386,10 +386,10 @@ def run_step(step_name: str, sample: int = 0) -> RunStepResult:
         details = f'{step_name} step completed successfully'
 
         # Detect skipped test (no DB connection)
-        if step_name == 'test' and 'No PostgreSQL connection info' in output:
+        if step_name == 'test' and 'connection info' in output and ('No ' in output or 'skipped' in output.lower()):
             result: RunStepResult = {
                 'status': 'skipped',
-                'details': 'Test skipped: PostgreSQL 접속 정보가 설정되지 않았습니다. run_setup.py에서 DB 접속 정보를 설정하세요.',
+                'details': 'Test skipped: DB 접속 정보가 설정되지 않았습니다. run_setup.py에서 DB 접속 정보를 설정하세요.',
                 'needs_merge': False
             }
             console_err.print("[yellow]Test skipped: DB connection info required[/yellow]")

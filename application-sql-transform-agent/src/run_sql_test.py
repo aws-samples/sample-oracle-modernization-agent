@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR
+from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, get_target_dbms, get_target_db_display_name
 from core.progress import drain_progress
 
 from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch
@@ -71,7 +71,7 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             f"=== Fix Procedure ===\n"
             f"For each SQL ID:\n"
             f"1. read_sql_source() to get Oracle original\n"
-            f"2. read_transform() to get current PostgreSQL SQL\n"
+            f"2. read_transform() to get current converted SQL\n"
             f"3. Analyze the error against both original and converted SQL, apply General Conversion Rules\n"
             f"4. convert_sql() to save the fix\n"
             f"5. run_single_test() to verify\n"
@@ -107,30 +107,47 @@ def run(max_workers=8):
     log_and_print(f"🧪 SQL Test 시작... [{time.strftime('%Y-%m-%d %H:%M:%S')}]")
     log_and_print("")
 
-    # Generate parameters.properties from DB
+    # Generate connection properties from DB based on TARGET_DBMS_TYPE
+    dbms = get_target_dbms()
+    display_name = get_target_db_display_name(dbms)
+
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT key, value FROM properties WHERE key LIKE 'PG%'")
-        pg_props = dict(cursor.fetchall())
+        if dbms == 'mysql':
+            cursor.execute("SELECT key, value FROM properties WHERE key LIKE 'MYSQL%'")
+        else:
+            cursor.execute("SELECT key, value FROM properties WHERE key LIKE 'PG%'")
+        db_props = dict(cursor.fetchall())
 
     TEST_DIR.mkdir(parents=True, exist_ok=True)
 
-    pg_params_file = PROJECT_ROOT / "src" / "reference" / "pg_connection.properties"
-    with open(pg_params_file, 'w', encoding='utf-8') as f:
-        f.write(f"# Auto-generated PostgreSQL connection parameters\n")
-        f.write(f"PGHOST={pg_props.get('PGHOST', '')}\n")
-        f.write(f"PGPORT={pg_props.get('PGPORT', '5432')}\n")
-        f.write(f"PGDATABASE={pg_props.get('PGDATABASE', '')}\n")
-        f.write(f"PGUSER={pg_props.get('PGUSER', '')}\n")
-        f.write(f"PGPASSWORD={pg_props.get('PGPASSWORD', '')}\n")
-    log_and_print(f"✅ Generated {pg_params_file}")
+    if dbms == 'mysql':
+        props_file = PROJECT_ROOT / "src" / "reference" / "mysql_connection.properties"
+        with open(props_file, 'w', encoding='utf-8') as f:
+            f.write(f"# Auto-generated MySQL connection parameters\n")
+            f.write(f"MYSQL_HOST={db_props.get('MYSQL_HOST', '')}\n")
+            f.write(f"MYSQL_PORT={db_props.get('MYSQL_PORT', '3306')}\n")
+            f.write(f"MYSQL_DATABASE={db_props.get('MYSQL_DATABASE', '')}\n")
+            f.write(f"MYSQL_USER={db_props.get('MYSQL_USER', '')}\n")
+            f.write(f"MYSQL_PASSWORD={db_props.get('MYSQL_PASSWORD', '')}\n")
+    else:
+        props_file = PROJECT_ROOT / "src" / "reference" / "pg_connection.properties"
+        with open(props_file, 'w', encoding='utf-8') as f:
+            f.write(f"# Auto-generated PostgreSQL connection parameters\n")
+            f.write(f"PGHOST={db_props.get('PGHOST', '')}\n")
+            f.write(f"PGPORT={db_props.get('PGPORT', '5432')}\n")
+            f.write(f"PGDATABASE={db_props.get('PGDATABASE', '')}\n")
+            f.write(f"PGUSER={db_props.get('PGUSER', '')}\n")
+            f.write(f"PGPASSWORD={db_props.get('PGPASSWORD', '')}\n")
+    log_and_print(f"Generated {props_file}")
 
     # Pre-check: DB connection available?
-    from agents.sql_transform.tools.metadata import _get_pg_connection_vars
-    if not _get_pg_connection_vars():
-        log_and_print("\n⚠️  No PostgreSQL connection info")
+    from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
+    conn_vars = _get_mysql_connection_vars() if dbms == 'mysql' else _get_pg_connection_vars()
+    if not conn_vars:
+        log_and_print(f"\nNo {display_name} connection info")
         log_and_print("Test 단계를 수행하려면 DB 접속 정보가 필요합니다.")
-        log_and_print("→ run_setup.py를 다시 실행하여 PostgreSQL 접속 정보를 설정하세요.")
+        log_and_print(f"run_setup.py를 다시 실행하여 {display_name} 접속 정보를 설정하세요.")
         return
 
     # Phase 0: EXPLAIN-based DML validation (no execution, no PK/NULL issues)
@@ -172,7 +189,7 @@ def run(max_workers=8):
 
     if bulk_result.get('status') == 'skipped':
         log_and_print(f"⚠️  {bulk_result['error']}")
-        log_and_print("PostgreSQL 접속 정보를 설정하세요 (env vars 또는 Parameter Store)")
+        log_and_print(f"{display_name} 접속 정보를 설정하세요 (env vars 또는 Parameter Store)")
         return
 
     if bulk_result.get('status') == 'error':

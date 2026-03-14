@@ -3,14 +3,14 @@ import sqlite3
 from strands import tool, Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
-from utils.project_paths import PROJECT_ROOT, DB_PATH, MODEL_ID
+from utils.project_paths import PROJECT_ROOT, DB_PATH, MODEL_ID, load_prompt_text, get_target_db_display_name
 from .test_tools import run_single_test
 
 
 def _load_test_prompt():
     prompt_path = PROJECT_ROOT / "src" / "agents" / "sql_test" / "prompt.md"
     return [
-        SystemContentBlock(text=prompt_path.read_text(encoding='utf-8')),
+        SystemContentBlock(text=load_prompt_text(prompt_path)),
         SystemContentBlock(cachePoint={"type": "default"})
     ]
 
@@ -19,7 +19,7 @@ def _load_test_prompt():
 def test_and_fix_single_sql(mapper_file: str, sql_id: str) -> dict:
     """Test a single SQL ID and auto-fix if it fails.
 
-    1. Runs the SQL test against PostgreSQL
+    1. Runs the SQL test against the target database
     2. If it fails, creates a Test Agent to analyze and fix the error
     3. Checks DB state to determine final result (not stdout parsing)
 
@@ -62,11 +62,12 @@ def test_and_fix_single_sql(mapper_file: str, sql_id: str) -> dict:
         callback_handler=None,
     )
 
+    target_db = get_target_db_display_name()
     agent(
-        f"{mapper_file}의 {sql_id}가 PostgreSQL 테스트에서 실패했습니다.\n\n"
+        f"{mapper_file}의 {sql_id}가 {target_db} 테스트에서 실패했습니다.\n\n"
         f"=== 에러 메시지 ===\n{error_msg}\n\n"
         f"=== 수정 절차 ===\n"
-        f"1. read_transform으로 현재 PostgreSQL SQL 읽기\n"
+        f"1. read_transform으로 현재 {target_db} SQL 읽기\n"
         f"2. 에러 메시지 분석\n"
         f"3. convert_sql로 수정된 SQL 저장\n"
         f"4. run_single_test로 재테스트\n"

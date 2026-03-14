@@ -67,3 +67,45 @@ def _load_model_id_by_key(env_key: str, db_key: str, default: str) -> str:
 
 MODEL_ID = _load_model_id_by_key("OMA_MODEL_ID", "OMA_MODEL_ID", DEFAULT_MODEL_ID)
 LITE_MODEL_ID = _load_model_id_by_key("OMA_LITE_MODEL_ID", "OMA_LITE_MODEL_ID", DEFAULT_LITE_MODEL_ID)
+
+# Reference directory
+REFERENCE_DIR = SRC_DIR / "reference"
+
+# Target DBMS configuration
+_SUPPORTED_DBMS = {"postgresql", "mysql"}
+_DBMS_DISPLAY_NAMES = {"postgresql": "PostgreSQL", "mysql": "MySQL"}
+_DBMS_RULES_FILES = {
+    "postgresql": "oracle_to_postgresql_rules.md",
+    "mysql": "oracle_to_mysql_rules.md",
+}
+
+
+def get_target_dbms() -> str:
+    """Get TARGET_DBMS_TYPE: env var > DB > default ('postgresql')"""
+    env_val = os.environ.get("TARGET_DBMS_TYPE", "").lower().strip()
+    if env_val in _SUPPORTED_DBMS:
+        return env_val
+    db_val = _load_from_db("TARGET_DBMS_TYPE")
+    if db_val and db_val.lower().strip() in _SUPPORTED_DBMS:
+        return db_val.lower().strip()
+    return "postgresql"
+
+
+def get_target_db_display_name(dbms: str | None = None) -> str:
+    """Get display name for target DBMS (e.g., 'PostgreSQL', 'MySQL')"""
+    dbms = dbms or get_target_dbms()
+    return _DBMS_DISPLAY_NAMES.get(dbms, dbms.upper())
+
+
+def load_prompt_text(prompt_path: Path, dbms: str | None = None) -> str:
+    """Load prompt file and replace {{TARGET_DB}} placeholder with actual target DB name."""
+    text = prompt_path.read_text(encoding="utf-8")
+    display_name = get_target_db_display_name(dbms)
+    return text.replace("{{TARGET_DB}}", display_name)
+
+
+def get_rules_path(dbms: str | None = None) -> Path:
+    """Get conversion rules file path for target DBMS"""
+    dbms = dbms or get_target_dbms()
+    filename = _DBMS_RULES_FILES.get(dbms, _DBMS_RULES_FILES["postgresql"])
+    return REFERENCE_DIR / filename

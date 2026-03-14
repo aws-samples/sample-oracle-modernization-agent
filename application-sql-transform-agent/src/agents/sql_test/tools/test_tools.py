@@ -7,11 +7,15 @@ import sqlite3
 import time
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR
-from agents.sql_transform.tools.metadata import _get_pg_connection_vars
+from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR, get_target_dbms, get_target_db_display_name
+from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
 
 
 REFERENCE_DIR = PROJECT_ROOT / "src" / "reference"
+_TEST_SCRIPTS = {
+    'postgresql': 'run_postgresql.sh',
+    'mysql': 'run_mysql.sh',
+}
 
 # MyBatis dynamic tags to strip for EXPLAIN-based validation
 _MYBATIS_TAG_PATTERN = re.compile(
@@ -92,16 +96,28 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
     Returns:
         Dict with passed/failed counts and failure details.
     """
-    if not _ensure_pg_env():
-        return {'status': 'skipped', 'error': 'No PostgreSQL connection info'}
+    dbms = get_target_dbms()
+    display_name = get_target_db_display_name(dbms)
 
-    pg_env = {
-        'PGHOST': os.environ.get('PGHOST', 'localhost'),
-        'PGPORT': os.environ.get('PGPORT', '5432'),
-        'PGDATABASE': os.environ.get('PGDATABASE', 'postgres'),
-        'PGUSER': os.environ.get('PGUSER', ''),
-        'PGPASSWORD': os.environ.get('PGPASSWORD', ''),
-    }
+    if not _ensure_db_env():
+        return {'status': 'skipped', 'error': f'No {display_name} connection info'}
+
+    if dbms == 'mysql':
+        db_env = {
+            'MYSQL_HOST': os.environ.get('MYSQL_HOST', 'localhost'),
+            'MYSQL_PORT': os.environ.get('MYSQL_PORT', '3306'),
+            'MYSQL_DATABASE': os.environ.get('MYSQL_DATABASE', 'test'),
+            'MYSQL_USER': os.environ.get('MYSQL_USER', ''),
+            'MYSQL_PWD': os.environ.get('MYSQL_PASSWORD', ''),
+        }
+    else:
+        db_env = {
+            'PGHOST': os.environ.get('PGHOST', 'localhost'),
+            'PGPORT': os.environ.get('PGPORT', '5432'),
+            'PGDATABASE': os.environ.get('PGDATABASE', 'postgres'),
+            'PGUSER': os.environ.get('PGUSER', ''),
+            'PGPASSWORD': os.environ.get('PGPASSWORD', ''),
+        }
 
     passed = 0
     failed = 0
@@ -125,10 +141,26 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
         sql_type, sql_body = extracted
 
         try:
+            if dbms == 'mysql':
+                # MySQL: strip ::type casts before EXPLAIN
+                sql_clean = re.sub(r'NULL::\w+', 'NULL', sql_body)
+                cmd = [
+                    'mysql',
+                    '-h', db_env.get('MYSQL_HOST', 'localhost'),
+                    '-P', db_env.get('MYSQL_PORT', '3306'),
+                    '-u', db_env.get('MYSQL_USER', 'root'),
+                    '-e', f'EXPLAIN {sql_clean}',
+                    os.environ.get('MYSQL_DATABASE', 'test'),
+                ]
+                run_env = {**os.environ, **db_env}
+            else:
+                cmd = ['psql', '-c', f'EXPLAIN {sql_body}']
+                run_env = {**os.environ, **db_env}
+
             result = subprocess.run(
-                ['psql', '-c', f'EXPLAIN {sql_body}'],
+                cmd,
                 capture_output=True, text=True, timeout=15,
-                env={**os.environ, **pg_env},
+                env=run_env,
             )
             if result.returncode == 0:
                 passed += 1
@@ -164,27 +196,39 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
     }
 
 
-def _ensure_pg_env():
-    """Set PostgreSQL env vars from Parameter Store if not already set."""
-    pg_vars = _get_pg_connection_vars()
-    if pg_vars:
-        os.environ.update(pg_vars)
-        return True
-    return False
+def _ensure_db_env() -> bool:
+    """Set target DB env vars from Parameter Store if not already set."""
+    dbms = get_target_dbms()
+    if dbms == 'mysql':
+        mysql_vars = _get_mysql_connection_vars()
+        if mysql_vars:
+            os.environ.update(mysql_vars)
+            return True
+        return False
+    else:
+        pg_vars = _get_pg_connection_vars()
+        if pg_vars:
+            os.environ.update(pg_vars)
+            return True
+        return False
 
 
 @tool
 def run_bulk_test(test_folder: str = "") -> dict:
     """Run Java MyBatis bulk executor on all transform/ XML files.
 
-    Executes run_postgresql.sh against the transform/ directory.
+    Executes test script against the transform/ directory.
     Returns JSON results with pass/fail per SQL ID.
 
     Args:
         test_folder: Override test folder path (default: output/transform/main/)
     """
-    if not _ensure_pg_env():
-        return {'status': 'skipped', 'error': 'No PostgreSQL connection info'}
+    dbms = get_target_dbms()
+    display_name = get_target_db_display_name(dbms)
+    test_script = _TEST_SCRIPTS.get(dbms, _TEST_SCRIPTS['postgresql'])
+
+    if not _ensure_db_env():
+        return {'status': 'skipped', 'error': f'No {display_name} connection info'}
 
     if not test_folder:
         test_folder = str(TRANSFORM_DIR / "main")
@@ -194,12 +238,12 @@ def run_bulk_test(test_folder: str = "") -> dict:
         # Convert to absolute path to prevent Java from creating relative directories
         test_folder_abs = str(Path(test_folder).resolve())
         
-        print(f"  🔧 Executing: bash run_postgresql.sh {test_folder_abs}", flush=True)
+        print(f"  🔧 Executing: bash {test_script} {test_folder_abs}", flush=True)
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
         print(f"  ⏱️  Timeout: 600s\n", flush=True)
         
         result = subprocess.run(
-            ['bash', 'run_postgresql.sh', test_folder_abs],
+            ['bash', test_script, test_folder_abs],
             capture_output=True, text=True, timeout=600,
             cwd=str(REFERENCE_DIR),
             env={**os.environ, 'TEST_FOLDER': test_folder_abs}
@@ -308,21 +352,25 @@ def run_bulk_test(test_folder: str = "") -> dict:
     except subprocess.TimeoutExpired:
         return {'status': 'timeout', 'error': 'Test execution timed out (600s)'}
     except FileNotFoundError:
-        return {'status': 'error', 'error': 'Java or run_postgresql.sh not found'}
+        return {'status': 'error', 'error': f'Java or {test_script} not found'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
 
 
 @tool
 def run_single_test(mapper_file: str, sql_id: str) -> dict:
-    """Run Java test for a single SQL ID against PostgreSQL.
+    """Run Java test for a single SQL ID against the target database.
 
     Args:
         mapper_file: Mapper file name
         sql_id: SQL statement ID
     """
-    if not _ensure_pg_env():
-        return {'status': 'skipped', 'error': 'No PostgreSQL connection info'}
+    dbms = get_target_dbms()
+    display_name = get_target_db_display_name(dbms)
+    test_script = _TEST_SCRIPTS.get(dbms, _TEST_SCRIPTS['postgresql'])
+
+    if not _ensure_db_env():
+        return {'status': 'skipped', 'error': f'No {display_name} connection info'}
 
     # Find the transform file
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
@@ -356,7 +404,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
         try:
             # Run bulk test on this single file
             result = subprocess.run(
-                ['bash', 'run_postgresql.sh', tmpdir],
+                ['bash', test_script, tmpdir],
                 capture_output=True, text=True, timeout=60,
                 cwd=str(REFERENCE_DIR),
                 env={**os.environ, 'TEST_FOLDER': tmpdir}

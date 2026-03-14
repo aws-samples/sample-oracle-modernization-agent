@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.project_paths import OUTPUT_DIR, DB_PATH
 
 # Keys that contain sensitive values — masked in output, entered via getpass
-_SENSITIVE_KEYS = {'ORACLE_SVC_PASSWORD', 'PGPASSWORD'}
+_SENSITIVE_KEYS = {'ORACLE_SVC_PASSWORD', 'PGPASSWORD', 'MYSQL_PASSWORD'}
 
 
 def init_db():
@@ -70,6 +70,113 @@ def ask_password(prompt: str, current: str = None) -> str:
             if user_input:
                 return user_input
             print("    ⚠️  값을 입력해주세요.")
+
+
+def _setup_pg_connection():
+    """PostgreSQL Target DB 접속 정보 설정."""
+    print("\n📋 PostgreSQL 접속 정보 (Target DB)\n")
+
+    pg_host = ask("PGHOST", get_property('PGHOST'))
+    pg_port = ask("PGPORT", get_property('PGPORT') or '5432')
+    pg_database = ask("PGDATABASE", get_property('PGDATABASE'))
+    pg_user = ask("PGUSER", get_property('PGUSER'))
+    pg_password = ask_password("PGPASSWORD", get_property('PGPASSWORD'))
+
+    set_property('PGHOST', pg_host, 'PostgreSQL host')
+    set_property('PGPORT', pg_port, 'PostgreSQL port')
+    set_property('PGDATABASE', pg_database, 'PostgreSQL database')
+    set_property('PGUSER', pg_user, 'PostgreSQL user')
+    set_property('PGPASSWORD', pg_password, 'PostgreSQL password')
+
+    # Parameter Store 저장
+    print("\n📡 AWS Parameter Store 저장 (PostgreSQL)...", flush=True)
+    try:
+        import boto3
+        ssm = boto3.client('ssm', region_name='us-east-1')
+        ssm_prefix = "/oma/target_postgres/"
+        params = {
+            'host': pg_host, 'port': pg_port, 'database': pg_database,
+            'username': pg_user, 'password': pg_password
+        }
+        for key, value in params.items():
+            param_type = 'SecureString' if key == 'password' else 'String'
+            ssm.put_parameter(Name=f"{ssm_prefix}{key}", Value=value, Type=param_type, Overwrite=True)
+        print(f"  ✅ Parameter Store 저장 완료 ({ssm_prefix}*)")
+    except Exception as e:
+        print(f"  ⚠️  Parameter Store 저장 실패: {e}")
+        print("  → 환경변수로 직접 설정하거나 나중에 다시 시도하세요.")
+
+    # 접속 테스트
+    print("\n🔌 PostgreSQL 접속 테스트...", flush=True)
+    try:
+        import subprocess
+        env = {**os.environ, 'PGHOST': pg_host, 'PGPORT': pg_port,
+               'PGDATABASE': pg_database, 'PGUSER': pg_user, 'PGPASSWORD': pg_password}
+        result = subprocess.run(
+            ['psql', '-c', 'SELECT 1'],
+            capture_output=True, text=True, timeout=10, env=env
+        )
+        if result.returncode == 0:
+            print("  ✅ 접속 성공!")
+        else:
+            print(f"  ❌ 접속 실패: {result.stderr.strip()}")
+    except FileNotFoundError:
+        print("  ⚠️  psql 미설치 - 접속 테스트 스킵")
+    except Exception as e:
+        print(f"  ⚠️  접속 테스트 실패: {e}")
+
+
+def _setup_mysql_connection():
+    """MySQL Target DB 접속 정보 설정."""
+    print("\n📋 MySQL 접속 정보 (Target DB)\n")
+
+    mysql_host = ask("MYSQL_HOST", get_property('MYSQL_HOST'))
+    mysql_port = ask("MYSQL_PORT", get_property('MYSQL_PORT') or '3306')
+    mysql_database = ask("MYSQL_DATABASE", get_property('MYSQL_DATABASE'))
+    mysql_user = ask("MYSQL_USER", get_property('MYSQL_USER'))
+    mysql_password = ask_password("MYSQL_PASSWORD", get_property('MYSQL_PASSWORD'))
+
+    set_property('MYSQL_HOST', mysql_host, 'MySQL host')
+    set_property('MYSQL_PORT', mysql_port, 'MySQL port')
+    set_property('MYSQL_DATABASE', mysql_database, 'MySQL database')
+    set_property('MYSQL_USER', mysql_user, 'MySQL user')
+    set_property('MYSQL_PASSWORD', mysql_password, 'MySQL password')
+
+    # Parameter Store 저장
+    print("\n📡 AWS Parameter Store 저장 (MySQL)...", flush=True)
+    try:
+        import boto3
+        ssm = boto3.client('ssm', region_name='us-east-1')
+        ssm_prefix = "/oma/target_mysql/"
+        params = {
+            'host': mysql_host, 'port': mysql_port, 'database': mysql_database,
+            'username': mysql_user, 'password': mysql_password
+        }
+        for key, value in params.items():
+            param_type = 'SecureString' if key == 'password' else 'String'
+            ssm.put_parameter(Name=f"{ssm_prefix}{key}", Value=value, Type=param_type, Overwrite=True)
+        print(f"  ✅ Parameter Store 저장 완료 ({ssm_prefix}*)")
+    except Exception as e:
+        print(f"  ⚠️  Parameter Store 저장 실패: {e}")
+        print("  → 환경변수로 직접 설정하거나 나중에 다시 시도하세요.")
+
+    # 접속 테스트
+    print("\n🔌 MySQL 접속 테스트...", flush=True)
+    try:
+        import subprocess
+        cmd = ['mysql', '-h', mysql_host, '-P', mysql_port, '-u', mysql_user, '-e', 'SELECT 1']
+        env = {**os.environ}
+        if mysql_password:
+            env['MYSQL_PWD'] = mysql_password
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+        if result.returncode == 0:
+            print("  ✅ 접속 성공!")
+        else:
+            print(f"  ❌ 접속 실패: {result.stderr.strip()}")
+    except FileNotFoundError:
+        print("  ⚠️  mysql 미설치 - 접속 테스트 스킵")
+    except Exception as e:
+        print(f"  ⚠️  접속 테스트 실패: {e}")
 
 
 def run():
@@ -135,7 +242,7 @@ def run():
     print("ℹ️  데이터베이스 접속 정보 설정")
     print("="*70)
     print("  SQL 변환(Transform)과 검증(Validate)은 DB 없이도 수행 가능합니다.")
-    print("  테스트(Test) 단계에서만 PostgreSQL 접속이 필요합니다.")
+    print(f"  테스트(Test) 단계에서만 Target DB ({target_dbms.upper()}) 접속이 필요합니다.")
     print("="*70)
 
     setup_db = input("\n  DB 접속 정보를 지금 설정하시겠습니까? (y/n) [n]: ").strip().lower()
@@ -182,60 +289,11 @@ def run():
     except Exception as e:
         print(f"  ⚠️  Parameter Store 저장 실패: {e}")
 
-    # 6. PostgreSQL 접속 정보 (Target DB)
-    print("\n📋 PostgreSQL 접속 정보 (Target DB)\n")
-
-    pg_host = ask("PGHOST", get_property('PGHOST'))
-    pg_port = ask("PGPORT", get_property('PGPORT') or '5432')
-    pg_database = ask("PGDATABASE", get_property('PGDATABASE'))
-    pg_user = ask("PGUSER", get_property('PGUSER'))
-    pg_password = ask_password("PGPASSWORD", get_property('PGPASSWORD'))
-
-    set_property('PGHOST', pg_host, 'PostgreSQL host')
-    set_property('PGPORT', pg_port, 'PostgreSQL port')
-    set_property('PGDATABASE', pg_database, 'PostgreSQL database')
-    set_property('PGUSER', pg_user, 'PostgreSQL user')
-    set_property('PGPASSWORD', pg_password, 'PostgreSQL password')
-
-    # 7. Parameter Store에 저장 (PostgreSQL)
-    print("\n📡 AWS Parameter Store 저장 (PostgreSQL)...", flush=True)
-    try:
-        import boto3
-        ssm = boto3.client('ssm', region_name='us-east-1')
-        ssm_prefix = "/oma/target_postgres/"
-        params = {
-            'host': pg_host, 'port': pg_port, 'database': pg_database,
-            'username': pg_user, 'password': pg_password
-        }
-        for key, value in params.items():
-            param_type = 'SecureString' if key == 'password' else 'String'
-            ssm.put_parameter(
-                Name=f"{ssm_prefix}{key}", Value=value,
-                Type=param_type, Overwrite=True
-            )
-        print(f"  ✅ Parameter Store 저장 완료 ({ssm_prefix}*)")
-    except Exception as e:
-        print(f"  ⚠️  Parameter Store 저장 실패: {e}")
-        print("  → 환경변수로 직접 설정하거나 나중에 다시 시도하세요.")
-
-    # 8. 접속 테스트
-    print("\n🔌 PostgreSQL 접속 테스트...", flush=True)
-    try:
-        import subprocess
-        env = {**os.environ, 'PGHOST': pg_host, 'PGPORT': pg_port,
-               'PGDATABASE': pg_database, 'PGUSER': pg_user, 'PGPASSWORD': pg_password}
-        result = subprocess.run(
-            ['psql', '-c', 'SELECT 1'],  # noqa: S603 S607 — trusted fixed command
-            capture_output=True, text=True, timeout=10, env=env
-        )
-        if result.returncode == 0:
-            print("  ✅ 접속 성공!")
-        else:
-            print(f"  ❌ 접속 실패: {result.stderr.strip()}")
-    except FileNotFoundError:
-        print("  ⚠️  psql 미설치 - 접속 테스트 스킵")
-    except Exception as e:
-        print(f"  ⚠️  접속 테스트 실패: {e}")
+    # 6. Target DB 접속 정보 (TARGET_DBMS_TYPE에 따라 분기)
+    if target_dbms == 'mysql':
+        _setup_mysql_connection()
+    else:
+        _setup_pg_connection()
 
     # 9. 확인 (비밀번호 마스킹)
     print("✅ 설정 완료:\n")
