@@ -141,24 +141,24 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
         sql_type, sql_body = extracted
 
         try:
+            # Pass SQL via stdin to avoid command argument injection
             if dbms == 'mysql':
-                # MySQL: strip ::type casts before EXPLAIN
                 sql_clean = re.sub(r'NULL::\w+', 'NULL', sql_body)
+                explain_sql = f'EXPLAIN {sql_clean};'
                 cmd = [
                     'mysql',
                     '-h', db_env.get('MYSQL_HOST', 'localhost'),
                     '-P', db_env.get('MYSQL_PORT', '3306'),
                     '-u', db_env.get('MYSQL_USER', 'root'),
-                    '-e', f'EXPLAIN {sql_clean}',
-                    os.environ.get('MYSQL_DATABASE', 'test'),
+                    '-D', os.environ.get('MYSQL_DATABASE', 'test'),
                 ]
-                run_env = {**os.environ, **db_env}
             else:
-                cmd = ['psql', '-c', f'EXPLAIN {sql_body}']
-                run_env = {**os.environ, **db_env}
+                explain_sql = f'EXPLAIN {sql_body};'
+                cmd = ['psql']
 
-            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit, dangerous-subprocess-use-tainted-env-args — EXPLAIN on converted SQL, no shell=True, env from trusted DB config
-                cmd,
+            run_env = {**os.environ, **db_env}
+            result = subprocess.run(
+                cmd, input=explain_sql,
                 capture_output=True, text=True, timeout=15,
                 env=run_env,
             )
