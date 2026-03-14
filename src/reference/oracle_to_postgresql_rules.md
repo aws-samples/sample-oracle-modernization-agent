@@ -103,9 +103,9 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 #### 2. Basic Functions
 | Oracle | PostgreSQL |
 |--------|-----------|
-| NVL(a, b) | COALESCE(a, b) |
+| NVL(a, b) | COALESCE(a, b) — **types must match** (see note below) |
 | NVL2(a, b, c) | CASE WHEN a IS NOT NULL THEN b ELSE c END |
-| DECODE(a,b,c,d) | CASE WHEN a = b THEN c ELSE d END |
+| DECODE(a,b,c,...,default) | CASE a WHEN b THEN c ... ELSE default END (see note below) |
 | SYSDATE | CURRENT_TIMESTAMP |
 | SYSTIMESTAMP | CURRENT_TIMESTAMP |
 | USER | CURRENT_USER |
@@ -114,14 +114,62 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | INSTR(s,sub) | POSITION(sub IN s) |
 | LENGTHB(s) | OCTET_LENGTH(s) |
 | LPAD(s,len,pad) | LPAD(s::text,len,pad) |
-| LISTAGG(col,delim) | STRING_AGG(col,delim) |
+| LISTAGG(col,delim) WITHIN GROUP (ORDER BY x) | STRING_AGG(col, delim ORDER BY x) — move ORDER BY inside function |
 | WM_CONCAT(col) | STRING_AGG(col, ',') |
 | TO_NUMBER(s) | CAST(s AS NUMERIC) |
 | DBMS_LOB.GETLENGTH(col) | LENGTH(col) or OCTET_LENGTH(col) |
-| ROWID | ctid (or remove) |
+| ROWID | **remove or replace with PK** — ctid changes after VACUUM, unsafe as identifier |
 | MINUS | EXCEPT |
 
-#### 2-1. Regular Expression Functions
+**NVL → COALESCE type mismatch:**
+Oracle NVL implicitly casts the second argument to match the first. PostgreSQL COALESCE requires matching types.
+```sql
+-- ❌ WRONG: types don't match
+COALESCE(numeric_col, 'N/A')
+
+-- ✅ RIGHT: explicit cast
+COALESCE(numeric_col::text, 'N/A')
+```
+
+**DECODE multi-condition:**
+```sql
+-- Oracle
+DECODE(status, 'A', '활성', 'I', '비활성', 'D', '삭제', '기타')
+
+-- PostgreSQL
+CASE status WHEN 'A' THEN '활성' WHEN 'I' THEN '비활성'
+            WHEN 'D' THEN '삭제' ELSE '기타' END
+```
+
+#### 2-1. Aggregate & Analytic Functions (Additional)
+| Oracle | PostgreSQL |
+|--------|-----------|
+| MEDIAN(col) | PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY col) |
+| KEEP (DENSE_RANK FIRST ORDER BY x) | Use subquery or DISTINCT ON (see note) |
+| FETCH FIRST N ROWS ONLY | LIMIT N |
+| ROWNUM | ROW_NUMBER() OVER() or LIMIT (context-dependent) |
+
+**KEEP (DENSE_RANK FIRST/LAST):**
+```sql
+-- Oracle
+MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
+
+-- PostgreSQL: use subquery approach
+(SELECT col FROM table ORDER BY date_col LIMIT 1)
+-- Or DISTINCT ON when selecting full rows:
+SELECT DISTINCT ON (group_col) * FROM table ORDER BY group_col, date_col
+```
+
+#### 2-2. No Conversion Needed (PostgreSQL supports directly)
+| Feature | Note |
+|---------|------|
+| CUBE / ROLLUP | Identical syntax in PostgreSQL |
+| NULLS FIRST / NULLS LAST | Identical syntax in PostgreSQL |
+| OVER (PARTITION BY ... ORDER BY ...) | Window functions work the same |
+| UNION ALL / INTERSECT | Identical syntax |
+| CASE WHEN ... END | Identical syntax |
+
+#### 2-3. Regular Expression Functions
 | Oracle | PostgreSQL |
 |--------|-----------|
 | REGEXP_LIKE(s, pattern) | s ~ pattern |
@@ -135,7 +183,8 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | Oracle | PostgreSQL |
 |--------|-----------|
 | SYSDATE | CURRENT_TIMESTAMP |
-| TO_DATE(s,'YYYY-MM-DD') | s::date |
+| TO_DATE(s,'YYYY-MM-DD') | to_date(s,'YYYY-MM-DD') or s::date (only if s is ISO format literal) |
+| TO_DATE(s,'YYYYMMDD') | to_date(s,'YYYYMMDD') (keep function — format-dependent) |
 | TO_DATE(s,'YYYY-MM-DD HH24:MI:SS') | to_timestamp(s,'YYYY-MM-DD HH24:MI:SS') |
 | ADD_MONTHS(date,n) | date + INTERVAL 'n months' |
 | TRUNC(date,'DD') | DATE_TRUNC('day',date) |
@@ -220,6 +269,44 @@ SELECT id, parent_id, name FROM hierarchy
 - Enforce type consistency: cast recursive term to match base term types
   - `CONCAT(...)::character varying` — when string grows in recursive term
 
+**CONNECT BY related functions:**
+| Oracle | PostgreSQL (in WITH RECURSIVE) |
+|--------|-------------------------------|
+| LEVEL | Add `1 as level` in base, `h.level + 1` in recursive |
+| PRIOR col | Use JOIN condition: `c.parent_id = h.id` |
+| SYS_CONNECT_BY_PATH(col,'/') | Accumulate string: base `col::text as path`, recursive `h.path \|\| '/' \|\| c.col` |
+| CONNECT_BY_ROOT col | Carry from base case: `col as root_col`, recursive `h.root_col` |
+| CONNECT_BY_ISLEAF | `CASE WHEN NOT EXISTS (SELECT 1 FROM t WHERE t.parent_id = h.id) THEN 1 ELSE 0 END` |
+| ORDER SIBLINGS BY col | `ORDER BY path` (use accumulated path column for sibling order) |
+
+```sql
+-- Oracle (complex)
+SELECT LEVEL, SYS_CONNECT_BY_PATH(name, '/'), CONNECT_BY_ISLEAF
+FROM categories
+START WITH parent_id IS NULL
+CONNECT BY PRIOR id = parent_id
+ORDER SIBLINGS BY name
+
+-- PostgreSQL
+WITH RECURSIVE h AS (
+  SELECT id, parent_id, name, 1 as level,
+         name::text as path,
+         name::text as root_name
+  FROM categories WHERE parent_id IS NULL
+  UNION ALL
+  SELECT c.id, c.parent_id, c.name, h.level + 1,
+         (h.path || '/' || c.name)::character varying,
+         h.root_name
+  FROM categories c JOIN h ON c.parent_id = h.id
+)
+SELECT level, '/' || path as sys_path,
+       CASE WHEN NOT EXISTS (
+         SELECT 1 FROM categories x WHERE x.parent_id = h.id
+       ) THEN 1 ELSE 0 END as is_leaf
+FROM h
+ORDER BY path
+```
+
 #### 2. MERGE Statement
 ```sql
 -- Oracle
@@ -252,6 +339,20 @@ LIMIT #{pageSize}::bigint OFFSET #{startRow}::bigint
 
 #### 4. Set Operator
 - `MINUS` → `EXCEPT`
+
+#### 5. FETCH FIRST (Oracle 12c+)
+```sql
+-- Oracle
+SELECT * FROM orders ORDER BY amount DESC
+FETCH FIRST 10 ROWS ONLY
+
+-- PostgreSQL
+SELECT * FROM orders ORDER BY amount DESC
+LIMIT 10
+```
+- `FETCH FIRST N ROWS ONLY` → `LIMIT N`
+- `FETCH FIRST N PERCENT ROWS ONLY` → subquery with `LIMIT CEIL(COUNT(*) * N / 100)` or application-level
+- `OFFSET M ROWS FETCH NEXT N ROWS ONLY` → `LIMIT N OFFSET M`
 
 ---
 
@@ -394,12 +495,42 @@ ROUND((date1::date - date2::date) * 24, 2)
 ROUND(((date1::date - date2::date) * 24)::numeric, 2)
 ```
 
-### 5. Incorrect Date Format in to_timestamp
+### 5. NVL → COALESCE Type Mismatch
+```sql
+-- ❌ WRONG: Oracle NVL auto-casts, PostgreSQL COALESCE doesn't
+COALESCE(numeric_col, 'N/A')           -- ERROR: incompatible types
+COALESCE(date_col, 0)                  -- ERROR: incompatible types
+
+-- ✅ RIGHT: explicit type cast to match
+COALESCE(numeric_col::text, 'N/A')
+COALESCE(date_col, '1970-01-01'::date)
+```
+
+### 6. LISTAGG WITHIN GROUP Syntax
+```sql
+-- ❌ WRONG: keeping Oracle WITHIN GROUP syntax
+STRING_AGG(col, ',') WITHIN GROUP (ORDER BY col)
+
+-- ✅ RIGHT: ORDER BY moves inside the function
+STRING_AGG(col, ',' ORDER BY col)
+```
+
+### 7. Incorrect Date Format in to_timestamp
 ```sql
 -- ❌ WRONG: Oracle format used in PostgreSQL
 to_timestamp(str, 'YYYY/MM/DD HH24:MI:SS')  -- check format matches actual data
 
 -- ✅ RIGHT: verify format string matches input pattern exactly
+```
+
+### 8. TO_DATE Blindly Converted to ::date Cast
+```sql
+-- ❌ RISKY: s::date only works with ISO format strings
+TO_DATE(#{param}, 'YYYYMMDD')  →  #{param}::date   -- FAILS for '20260315'
+
+-- ✅ RIGHT: preserve to_date function when format is non-ISO
+TO_DATE(#{param}, 'YYYYMMDD')  →  to_date(#{param}, 'YYYYMMDD')
+-- ::date cast is safe ONLY for ISO format ('2026-03-15') or date-typed values
 ```
 
 ---
