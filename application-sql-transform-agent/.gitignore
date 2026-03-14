@@ -1,0 +1,36 @@
+# Claude Code
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+._.DS_Store
+**/.DS_Store
+**/_._.DS_Store
+._*
+
+# IDE
+.vscode/
+.idea/
+.claude/
+.kiro/
+
+# Project specific
+output/
+example/output/
+example/.mcp.json
+example/AGENT.md
+example/skills
+GITHUB_PUSH_GUIDE.md
+push-github.sh
+src/config/
+src/reference/pg_connection.properties
+src/reference/com/test/mybatis/*.class
+src/reference/lib/backup/
