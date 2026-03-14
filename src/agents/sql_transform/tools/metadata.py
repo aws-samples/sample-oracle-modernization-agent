@@ -10,8 +10,6 @@ import sqlite3
 from strands import tool
 from utils.project_paths import DB_PATH, OUTPUT_DIR, get_target_dbms, get_target_db_display_name
 
-_TABLE_NAME = 'target_metadata'
-
 # --- PostgreSQL ---
 _PG_SSM_PREFIX = "/oma/target_postgres/"
 _PG_PARAM_MAP = {
@@ -87,8 +85,8 @@ def _get_mysql_connection_vars() -> dict:
 
 def _init_metadata_table(conn):
     """Create target_metadata table if not exists. Migrate from legacy pg_metadata if found."""
-    conn.execute(f"""
-        CREATE TABLE IF NOT EXISTS {_TABLE_NAME} (
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS target_metadata (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             table_schema TEXT NOT NULL,
             table_name TEXT NOT NULL,
@@ -96,19 +94,19 @@ def _init_metadata_table(conn):
             data_type TEXT NOT NULL
         )
     """)
-    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_target_meta_col ON {_TABLE_NAME}(table_name, column_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_target_meta_col ON target_metadata(table_name, column_name)")
 
     # Migrate legacy pg_metadata data if it exists and target_metadata is empty
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pg_metadata'")
     if cursor.fetchone():
-        cursor.execute(f"SELECT COUNT(*) FROM {_TABLE_NAME}")
+        cursor.execute("SELECT COUNT(*) FROM target_metadata")
         if cursor.fetchone()[0] == 0:
-            cursor.execute(f"INSERT INTO {_TABLE_NAME} (table_schema, table_name, column_name, data_type) "
+            cursor.execute("INSERT INTO target_metadata (table_schema, table_name, column_name, data_type) "
                            "SELECT table_schema, table_name, column_name, data_type FROM pg_metadata")
             migrated = cursor.rowcount
             if migrated > 0:
-                print(f"📦 Migrated {migrated} rows from pg_metadata → {_TABLE_NAME}")
+                print(f"📦 Migrated {migrated} rows from pg_metadata → target_metadata")
         conn.execute("DROP TABLE pg_metadata")
     conn.commit()
 
@@ -143,10 +141,11 @@ ORDER BY table_schema, table_name, ordinal_position;
 def _extract_mysql_metadata(conn_vars: dict) -> list[tuple]:
     """Extract metadata from MySQL via mysql CLI."""
     database = conn_vars.get('MYSQL_DATABASE', '')
-    sql = f"""
+    # Use mysql --database flag instead of interpolating into SQL
+    sql = """
 SELECT table_schema, table_name, column_name, data_type
 FROM information_schema.columns
-WHERE table_schema = '{database}'
+WHERE table_schema = DATABASE()
 ORDER BY table_schema, table_name, ordinal_position;
 """
     cmd = [
@@ -154,6 +153,7 @@ ORDER BY table_schema, table_name, ordinal_position;
         '-h', conn_vars.get('MYSQL_HOST', 'localhost'),
         '-P', conn_vars.get('MYSQL_PORT', '3306'),
         '-u', conn_vars.get('MYSQL_USER', 'root'),
+        '-D', database,
         '--batch', '--skip-column-names',
         '-e', sql,
     ]
@@ -161,7 +161,7 @@ ORDER BY table_schema, table_name, ordinal_position;
     if conn_vars.get('MYSQL_PASSWORD'):
         env['MYSQL_PWD'] = conn_vars['MYSQL_PASSWORD']
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)  # nosemgrep: dangerous-subprocess-use-audit
     if result.returncode != 0:
         raise RuntimeError(f"mysql error: {result.stderr.strip()}")
 
@@ -214,9 +214,9 @@ def generate_metadata() -> dict:
 
         with sqlite3.connect(str(DB_PATH)) as conn:
             _init_metadata_table(conn)
-            conn.execute(f"DELETE FROM {_TABLE_NAME}")
+            conn.execute("DELETE FROM target_metadata")
             conn.executemany(
-                f"INSERT INTO {_TABLE_NAME} (table_schema, table_name, column_name, data_type) VALUES (?,?,?,?)",
+                "INSERT INTO target_metadata (table_schema, table_name, column_name, data_type) VALUES (?,?,?,?)",
                 rows
             )
             conn.commit()
@@ -229,7 +229,7 @@ def generate_metadata() -> dict:
             for row in rows:
                 f.write('|'.join(row) + '\n')
 
-        print(f"📊 Metadata: {len(rows)} columns saved to {_TABLE_NAME} table + {txt_path}")
+        print(f"📊 Metadata: {len(rows)} columns saved to target_metadata table + {txt_path}")
         return {'status': 'success', 'row_count': len(rows)}
 
     except FileNotFoundError:
@@ -256,12 +256,12 @@ def lookup_column_type(table_name: str, column_name: str) -> dict:
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
 
-        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{_TABLE_NAME}'")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='target_metadata'")
         if not cursor.fetchone():
             return {'table_name': table_name, 'column_name': column_name, 'data_type': 'unknown', 'reason': 'no metadata table'}
 
         cursor.execute(
-            f"SELECT data_type FROM {_TABLE_NAME} WHERE LOWER(table_name) = LOWER(?) AND LOWER(column_name) = LOWER(?)",
+            "SELECT data_type FROM target_metadata WHERE LOWER(table_name) = LOWER(?) AND LOWER(column_name) = LOWER(?)",
             (table_name, column_name)
         )
         row = cursor.fetchone()

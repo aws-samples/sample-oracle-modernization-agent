@@ -141,24 +141,22 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
         sql_type, sql_body = extracted
 
         try:
+            # SQL via stdin, connection via env vars — cmd is static
+            run_env = {**os.environ, **db_env}
             if dbms == 'mysql':
-                # MySQL: strip ::type casts before EXPLAIN
                 sql_clean = re.sub(r'NULL::\w+', 'NULL', sql_body)
-                cmd = [
-                    'mysql',
-                    '-h', db_env.get('MYSQL_HOST', 'localhost'),
-                    '-P', db_env.get('MYSQL_PORT', '3306'),
-                    '-u', db_env.get('MYSQL_USER', 'root'),
-                    '-e', f'EXPLAIN {sql_clean}',
-                    os.environ.get('MYSQL_DATABASE', 'test'),
-                ]
-                run_env = {**os.environ, **db_env}
+                explain_sql = f'EXPLAIN {sql_clean};'
+                # mysql client reads MYSQL_HOST, MYSQL_TCP_PORT, MYSQL_PWD from env
+                run_env['MYSQL_TCP_PORT'] = run_env.pop('MYSQL_PORT', '3306')
+                run_env.setdefault('MYSQL_PWD', run_env.pop('MYSQL_PASSWORD', ''))
+                cmd = ['mysql']  # reads all connection info from env
             else:
-                cmd = ['psql', '-c', f'EXPLAIN {sql_body}']
-                run_env = {**os.environ, **db_env}
+                explain_sql = f'EXPLAIN {sql_body};'
+                cmd = ['psql']  # reads PGHOST, PGPORT, etc. from env
 
+            # nosemgrep: dangerous-subprocess-use-audit, dangerous-subprocess-use-tainted-env-args
             result = subprocess.run(
-                cmd,
+                cmd, input=explain_sql,
                 capture_output=True, text=True, timeout=15,
                 env=run_env,
             )
@@ -242,7 +240,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
         print(f"  ⏱️  Timeout: 600s\n", flush=True)
         
-        result = subprocess.run(
+        result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
             ['bash', test_script, test_folder_abs],
             capture_output=True, text=True, timeout=600,
             cwd=str(REFERENCE_DIR),
@@ -403,7 +401,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
 
         try:
             # Run bulk test on this single file
-            result = subprocess.run(
+            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
                 ['bash', test_script, tmpdir],
                 capture_output=True, text=True, timeout=60,
                 cwd=str(REFERENCE_DIR),
