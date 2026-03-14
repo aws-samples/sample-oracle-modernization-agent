@@ -1,5 +1,5 @@
 """SQL Transform Agent - Strands Framework"""
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, get_rules_path, get_target_db_display_name, load_prompt_text
 from pathlib import Path
 from strands import Agent
 from strands.models.bedrock import BedrockModel
@@ -17,12 +17,12 @@ from strands.types.content import SystemContentBlock
 
 def _load_system_prompt():
     """Load system prompt with static and dynamic rules."""
-    # Base prompt
+    # Base prompt ({{TARGET_DB}} placeholder replaced)
     prompt_path = Path(__file__).parent / "prompt.md"
-    base_prompt = prompt_path.read_text(encoding='utf-8')
+    base_prompt = load_prompt_text(prompt_path)
     
-    # Static rules (general)
-    static_rules_path = Path(__file__).parent.parent.parent / "reference" / "oracle_to_postgresql_rules.md"
+    # Static rules (general) — target DB dependent
+    static_rules_path = get_rules_path()
     static_rules = static_rules_path.read_text(encoding='utf-8') if static_rules_path.exists() else ""
     
     # Dynamic rules (project-specific)
@@ -79,7 +79,8 @@ def run_transform():
     clear_conversions()
 
     agent = create_sql_transform_agent()
-    result = agent("모든 Mapper XML 파일의 Oracle SQL을 PostgreSQL로 변환해줘")
+    target_db = get_target_db_display_name()
+    result = agent(f"모든 Mapper XML 파일의 Oracle SQL을 {target_db}로 변환해줘")
 
     print("\n" + "=" * 60)
     print(result)

@@ -10,7 +10,7 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 
-from utils.project_paths import MODEL_ID, LITE_MODEL_ID
+from utils.project_paths import MODEL_ID, LITE_MODEL_ID, get_rules_path, load_prompt_text
 from agents.sql_transform.tools.load_mapper_list import read_sql_source
 from agents.sql_validate.tools.validate_tools import read_transform
 
@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 def _load_prompt_with_rules(prompt_filename: str) -> list:
     """Load a perspective prompt + General Rules with cache points."""
     prompt_path = Path(__file__).parent / prompt_filename
-    rules_path = Path(__file__).parents[2] / "reference" / "oracle_to_postgresql_rules.md"
+    rules_path = get_rules_path()
     return [
-        SystemContentBlock(text=prompt_path.read_text(encoding="utf-8")),
+        SystemContentBlock(text=load_prompt_text(prompt_path)),
         SystemContentBlock(cachePoint={"type": "default"}),
         SystemContentBlock(text=rules_path.read_text(encoding="utf-8")),
         SystemContentBlock(cachePoint={"type": "default"}),
@@ -129,7 +129,7 @@ def _normalize_issue(issue) -> dict:
 
 _FACILITATOR_PROMPT = """\
 You are a SQL review facilitator. Two review agents (Syntax, Equivalence) analyzed \
-Oracle-to-PostgreSQL SQL conversions and produced CRITICAL findings.
+Oracle SQL conversions and produced CRITICAL findings.
 
 Your job: evaluate each CRITICAL finding and determine if the reviewer's own description \
 contradicts its CRITICAL severity. This happens when a reviewer:

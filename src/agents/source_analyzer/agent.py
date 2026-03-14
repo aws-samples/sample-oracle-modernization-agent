@@ -2,7 +2,7 @@
 from pathlib import Path
 from strands import Agent
 from strands.models.bedrock import BedrockModel
-from utils.project_paths import MODEL_ID
+from utils.project_paths import MODEL_ID, load_prompt_text
 
 # Import tools - analysis
 from .tools.db_manager import get_java_source_folder, save_xml_list
@@ -19,7 +19,7 @@ from .tools.strategy_generator import generate_strategy, write_strategy_file
 def create_source_analyzer_agent() -> Agent:
     """Create and configure Source Analyzer Agent."""
     prompt_path = Path(__file__).parent / "prompt.md"
-    system_prompt = prompt_path.read_text(encoding='utf-8')
+    system_prompt = load_prompt_text(prompt_path)
 
     model = BedrockModel(
         model_id=MODEL_ID,

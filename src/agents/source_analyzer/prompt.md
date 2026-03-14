@@ -190,7 +190,7 @@ After analysis is complete, generate a project-specific transform strategy.
        analysis_data=patterns,
        strategy_type='transform',
        output_file='output/strategy/transform_strategy.md',
-       reference_rules='src/reference/oracle_to_postgresql_rules.md'
+       reference_rules='src/reference/oracle_to_postgresql_rules.md (or oracle_to_mysql_rules.md)'
    )
    ```
 

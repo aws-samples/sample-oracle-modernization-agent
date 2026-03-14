@@ -78,9 +78,9 @@ class SourceXmlList(Base):
         return f"<SourceXmlList(file_name={self.file_name})>"
 
 
-class PgMetadata(Base):
-    """PostgreSQL column metadata cache"""
-    __tablename__ = 'pg_metadata'
+class TargetMetadata(Base):
+    """Target DB column metadata cache (PostgreSQL or MySQL)"""
+    __tablename__ = 'target_metadata'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     table_schema = Column(Text, nullable=False)
@@ -89,11 +89,11 @@ class PgMetadata(Base):
     data_type = Column(Text, nullable=False)
 
     __table_args__ = (
-        Index('idx_pg_meta_col', 'table_name', 'column_name'),
+        Index('idx_target_meta_col', 'table_name', 'column_name'),
     )
 
     def __repr__(self):
-        return f"<PgMetadata(table={self.table_name}, column={self.column_name}, type={self.data_type})>"
+        return f"<TargetMetadata(table={self.table_name}, column={self.column_name}, type={self.data_type})>"
 
 
 # History tables (optional - can be added later if needed)

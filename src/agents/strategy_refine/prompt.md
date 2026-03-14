@@ -15,7 +15,7 @@ These are ALL in General Rules — NEVER add to strategy:
 - (+) → LEFT/RIGHT JOIN, Comma JOIN → explicit JOIN
 - TO_DATE, TO_CHAR, SUBSTR, INSTR conversions
 - ROWNUM → LIMIT/OFFSET, CONNECT BY → WITH RECURSIVE
-- || → CONCAT (|| works in PostgreSQL, both are fine)
+- || → CONCAT (|| works in {{TARGET_DB}}, both are fine)
 - Parameter casting (::integer, ::bigint, etc.)
 - XML escaping (`<` → `&lt;`)
 - Date arithmetic (TRUNC, ADD_MONTHS, etc.)
@@ -58,7 +58,7 @@ These are ALL in General Rules — NEVER add to strategy:
 ```sql
 -- Before (Oracle)
 WHERE a.id = b.id(+)
--- After (PostgreSQL)
+-- After ({{TARGET_DB}})
 FROM a LEFT JOIN b ON a.id = b.id
 ```
 ```

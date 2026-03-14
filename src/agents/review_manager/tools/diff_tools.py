@@ -57,7 +57,7 @@ def _get_sql_diff_internal(source_file, target_file):
     diff = list(difflib.unified_diff(
         source_sql.splitlines(keepends=True),
         target_sql.splitlines(keepends=True),
-        fromfile='Oracle', tofile='PostgreSQL', lineterm=''
+        fromfile='Oracle', tofile='Converted', lineterm=''
     ))
     return {
         'status': 'success',
@@ -169,7 +169,7 @@ def generate_diff_report(mapper_file: str = None) -> dict:
             lines.append("**Oracle (Before)**\n```sql")
             lines.append(oracle_sql.strip())
             lines.append("```\n")
-            lines.append("**PostgreSQL (After)**\n```sql")
+            lines.append("**Converted (After)**\n```sql")
             lines.append(pg_sql.strip())
             lines.append("```\n")
         else:
