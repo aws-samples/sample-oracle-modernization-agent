@@ -32,5 +32,6 @@ GITHUB_PUSH_GUIDE.md
 push-github.sh
 src/config/
 src/reference/pg_connection.properties
+src/agents/sql_transform/oma_metadata.txt
 src/reference/com/test/mybatis/*.class
 src/reference/lib/backup/
