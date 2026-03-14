@@ -3,13 +3,13 @@ import sqlite3
 from strands import tool, Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
-from utils.project_paths import DB_PATH, PROJECT_ROOT, MODEL_ID
+from utils.project_paths import DB_PATH, PROJECT_ROOT, MODEL_ID, load_prompt_text, get_target_db_display_name
 
 
 def _load_transform_prompt():
     prompt_path = PROJECT_ROOT / "src" / "agents" / "sql_transform" / "prompt.md"
     return [
-        SystemContentBlock(text=prompt_path.read_text(encoding='utf-8')),
+        SystemContentBlock(text=load_prompt_text(prompt_path)),
         SystemContentBlock(cachePoint={"type": "default"})
     ]
 
@@ -56,10 +56,11 @@ def transform_single_sql(mapper_file: str, sql_id: str) -> dict:
         callback_handler=None,
     )
 
+    target_db = get_target_db_display_name()
     agent(
-        f"{mapper_file}의 {sql_id}를 PostgreSQL로 변환해줘.\n"
+        f"{mapper_file}의 {sql_id}를 {target_db}로 변환해줘.\n"
         f"1. read_sql_source로 원본 읽기\n"
-        f"2. Oracle → PostgreSQL 변환 (4-Phase 규칙 적용)\n"
+        f"2. Oracle → {target_db} 변환 (4-Phase 규칙 적용)\n"
         f"3. convert_sql로 저장"
     )
 

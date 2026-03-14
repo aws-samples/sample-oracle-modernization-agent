@@ -59,13 +59,13 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 - Generates final conversion report from DB status
 
 ### 8. generate_metadata()
-- Extracts {{TARGET_DB}} column metadata via psql and stores in oma_control.db (pg_metadata table)
-- Uses PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD env vars
+- Extracts {{TARGET_DB}} column metadata and stores in oma_control.db (target_metadata table)
+- Uses target DB connection env vars (PostgreSQL: PGHOST/PGUSER/..., MySQL: MYSQL_HOST/MYSQL_USER/...)
 - **Non-fatal**: If it fails (no psql, no DB connection), transform continues without metadata
 - Returns: `{status, row_count}` or `{status: 'skipped', error: '...'}`
 
 ### 9. lookup_column_type(table_name, column_name)
-- Looks up column data type from pg_metadata table
+- Looks up column data type from target_metadata table
 - Case-insensitive matching
 - Returns: `{table_name, column_name, data_type}` or `data_type: 'unknown'`
 

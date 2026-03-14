@@ -57,7 +57,7 @@ def _get_sql_diff_internal(source_file, target_file):
     diff = list(difflib.unified_diff(
         source_sql.splitlines(keepends=True),
         target_sql.splitlines(keepends=True),
-        fromfile='Oracle', tofile='PostgreSQL', lineterm=''
+        fromfile='Oracle', tofile='Converted', lineterm=''
     ))
     return {
         'status': 'success',
