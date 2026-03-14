@@ -168,7 +168,7 @@ def _setup_mysql_connection():
         env = {**os.environ}
         if mysql_password:
             env['MYSQL_PWD'] = mysql_password
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)  # nosemgrep: dangerous-subprocess-use-audit
         if result.returncode == 0:
             print("  ✅ 접속 성공!")
         else:

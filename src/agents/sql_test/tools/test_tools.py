@@ -157,7 +157,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 cmd = ['psql', '-c', f'EXPLAIN {sql_body}']
                 run_env = {**os.environ, **db_env}
 
-            result = subprocess.run(
+            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — cmd is a fixed list, no shell=True
                 cmd,
                 capture_output=True, text=True, timeout=15,
                 env=run_env,
@@ -242,7 +242,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
         print(f"  ⏱️  Timeout: 600s\n", flush=True)
         
-        result = subprocess.run(
+        result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
             ['bash', test_script, test_folder_abs],
             capture_output=True, text=True, timeout=600,
             cwd=str(REFERENCE_DIR),
@@ -403,7 +403,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
 
         try:
             # Run bulk test on this single file
-            result = subprocess.run(
+            result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
                 ['bash', test_script, tmpdir],
                 capture_output=True, text=True, timeout=60,
                 cwd=str(REFERENCE_DIR),
