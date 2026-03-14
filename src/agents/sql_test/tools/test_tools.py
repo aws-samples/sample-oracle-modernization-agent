@@ -154,6 +154,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 explain_sql = f'EXPLAIN {sql_body};'
                 cmd = ['psql']  # reads PGHOST, PGPORT, etc. from env
 
+            # nosemgrep: dangerous-subprocess-use-audit, dangerous-subprocess-use-tainted-env-args
             result = subprocess.run(
                 cmd, input=explain_sql,
                 capture_output=True, text=True, timeout=15,
