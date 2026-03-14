@@ -8,7 +8,7 @@ import os
 import subprocess
 import sqlite3
 from strands import tool
-from utils.project_paths import DB_PATH
+from utils.project_paths import DB_PATH, OUTPUT_DIR
 
 # Parameter Store prefix
 _SSM_PREFIX = "/oma/target_postgres/"
@@ -132,7 +132,14 @@ ORDER BY table_schema, table_name, ordinal_position;
             )
             conn.commit()
 
-        print(f"📊 Metadata: {len(rows)} columns saved to pg_metadata table")
+        # Also save as txt file for Java test tool
+        metadata_dir = OUTPUT_DIR / "metadata"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        txt_path = metadata_dir / "oma_metadata.txt"
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(result.stdout)
+
+        print(f"📊 Metadata: {len(rows)} columns saved to pg_metadata table + {txt_path}")
         return {'status': 'success', 'row_count': len(rows)}
 
     except FileNotFoundError:

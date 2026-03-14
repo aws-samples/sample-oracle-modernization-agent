@@ -23,7 +23,6 @@ sql_transform/
 ├── README.md                 # This documentation
 ├── agent.py                  # Main agent configuration
 ├── prompt.md                 # Detailed conversion rules and instructions
-├── oma_metadata.txt          # PostgreSQL metadata cache
 └── tools/                    # Conversion tools
     ├── __init__.py
     ├── load_mapper_list.py    # Database operations for mapper files
