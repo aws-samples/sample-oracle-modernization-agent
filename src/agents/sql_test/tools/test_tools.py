@@ -141,22 +141,19 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
         sql_type, sql_body = extracted
 
         try:
-            # Pass SQL via stdin to avoid command argument injection
+            # SQL via stdin, connection via env vars — cmd is static
+            run_env = {**os.environ, **db_env}
             if dbms == 'mysql':
                 sql_clean = re.sub(r'NULL::\w+', 'NULL', sql_body)
                 explain_sql = f'EXPLAIN {sql_clean};'
-                cmd = [
-                    'mysql',
-                    '-h', db_env.get('MYSQL_HOST', 'localhost'),
-                    '-P', db_env.get('MYSQL_PORT', '3306'),
-                    '-u', db_env.get('MYSQL_USER', 'root'),
-                    '-D', os.environ.get('MYSQL_DATABASE', 'test'),
-                ]
+                # mysql client reads MYSQL_HOST, MYSQL_TCP_PORT, MYSQL_PWD from env
+                run_env['MYSQL_TCP_PORT'] = run_env.pop('MYSQL_PORT', '3306')
+                run_env.setdefault('MYSQL_PWD', run_env.pop('MYSQL_PASSWORD', ''))
+                cmd = ['mysql']  # reads all connection info from env
             else:
                 explain_sql = f'EXPLAIN {sql_body};'
-                cmd = ['psql']
+                cmd = ['psql']  # reads PGHOST, PGPORT, etc. from env
 
-            run_env = {**os.environ, **db_env}
             result = subprocess.run(
                 cmd, input=explain_sql,
                 capture_output=True, text=True, timeout=15,
