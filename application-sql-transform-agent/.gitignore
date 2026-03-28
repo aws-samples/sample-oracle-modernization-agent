@@ -21,6 +21,7 @@ venv/
 .idea/
 .claude/
 .kiro/
+.bkit/
 
 # Project specific
 output/
