@@ -26,6 +26,7 @@ For EACH SQL ID:
 
 ### Phase 1: Structural — must be removed/converted
 - [ ] Schema prefix: `SCHEMA.TABLE` → `TABLE`
+- [ ] **Identifier lowercase**: All table names, column names, aliases must be lowercase. (String literals like `'Y'` and MyBatis params `#{paramName}` are excluded)
 - [ ] Oracle hints: `/*+ ... */` → removed
 - [ ] `FROM DUAL` → removed
 - [ ] `TABLE(func())` → `func()`
