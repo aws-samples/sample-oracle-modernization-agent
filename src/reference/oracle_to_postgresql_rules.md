@@ -16,6 +16,21 @@ Remove Oracle-specific meta elements first.
 - `SCHEMA_NAME.TABLE_NAME` → `TABLE_NAME`
 - `SCHEMA.PACKAGE.PROCEDURE` → `PACKAGE_PROCEDURE`
 
+#### 1-1. Identifier Case Folding (CRITICAL)
+Oracle stores unquoted identifiers in UPPERCASE; PostgreSQL folds them to lowercase.
+Target PostgreSQL schemas are created with unquoted identifiers (all lowercase).
+
+**Rule: Convert ALL identifiers (table, column, alias, function) to lowercase.**
+- `TABLE_NAME` → `table_name`
+- `COLUMN_NAME` → `column_name`
+- `T1.COLUMN_NAME` → `t1.column_name`
+- `NVL(A.STATUS, 'N')` → `nvl(a.status, 'N')` (only identifiers, not string literals)
+
+**Do NOT lowercase:**
+- String literals: `'Y'`, `'ACTIVE'`, `'%search%'` — keep as-is
+- MyBatis parameters: `#{paramName}`, `${columnName}` — keep as-is
+- SQL keywords: `SELECT`, `FROM`, `WHERE` — either case is fine (PostgreSQL ignores case for keywords)
+
 #### 2. Oracle Hint Removal
 - Remove ALL: `/*+ INDEX(...) */`, `/*+ FULL(...) */`, `/*+ ORDERED */`, etc.
 

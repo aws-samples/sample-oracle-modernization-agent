@@ -35,3 +35,4 @@ src/config/
 src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
 src/reference/lib/backup/
+deliverables/
