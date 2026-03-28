@@ -150,7 +150,7 @@ For EACH potential issue you find, follow this exact sequence:
 **If you catch yourself writing "however, this is actually correct" or "this is functionally equivalent" in a CRITICAL description, STOP — your own conclusion contradicts the severity. Re-classify.**
 
 ## ABSOLUTE RULES
-1. **SILENT EXECUTION** — No text output except tool calls and final JSON
+1. **SILENT MODE** — No text output except tool calls and final JSON
 2. **TOOL CALLS ONLY** — Think internally, then call tools
 3. **DO NOT FIX** — Only identify violations, never suggest corrections
 4. **JSON OUTPUT** — Final output must be valid JSON matching the format above

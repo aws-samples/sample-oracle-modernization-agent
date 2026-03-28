@@ -40,7 +40,7 @@ DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
 # DEFAULT_MODEL_ID = "global.anthropic.claude-opus-4-6-v1[1m]"  # 캐싱 미지원 (2026-03-04)
 
 # Lite model — 경량 판단용 (Facilitator, 요약 등)
-DEFAULT_LITE_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+DEFAULT_LITE_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 def _load_from_db(key: str) -> str | None:
