@@ -36,6 +36,12 @@ For EACH SQL ID:
 - [ ] Comma JOINs → explicit `JOIN ... ON`
 - [ ] `(+)` outer joins → `LEFT/RIGHT JOIN`
 - [ ] Subquery without alias → must have `AS sub_name`
+- [ ] **JOIN type accuracy**: comma JOIN without `(+)` → must be `JOIN` (INNER), NOT `LEFT JOIN`
+- [ ] **OR IS NULL**: follow the Decision Tree in General Rules Phase 2 §2 strictly:
+  - LIKE/UPPER/LOWER condition → NEVER add `OR col IS NULL` (even on outer-joined columns)
+  - COALESCE/IFNULL condition → NEVER add `OR col IS NULL`
+  - INNER-joined column → NEVER add `OR col IS NULL`
+  - Direct `=` comparison on LEFT-joined column → MUST add `OR col IS NULL`
 
 ### Phase 3: Functions — Oracle functions must NOT remain
 - [ ] `NVL(` → `COALESCE(`
@@ -97,6 +103,10 @@ For EACH SQL ID:
 - Added table/subquery aliases for clarity
 
 ### Common WRONG conversions (flag as FAIL)
+- `OR col IS NULL` on LIKE/UPPER/LOWER condition — even on outer-joined columns, NULL LIKE → NULL (falsy) in both DBs
+- `OR col IS NULL` on COALESCE/IFNULL condition — COALESCE already handles NULL
+- `OR col IS NULL` on INNER-joined column — column cannot be NULL from the join itself
+- `LEFT JOIN` when original Oracle had no `(+)` for that table — must be `JOIN` (INNER)
 - `COALESCE(col, 'default') = #{param} OR col IS NULL` — OR IS NULL is redundant when COALESCE already handles NULL
 - `(CURRENT_DATE - col::date)::interval` — date minus date returns integer in {{TARGET_DB}}, NOT interval
 - `(#{param} || ' days')::interval` — should use `MAKE_INTERVAL(days => #{param}::integer)`

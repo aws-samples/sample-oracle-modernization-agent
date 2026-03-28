@@ -51,25 +51,68 @@ JOIN table3 t3 ON t2.ref_id = t3.id
 ```
 
 #### 2. Outer Join: (+) → LEFT/RIGHT JOIN
-```sql
--- Oracle
-WHERE a.id = b.id(+)
 
+**Step 1 — Determine JOIN type from Oracle comma JOIN:**
+```
+Oracle comma JOIN → what JOIN type?
+├─ WHERE clause has (+) on this table → LEFT JOIN (or RIGHT JOIN)
+└─ WHERE clause has NO (+) on this table → INNER JOIN (never LEFT JOIN)
+```
+```sql
+-- Oracle: (+) present → LEFT JOIN
+FROM orders o, users u WHERE o.user_id = u.user_id(+)
 -- PostgreSQL
-FROM a LEFT JOIN b ON a.id = b.id
+FROM orders o LEFT JOIN users u ON o.user_id = u.user_id
+
+-- Oracle: no (+) → INNER JOIN (NOT LEFT JOIN)
+FROM orders o, users u WHERE o.user_id = u.user_id
+-- PostgreSQL
+FROM orders o JOIN users u ON o.user_id = u.user_id
 ```
 
-**Add NULL-safety for dynamic conditions on outer-joined tables ONLY:**
-```sql
--- ONLY when: t2 is an outer-joined table AND the <if> condition filters on t2's column
-<if test="param != null">
-   AND (t2.column = #{param}::type OR t2.column IS NULL)
-</if>
+**Step 2 — OR IS NULL Decision Tree for `<if>` dynamic conditions:**
 ```
-**Do NOT add `OR col IS NULL` when:**
-- The column belongs to the main table (not outer-joined) — NULL behavior is identical in Oracle and PostgreSQL
-- The condition uses LIKE/UPPER/LOWER — `NULL LIKE '%pattern%'` returns NULL (falsy) in both databases
-- The condition already uses COALESCE/NVL conversion (e.g., `COALESCE(t2.column, 'default') = #{param}`) — COALESCE already handles NULL
+Does this <if> condition need OR col IS NULL?
+│
+├─ Is the column from an outer-joined (LEFT/RIGHT JOIN) table?
+│  ├─ NO → NEVER add OR IS NULL (stop)
+│  └─ YES → What is the condition type?
+│     ├─ LIKE / UPPER / LOWER pattern
+│     │  → NEVER add OR IS NULL
+│     │    (NULL LIKE anything → NULL → falsy in BOTH databases)
+│     │
+│     ├─ COALESCE(col, default) = #{param}
+│     │  → NEVER add OR IS NULL
+│     │    (COALESCE already converts NULL to default)
+│     │
+│     └─ Direct comparison: col = #{param}
+│        → ADD OR col IS NULL
+│        (Oracle (+) preserves outer rows, PG LEFT JOIN needs explicit NULL guard)
+```
+
+**Examples:**
+```sql
+-- ✅ CORRECT: direct comparison on outer-joined column → add OR IS NULL
+<if test="statusFilter != null">
+   AND (u.STATUS = #{statusFilter}::varchar OR u.STATUS IS NULL)
+</if>
+
+-- ✅ CORRECT: LIKE on outer-joined column → do NOT add OR IS NULL
+<if test="searchKeyword != null">
+   AND UPPER(u.EMAIL) LIKE '%' || UPPER(#{searchKeyword}) || '%'
+</if>
+
+-- ✅ CORRECT: COALESCE on outer-joined column → do NOT add OR IS NULL
+<if test="country != null">
+   AND COALESCE(addr.COUNTRY, 'UNKNOWN') = #{country}::varchar
+</if>
+
+-- ✅ CORRECT: column from INNER-joined table → do NOT add OR IS NULL
+<if test="searchKeyword != null">
+   AND UPPER(u.EMAIL) LIKE '%' || UPPER(#{searchKeyword}) || '%'
+</if>
+-- (u is INNER JOIN, so u.EMAIL is never NULL from the join)
+```
 
 #### 3. Subquery Alias (Mandatory in PostgreSQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
@@ -446,21 +489,29 @@ When converting comma JOINs to explicit JOINs with subqueries:
 
 These are frequently observed incorrect conversion patterns. Check your output against this list.
 
-### 1. Redundant OR IS NULL
+### 1. Redundant OR IS NULL (see Decision Tree in Phase 2 §2)
 ```sql
--- ❌ WRONG: OR IS NULL on non-outer-joined table — changes query semantics
-WHERE (UPPER(name) LIKE '%' || #{param} || '%' OR name IS NULL)
+-- ❌ WRONG: LIKE on outer-joined column — OR IS NULL changes semantics
+WHERE (UPPER(u.EMAIL) LIKE '%' || #{kw} || '%' OR u.EMAIL IS NULL)
 
--- ✅ RIGHT: NULL LIKE returns NULL (falsy) in both Oracle and PostgreSQL
-WHERE UPPER(name) LIKE '%' || #{param} || '%'
+-- ✅ RIGHT: NULL LIKE → NULL → falsy, identical in both DBs
+WHERE UPPER(u.EMAIL) LIKE '%' || #{kw} || '%'
 
--- ❌ WRONG: OR IS NULL is redundant when COALESCE already handles NULL
-WHERE COALESCE(col, 'default') = #{param} OR col IS NULL
+-- ❌ WRONG: COALESCE already handles NULL
+WHERE COALESCE(addr.COUNTRY, 'UNKNOWN') = #{country} OR addr.COUNTRY IS NULL
 
 -- ✅ RIGHT: COALESCE alone is sufficient
-WHERE COALESCE(col, 'default') = #{param}
+WHERE COALESCE(addr.COUNTRY, 'UNKNOWN') = #{country}
+
+-- ❌ WRONG: column from INNER-joined table — never NULL from join
+WHERE (u.EMAIL = #{email}::varchar OR u.EMAIL IS NULL)
+-- (u is JOIN, not LEFT JOIN → u.EMAIL cannot be NULL from the join)
+
+-- ✅ RIGHT: only for direct comparison on LEFT-joined column
+WHERE (addr.STATUS = #{status}::varchar OR addr.STATUS IS NULL)
+-- (addr is LEFT JOIN → addr.STATUS can be NULL when no matching row)
 ```
-**Rule**: `OR col IS NULL` is ONLY needed for outer-joined table columns in dynamic `<if>` blocks. Never add it to main-table columns or LIKE/UPPER patterns.
+**Rule**: Follow the Decision Tree in Phase 2 §2. `OR col IS NULL` is ONLY needed for **direct equality comparison** on **outer-joined table** columns. Never for LIKE, COALESCE, or INNER-joined columns.
 
 ### 2. Redundant or Wrong ::interval Cast
 ```sql

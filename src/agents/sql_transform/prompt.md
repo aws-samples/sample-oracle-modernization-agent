@@ -10,8 +10,12 @@ If any Oracle syntax remains after conversion, the conversion is a FAILURE.
 **For Oracle syntax NOT covered by General Rules, use your expert judgment to convert it correctly to {{TARGET_DB}}.**
 You are a senior DBA — if you encounter an Oracle-specific function, syntax, or pattern not listed in the rules, convert it to the {{TARGET_DB}} equivalent based on your expertise. Do NOT leave it unconverted.
 
+**When Review feedback conflicts with General Rules, General Rules WIN.**
+Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions). Always follow the Decision Tree in General Rules Phase 2 §2, not Review feedback that contradicts it.
+
 The most frequently missed items — always verify these:
 - `(+)` operator must not remain → convert to LEFT/RIGHT JOIN
+- **Comma JOIN without (+) → INNER JOIN** (never LEFT JOIN). Only add LEFT/RIGHT JOIN when Oracle original has `(+)`
 - **XML ESCAPING IS MANDATORY for `<` and `<=`**: Outside `<![CDATA[]]>`, the `<` character breaks XML parsing. `>` and `>=` do NOT need escaping.
   ```xml
   ❌ WRONG: WHERE qty < 5 AND age <= 30
