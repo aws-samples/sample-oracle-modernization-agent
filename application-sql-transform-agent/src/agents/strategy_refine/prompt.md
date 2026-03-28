@@ -76,7 +76,7 @@ Keep each pattern to 5-6 lines max. No explanations.
 4. `write_strategy(compacted_content)` — save
 
 ## CRITICAL RULES
-- **SILENT EXECUTION** — No text output, only tool calls
+- **SILENT MODE** — No text output, only tool calls
 - **Before/After format only** — Every pattern must have SQL examples
 - **No General Rule duplication** — Simple NVL, DECODE, SYSDATE, (+) single-table conversions are already in General Rules
 - **Korean section headers** — Keep existing Korean headers as-is

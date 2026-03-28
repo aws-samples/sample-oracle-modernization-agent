@@ -94,8 +94,11 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 Scan your output SQL line by line and verify:
 - [ ] No Oracle syntax remains? (NVL, DECODE, SYSDATE, TO_DATE, (+), FROM DUAL, etc.)
 - [ ] **IDENTIFIER LOWERCASE**: All table names, column names, aliases must be lowercase. String literals (`'Y'`, `'ACTIVE'`) and MyBatis params (`#{paramName}`) stay as-is.
+- [ ] **JOIN TYPE**: Comma JOIN without `(+)` → must be `JOIN` (INNER), NOT `LEFT JOIN`. Only use LEFT/RIGHT JOIN when original has `(+)`.
+- [ ] **OR IS NULL**: Follow Decision Tree in General Rules Phase 2 §2. Never add for LIKE/COALESCE/IFNULL/INNER-joined columns.
 - [ ] **XML ESCAPE CHECK**: Search for any raw `<` or `<=` outside `<![CDATA[]]>`. If found, replace with `&lt;` `&lt;=`. (`>` `>=` do NOT need escaping)
-- [ ] **Parameter casting**: Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast
+- [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
+- [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags and #{param} references are intact?
 If any violation is found, fix it BEFORE calling convert_sql().
 

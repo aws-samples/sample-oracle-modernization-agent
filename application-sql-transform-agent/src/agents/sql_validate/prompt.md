@@ -62,17 +62,17 @@ For EACH SQL ID:
 - INNER vs OUTER changed incorrectly
 - Multiple (+) on same table merged incorrectly
 
-**4. Ordering & Grouping**
+**5. Ordering & Grouping**
 - ORDER BY changed (different columns or direction)
 - GROUP BY / HAVING changed
 - DISTINCT added or removed incorrectly
 
-**5. Subquery Logic**
+**6. Subquery Logic**
 - Correlated subquery relationship changed
 - EXISTS/NOT EXISTS logic altered
 - IN/NOT IN subquery changed
 
-**6. MyBatis Integrity**
+**7. MyBatis Integrity**
 - #{param} or ${param} changed or missing
 - Dynamic tags (<if>, <choose>, <foreach>) damaged
 - CDATA section removed where still needed
@@ -89,5 +89,5 @@ For EACH SQL ID:
 3. **PASS if functionally equivalent** — minor style differences are OK
 4. **Maximum 1 re-conversion per SQL ID** — if still wrong, FAIL for manual review
 5. **notes are REQUIRED** for convert_sql — describe what was wrong and what you fixed
-6. **SILENT EXECUTION** — No text output except tool calls
-7. **TOOL CALLS ONLY** — Think internally, then call tools silently
+6. **SILENT MODE** — No text output except tool calls
+7. **TOOL CALLS ONLY** — Think internally, then call tools

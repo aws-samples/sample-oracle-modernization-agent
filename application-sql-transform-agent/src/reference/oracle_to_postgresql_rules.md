@@ -412,6 +412,46 @@ LIMIT 10
 - `FETCH FIRST N PERCENT ROWS ONLY` → subquery with `LIMIT CEIL(COUNT(*) * N / 100)` or application-level
 - `OFFSET M ROWS FETCH NEXT N ROWS ONLY` → `LIMIT N OFFSET M`
 
+#### 6. XML Functions
+| Oracle | PostgreSQL |
+|--------|-----------|
+| `XMLTYPE(string)` | `string::xml` or `XMLPARSE(DOCUMENT string)` |
+| `XMLELEMENT("name", value)` | `XMLELEMENT(NAME "name", value)` (add `NAME` keyword) |
+| `XMLAGG(xml ORDER BY col)` | `XMLAGG(xml ORDER BY col)` — same syntax |
+| `XMLFOREST(a AS "col1", b AS "col2")` | `XMLFOREST(a AS "col1", b AS "col2")` — same syntax |
+| `col.EXTRACT('/path')` | `xpath('/path', col)` |
+| `EXISTSNODE(xml, '/path')` | `(xpath('/path', xml))[1] IS NOT NULL` |
+
+```sql
+-- Oracle
+SELECT XMLELEMENT("employee", XMLFOREST(name AS "name", dept AS "dept"))
+FROM employees
+
+-- PostgreSQL
+SELECT XMLELEMENT(NAME "employee", XMLFOREST(name AS "name", dept AS "dept"))
+FROM employees
+```
+
+#### 7. PL/SQL Constructs in SQL
+These Oracle PL/SQL constructs may appear in MyBatis mappers (usually in `<select>` with stored procedure calls):
+
+| Oracle | PostgreSQL |
+|--------|-----------|
+| `BULK COLLECT INTO` | Remove — use plain `SELECT` (MyBatis handles result collection) |
+| `RETURNING ... INTO :var` | `RETURNING col1, col2` (remove `INTO :var`, MyBatis maps results) |
+| `%ROWTYPE` | Remove — use explicit column types |
+| `%TYPE` | Remove — use explicit types |
+
+```sql
+-- Oracle: RETURNING INTO
+INSERT INTO orders (id, status) VALUES (seq.NEXTVAL, 'NEW')
+RETURNING id INTO :order_id
+
+-- PostgreSQL
+INSERT INTO orders (id, status) VALUES (nextval('seq'), 'NEW')
+RETURNING id
+```
+
 ---
 
 ## XML Special Character Handling (MyBatis)
