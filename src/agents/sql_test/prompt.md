@@ -67,7 +67,7 @@ For EACH failed SQL ID:
 ## CRITICAL Rules
 1. **Fix only what the error indicates** - do not change working parts
 2. **Preserve MyBatis tags** - #{param}, <if>, <foreach> must remain intact
-3. **SILENT EXECUTION** - Do NOT output any text except tool calls. No explanations, no SQL echoing, no commentary.
-4. **TOOL CALLS ONLY** - Your response should contain ONLY tool invocations. Think internally, then call tools silently.
+3. **SILENT MODE** — No text output except tool calls. No explanations, no SQL echoing, no commentary.
+4. **TOOL CALLS ONLY** — Think internally, then call tools.
 5. **Maximum 2 fix attempts per SQL ID** - then skip with MANUAL_REVIEW note
 6. **Test after every fix** - always call run_single_test to verify

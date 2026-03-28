@@ -45,41 +45,39 @@ For EACH SQL ID:
   - Direct `=` comparison on LEFT-joined column → MUST add `OR col IS NULL`
 
 ### Phase 3: Functions — Oracle functions must NOT remain
-- [ ] `NVL(` → `COALESCE(`
+
+**Core rule: No Oracle-specific function should remain in converted SQL. Refer to General Conversion Rules for the exact {{TARGET_DB}} equivalent of each function.**
+
+Common Oracle functions to check ({{TARGET_DB}} equivalents differ — see General Rules):
+- [ ] `NVL(` → converted (PG: `COALESCE(`, MySQL: `IFNULL(`)
 - [ ] `NVL2(` → `CASE WHEN ... IS NOT NULL`
 - [ ] `DECODE(` → `CASE WHEN`
-- [ ] `SYSDATE` → `CURRENT_TIMESTAMP` or `CURRENT_DATE`
-- [ ] `SYSTIMESTAMP` → `CURRENT_TIMESTAMP`
-- [ ] `TO_DATE(` → `::date` or `to_timestamp()`
-- [ ] `TO_NUMBER(` → `CAST(... AS NUMERIC)` or `::numeric`
-- [ ] `TO_CHAR(` with Oracle format → {{TARGET_DB}} format (e.g., Oracle `'YYYYMMDD'` is OK in PG)
+- [ ] `SYSDATE` → converted (PG: `CURRENT_TIMESTAMP`, MySQL: `NOW()`)
+- [ ] `SYSTIMESTAMP` → converted
+- [ ] `TO_DATE(` → converted (PG: `to_date()`/`to_timestamp()`, MySQL: `STR_TO_DATE()`)
+- [ ] `TO_NUMBER(` → `CAST(... AS NUMERIC)` or equivalent
+- [ ] `TO_CHAR(` with Oracle format → {{TARGET_DB}} format
 - [ ] `SUBSTR(` → `SUBSTRING(`
-- [ ] `INSTR(` → `POSITION(... IN ...)`
-- [ ] `LENGTHB(` → `OCTET_LENGTH(`
-- [ ] `LISTAGG(` → `STRING_AGG(`
-- [ ] `WM_CONCAT(` → `STRING_AGG(`
-- [ ] `SYS_GUID()` → `gen_random_uuid()`
+- [ ] `INSTR(` → converted (PG: `POSITION(sub IN s)`, MySQL: no change needed)
+- [ ] `LENGTHB(` → converted (PG: `OCTET_LENGTH(`, MySQL: `LENGTH(`)
+- [ ] `LISTAGG(` → converted (PG: `STRING_AGG(`, MySQL: `GROUP_CONCAT(`)
+- [ ] `WM_CONCAT(` → converted (PG: `STRING_AGG(`, MySQL: `GROUP_CONCAT(`)
+- [ ] `SYS_GUID()` → converted (PG: `gen_random_uuid()`, MySQL: `UUID()`)
 - [ ] `DBMS_LOB.GETLENGTH(` → `LENGTH(` or `OCTET_LENGTH(`
-- [ ] `ADD_MONTHS(` → `+ INTERVAL '... months'`
-- [ ] `MONTHS_BETWEEN(` → `EXTRACT` from `AGE()`
-- [ ] `TRUNC(date` → `DATE_TRUNC(`
-- [ ] `LAST_DAY(` → `(DATE_TRUNC('month', date) + INTERVAL '1 month - 1 day')::date`
+- [ ] `ADD_MONTHS(` → converted (PG: `+ INTERVAL`, MySQL: `DATE_ADD()`)
+- [ ] `MONTHS_BETWEEN(` → converted (PG: `AGE()` + `EXTRACT`, MySQL: `TIMESTAMPDIFF()`)
+- [ ] `TRUNC(date` → converted (PG: `DATE_TRUNC(`, MySQL: `DATE()` or `DATE_FORMAT()`)
+- [ ] `LAST_DAY(` → converted (PG: expression, MySQL: `LAST_DAY()` same syntax)
 - [ ] `NEXT_DAY(` → custom expression
-- [ ] `SEQ_NAME.NEXTVAL` → `nextval('seq_name')`
-- [ ] `SEQ_NAME.CURRVAL` → `currval('seq_name')`
+- [ ] Sequence functions → converted (PG: `nextval()`/`currval()`, MySQL: `AUTO_INCREMENT`/`LAST_INSERT_ID()`)
 - [ ] `USER` (standalone) → `CURRENT_USER`
-- [ ] `ROWID` → `ctid` or remove
-- [ ] `ROWNUM` (in WHERE) → `LIMIT/OFFSET` or `ROW_NUMBER()`
-- [ ] `REGEXP_LIKE(` → `~` operator or `REGEXP_MATCHES(`
-- [ ] `REGEXP_SUBSTR(` → `SUBSTRING(... FROM pattern)`
-- [ ] `REGEXP_REPLACE(` → `REGEXP_REPLACE(` (check flag differences: Oracle `'i'` → PG `'i'`)
-- [ ] `REGEXP_COUNT(` → `array_length(regexp_matches(..., 'g'), 1)`
+- [ ] `ROWID` → remove or replace with PK
+- [ ] `ROWNUM` → `LIMIT/OFFSET` or `ROW_NUMBER()`
+- [ ] `REGEXP_LIKE(` → converted (PG: `~`, MySQL: `REGEXP`)
 - [ ] `XMLTYPE(`, `XMLELEMENT(`, `XMLAGG(` → {{TARGET_DB}} XML functions
-- [ ] `CONNECT_BY_ROOT` → recursive CTE column
-- [ ] `SYS_CONNECT_BY_PATH(` → recursive CTE string aggregation
-- [ ] `LEVEL` (hierarchical) → recursive CTE level column
-- [ ] `PRIOR` keyword → recursive CTE join
+- [ ] `CONNECT_BY_ROOT`, `SYS_CONNECT_BY_PATH(`, `LEVEL`, `PRIOR` → recursive CTE
 - [ ] `(+)` → `LEFT/RIGHT JOIN` (Phase 2 but double-check here)
+- [ ] `||` string concatenation → MySQL: must use `CONCAT()` (PG: `||` is OK)
 
 ### Phase 4: Advanced — must be converted
 - [ ] `CONNECT BY` / `START WITH` → `WITH RECURSIVE`
@@ -92,7 +90,7 @@ For EACH SQL ID:
 - [ ] `%ROWTYPE`, `%TYPE` → explicit types
 
 ### Always Check
-- [ ] Parameter casting: `#{param}` in WHERE/LIMIT/OFFSET should have `::type`
+- [ ] Parameter casting (PostgreSQL only): `#{param}` in WHERE/LIMIT/OFFSET should have `::type` cast. MySQL does NOT use `::type` — skip this check for MySQL.
 - [ ] XML escaping: raw `<` or `<=` outside CDATA must be `&lt;` / `&lt;=`
 - [ ] MyBatis tags intact: `#{}`, `${}`, `<if>`, `<choose>`, `<foreach>`, `<where>`, `<set>`
 
@@ -105,14 +103,16 @@ For EACH SQL ID:
 
 ### Common WRONG conversions (flag as FAIL)
 - `OR col IS NULL` on LIKE/UPPER/LOWER condition — even on outer-joined columns, NULL LIKE → NULL (falsy) in both DBs
-- `OR col IS NULL` on COALESCE/IFNULL condition — COALESCE already handles NULL
+- `OR col IS NULL` on COALESCE/IFNULL condition — COALESCE/IFNULL already handles NULL
 - `OR col IS NULL` on INNER-joined column — column cannot be NULL from the join itself
 - `LEFT JOIN` when original Oracle had no `(+)` for that table — must be `JOIN` (INNER)
 - `COALESCE(col, 'default') = #{param} OR col IS NULL` — OR IS NULL is redundant when COALESCE already handles NULL
-- `(CURRENT_DATE - col::date)::interval` — date minus date returns integer in {{TARGET_DB}}, NOT interval
-- `(#{param} || ' days')::interval` — should use `MAKE_INTERVAL(days => #{param}::integer)`
-- `ROUND(integer_expr, 2)` without `::numeric` — {{TARGET_DB}} ROUND requires numeric type
-- Incorrect date format strings in `to_timestamp()` / `to_date()`
+- PostgreSQL only: `(CURRENT_DATE - col::date)::interval` — date minus date returns integer, NOT interval
+- PostgreSQL only: `(#{param} || ' days')::interval` — should use `MAKE_INTERVAL(days => #{param}::integer)`
+- PostgreSQL only: `ROUND(integer_expr, 2)` without `::numeric` — PG ROUND requires numeric type
+- MySQL only: `||` used for string concatenation — must be `CONCAT()` (MySQL `||` is logical OR)
+- MySQL only: `::type` casting syntax — must use `CAST(... AS type)`
+- Incorrect date format strings (Oracle formats in {{TARGET_DB}} functions)
 
 ## Result Rules
 
@@ -122,7 +122,7 @@ For EACH SQL ID:
   - Good: "NVL(status, 'N') on line 5 not converted to COALESCE"
 
 ## ABSOLUTE RULES
-1. **SILENT EXECUTION** — No text output except tool calls
+1. **SILENT MODE** — No text output except tool calls
 2. **TOOL CALLS ONLY** — Think internally, then call tools
 3. **DO NOT FIX** — Only identify violations, never suggest corrections
 4. **Be specific** — Include the actual Oracle syntax found and its location

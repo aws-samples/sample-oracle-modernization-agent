@@ -38,6 +38,23 @@ Remove Oracle-specific meta elements first.
 - `SCHEMA_NAME.TABLE_NAME` → `TABLE_NAME`
 - `SCHEMA.PACKAGE.PROCEDURE` → `PACKAGE_PROCEDURE`
 
+#### 1-1. Identifier Case Handling
+MySQL identifier case sensitivity depends on `lower_case_table_names` system variable:
+- **0 (Linux default)**: Table/DB names are case-sensitive, stored as-is
+- **1 (Windows/macOS default)**: Names stored lowercase, comparisons case-insensitive
+- **2 (macOS alternative)**: Names stored as-is, comparisons case-insensitive
+
+**Rule: Convert all identifiers (table, column, alias) to lowercase for maximum portability.**
+- `TABLE_NAME` → `table_name`
+- `COLUMN_NAME` → `column_name`
+- `T1.COLUMN_NAME` → `t1.column_name`
+
+**Do NOT lowercase:**
+- String literals: `'Y'`, `'ACTIVE'` — keep as-is
+- MyBatis parameters: `#{paramName}`, `${columnName}` — keep as-is
+- SQL keywords: `SELECT`, `FROM`, `WHERE` — either case is fine
+- Backtick-quoted reserved words: `` `order` ``, `` `group` `` — keep as-is
+
 #### 2. Oracle Hint Removal
 - Remove ALL: `/*+ INDEX(...) */`, `/*+ FULL(...) */`, `/*+ ORDERED */`, etc.
 - MySQL has its own hint syntax but Oracle hints are incompatible.
@@ -409,6 +426,26 @@ LIMIT 10
 - `FETCH FIRST N ROWS ONLY` → `LIMIT N`
 - `OFFSET M ROWS FETCH NEXT N ROWS ONLY` → `LIMIT N OFFSET M`
 
+#### 6. PL/SQL Constructs in SQL
+These Oracle PL/SQL constructs may appear in MyBatis mappers:
+
+| Oracle | MySQL |
+|--------|-------|
+| `BULK COLLECT INTO` | Remove — use plain `SELECT` (MyBatis handles result collection) |
+| `RETURNING ... INTO :var` | Remove entirely — MySQL `INSERT` does not support `RETURNING`. Use `LAST_INSERT_ID()` for auto-increment PKs |
+| `%ROWTYPE` | Remove — use explicit column types |
+| `%TYPE` | Remove — use explicit types |
+
+```sql
+-- Oracle: RETURNING INTO
+INSERT INTO orders (id, status) VALUES (seq.NEXTVAL, 'NEW')
+RETURNING id INTO :order_id
+
+-- MySQL: no RETURNING — use LAST_INSERT_ID() if needed
+INSERT INTO orders (status) VALUES ('NEW')
+-- then: SELECT LAST_INSERT_ID()
+```
+
 ---
 
 ## XML Special Character Handling (MyBatis)
@@ -549,6 +586,16 @@ SELECT ... EXCEPT SELECT ...
 
 -- ✅ RIGHT (MySQL < 8.0.31): use NOT EXISTS
 SELECT ... WHERE NOT EXISTS (SELECT 1 FROM (...) sub WHERE sub.id = main.id)
+```
+
+### 8. TO_DATE Blindly Converted to CAST
+```sql
+-- ❌ WRONG: CAST only works with standard date format
+TO_DATE(#{param}, 'YYYYMMDD')  →  CAST(#{param} AS DATE)  -- FAILS for '20260315'
+
+-- ✅ RIGHT: use STR_TO_DATE with correct format
+TO_DATE(#{param}, 'YYYYMMDD')  →  STR_TO_DATE(#{param}, '%Y%m%d')
+-- CAST(... AS DATE) is safe ONLY for ISO format ('2026-03-15')
 ```
 
 ---
