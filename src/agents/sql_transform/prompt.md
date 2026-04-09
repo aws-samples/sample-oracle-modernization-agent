@@ -21,6 +21,14 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 The most frequently missed items — always verify these:
 - `(+)` operator must not remain → convert to LEFT/RIGHT JOIN
 - **Comma JOIN without (+) → INNER JOIN** (never LEFT JOIN). Only add LEFT/RIGHT JOIN when Oracle original has `(+)`
+- **CDATA sections MUST be preserved**: If the original SQL uses `<![CDATA[...]]>`, keep the CDATA wrapper in the converted SQL. Do NOT replace CDATA with `&lt;` entity escapes.
+  ```xml
+  ❌ WRONG: Original has CDATA but you removed it:
+     Original: <![CDATA[ AND col <= #{param} ]]>
+     Converted: AND col &lt;= #{param}::numeric
+  ✅ RIGHT: Keep the CDATA wrapper:
+     Converted: <![CDATA[ AND col <= #{param}::numeric ]]>
+  ```
 - **XML ESCAPING IS MANDATORY for `<` and `<=`**: Outside `<![CDATA[]]>`, the `<` character breaks XML parsing. `>` and `>=` do NOT need escaping.
   ```xml
   ❌ WRONG: WHERE qty < 5 AND age <= 30
@@ -107,6 +115,7 @@ Scan your output SQL line by line and verify:
 - [ ] **IDENTIFIER LOWERCASE**: All table names, column names, aliases must be lowercase. String literals (`'Y'`, `'ACTIVE'`) and MyBatis params (`#{paramName}`) stay as-is.
 - [ ] **JOIN TYPE**: Comma JOIN without `(+)` → must be `JOIN` (INNER), NOT `LEFT JOIN`. Only use LEFT/RIGHT JOIN when original has `(+)`.
 - [ ] **OR IS NULL**: Follow Decision Tree in General Rules Phase 2 §2. Never add for LIKE/COALESCE/IFNULL/INNER-joined columns.
+- [ ] **CDATA PRESERVED**: If original had `<![CDATA[...]]>`, converted SQL must keep CDATA (not replace with `&lt;` escapes)
 - [ ] **XML ESCAPE CHECK**: Search for any raw `<` or `<=` outside `<![CDATA[]]>`. If found, replace with `&lt;` `&lt;=`. (`>` `>=` do NOT need escaping)
 - [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
