@@ -42,6 +42,8 @@ Target PostgreSQL schemas are created with unquoted identifiers (all lowercase).
 
 #### 5. Database Link Removal
 - `TABLE@DBLINK` → `TABLE`
+- **Record the removed DB Link name in the `[OMA]` conversion comment** so the origin is traceable
+  - e.g., `FROM TEST_01@NDS01 A` → `FROM test_01 a` + comment includes `@DBLINK removed(NDS01)`
 
 #### 6. Stored Procedure Conversion
 - `{call PROC()}` → `CALL PROC()`
@@ -432,6 +434,18 @@ SELECT XMLELEMENT(NAME "employee", XMLFOREST(name AS "name", dept AS "dept"))
 FROM employees
 ```
 
+**CRITICAL: XMLAGG String Aggregation Idiom**
+Oracle commonly uses `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` as a string aggregation pattern. This MUST be converted to `STRING_AGG()`, NOT left as XML functions:
+```sql
+-- Oracle (string aggregation idiom)
+SUBSTR(XMLAGG(XMLELEMENT(COL, ',', col_name) ORDER BY col_name).EXTRACT('//text()').GETSTRINGVAL(), 2) AS result
+
+-- PostgreSQL
+STRING_AGG(col_name, ',' ORDER BY col_name) AS result
+```
+- `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` → `STRING_AGG(col, delim ORDER BY ...)`
+- The `SUBSTR(..., 2)` removes the leading delimiter — `STRING_AGG` does not add a leading delimiter, so `SUBSTR` is not needed
+
 #### 7. PL/SQL Constructs in SQL
 These Oracle PL/SQL constructs may appear in MyBatis mappers (usually in `<select>` with stored procedure calls):
 
@@ -441,6 +455,9 @@ These Oracle PL/SQL constructs may appear in MyBatis mappers (usually in `<selec
 | `RETURNING ... INTO :var` | `RETURNING col1, col2` (remove `INTO :var`, MyBatis maps results) |
 | `%ROWTYPE` | Remove — use explicit column types |
 | `%TYPE` | Remove — use explicit types |
+| `UTL_HTTP.*` | **MANUAL_REVIEW** — requires project-specific replacement (e.g., `aws_lambda.invoke`, HTTP client) |
+| `UTL_SMTP.*` | **MANUAL_REVIEW** — requires project-specific mail service replacement |
+| `DBMS_PIPE.*` | **MANUAL_REVIEW** — requires project-specific messaging replacement |
 
 ```sql
 -- Oracle: RETURNING INTO
@@ -646,6 +663,9 @@ TO_DATE(#{param}, 'YYYYMMDD')  →  to_date(#{param}, 'YYYYMMDD')
 2. **Follow 4-phase order** — Phase 1(Structural) → Phase 2(Syntax) → Phase 3(Functions) → Phase 4(Advanced)
 3. **Preserve MyBatis tags** — `<if>`, `<foreach>`, etc. must remain intact
 4. **Preserve parameter references** — `#{param}`, `${param}` unchanged
-5. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
-6. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
-7. **NO optimization** — convert syntax only, do not change logic or structure
+5. **Preserve ALL comments** — `--` and `/* */` comments must remain exactly as-is
+6. **Preserve variable names** — only lowercase, NEVER change prefixes or naming (V_RETURN → v_return, NOT p_return)
+7. **Preserve literal values** — string literals, email addresses, URLs, constants must NOT be masked, anonymized, or sanitized
+8. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
+9. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
+10. **NO optimization** — convert syntax only, do not change logic or structure

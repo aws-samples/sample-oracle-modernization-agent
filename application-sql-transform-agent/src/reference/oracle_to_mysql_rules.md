@@ -67,6 +67,8 @@ MySQL identifier case sensitivity depends on `lower_case_table_names` system var
 
 #### 5. Database Link Removal
 - `TABLE@DBLINK` → `TABLE`
+- **Record the removed DB Link name in the `[OMA]` conversion comment** so the origin is traceable
+  - e.g., `FROM TEST_01@NDS01 A` → `FROM test_01 a` + comment includes `@DBLINK removed(NDS01)`
 
 #### 6. Stored Procedure Conversion
 - `{call PROC()}` → `CALL PROC()`
@@ -202,6 +204,7 @@ CONCAT(IFNULL(col1, ''), col2)
 | LPAD(s,len,pad) | LPAD(s,len,pad) — **same syntax, no change needed** |
 | LISTAGG(col,delim) WITHIN GROUP (ORDER BY x) | GROUP_CONCAT(col ORDER BY x SEPARATOR delim) |
 | WM_CONCAT(col) | GROUP_CONCAT(col) |
+| XMLAGG(XMLELEMENT(...)...).EXTRACT().GETSTRINGVAL() | GROUP_CONCAT() — see XMLAGG Idiom below |
 | TO_NUMBER(s) | CAST(s AS DECIMAL) or s+0 |
 | DBMS_LOB.GETLENGTH(col) | LENGTH(col) or OCTET_LENGTH(col) |
 | ROWID | **remove or replace with PK** |
@@ -232,6 +235,18 @@ CASE status WHEN 'A' THEN 'active' WHEN 'I' THEN 'inactive'
 | OVER (PARTITION BY ... ORDER BY ...) | Window functions work in MySQL 8.0+ |
 | UNION ALL / INTERSECT | Identical syntax |
 | CASE WHEN ... END | Identical syntax |
+
+**CRITICAL: XMLAGG String Aggregation Idiom**
+Oracle commonly uses `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` as a string aggregation pattern. This MUST be converted to `GROUP_CONCAT()`, NOT left as XML functions:
+```sql
+-- Oracle (string aggregation idiom)
+SUBSTR(XMLAGG(XMLELEMENT(COL, ',', col_name) ORDER BY col_name).EXTRACT('//text()').GETSTRINGVAL(), 2) AS result
+
+-- MySQL
+GROUP_CONCAT(col_name ORDER BY col_name SEPARATOR ',') AS result
+```
+- `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` → `GROUP_CONCAT(col ORDER BY ... SEPARATOR delim)`
+- The `SUBSTR(..., 2)` removes the leading delimiter — `GROUP_CONCAT` does not add a leading delimiter, so `SUBSTR` is not needed
 
 **Note**: MySQL does not support `CUBE` — use UNION of multiple ROLLUP queries.
 **Note**: MySQL does not support `NULLS FIRST / NULLS LAST` directly — use:
@@ -435,6 +450,9 @@ These Oracle PL/SQL constructs may appear in MyBatis mappers:
 | `RETURNING ... INTO :var` | Remove entirely — MySQL `INSERT` does not support `RETURNING`. Use `LAST_INSERT_ID()` for auto-increment PKs |
 | `%ROWTYPE` | Remove — use explicit column types |
 | `%TYPE` | Remove — use explicit types |
+| `UTL_HTTP.*` | **MANUAL_REVIEW** — requires project-specific replacement (e.g., `aws_lambda.invoke`, HTTP client) |
+| `UTL_SMTP.*` | **MANUAL_REVIEW** — requires project-specific mail service replacement |
+| `DBMS_PIPE.*` | **MANUAL_REVIEW** — requires project-specific messaging replacement |
 
 ```sql
 -- Oracle: RETURNING INTO
@@ -606,6 +624,9 @@ TO_DATE(#{param}, 'YYYYMMDD')  →  STR_TO_DATE(#{param}, '%Y%m%d')
 3. **Preserve MyBatis tags** — `<if>`, `<foreach>`, etc. must remain intact
 4. **Preserve parameter references** — `#{param}`, `${param}` unchanged
 5. **Always use CONCAT()** — never leave `||` for string concatenation
-6. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
-7. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
-8. **NO optimization** — convert syntax only, do not change logic or structure
+6. **Preserve ALL comments** — `--` and `/* */` comments must remain exactly as-is
+7. **Preserve variable names** — only lowercase, NEVER change prefixes or naming (V_RETURN → v_return, NOT p_return)
+8. **Preserve literal values** — string literals, email addresses, URLs, constants must NOT be masked, anonymized, or sanitized
+9. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
+10. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
+11. **NO optimization** — convert syntax only, do not change logic or structure
