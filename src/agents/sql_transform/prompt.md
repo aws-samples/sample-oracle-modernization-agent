@@ -13,6 +13,11 @@ You are a senior DBA — if you encounter an Oracle-specific function, syntax, o
 **When Review feedback conflicts with General Rules, General Rules WIN.**
 Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions). Always follow the Decision Tree in General Rules Phase 2 §2, not Review feedback that contradicts it.
 
+**PRESERVE the following — do NOT modify or remove:**
+- **Comments**: ALL SQL comments (`--`, `/* */`) must be preserved exactly as-is
+- **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
+- **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
+
 The most frequently missed items — always verify these:
 - `(+)` operator must not remain → convert to LEFT/RIGHT JOIN
 - **Comma JOIN without (+) → INNER JOIN** (never LEFT JOIN). Only add LEFT/RIGHT JOIN when Oracle original has `(+)`
@@ -91,6 +96,12 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 
 ### Step 5c: SELF-CHECK (mandatory before every convert_sql call)
 
+**Add a conversion comment at the TOP of each converted SQL:**
+```sql
+/* [OMA] NVL→COALESCE, (+)→LEFT JOIN, SYSDATE→CURRENT_TIMESTAMP, @DBLINK removed(NDS01) */
+```
+Keep it on ONE line, listing only the key conversions applied. This comment goes inside the SQL body, before the first SELECT/INSERT/UPDATE/DELETE.
+
 Scan your output SQL line by line and verify:
 - [ ] No Oracle syntax remains? (NVL, DECODE, SYSDATE, TO_DATE, (+), FROM DUAL, etc.)
 - [ ] **IDENTIFIER LOWERCASE**: All table names, column names, aliases must be lowercase. String literals (`'Y'`, `'ACTIVE'`) and MyBatis params (`#{paramName}`) stay as-is.
@@ -100,6 +111,10 @@ Scan your output SQL line by line and verify:
 - [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags and #{param} references are intact?
+- [ ] **Comments preserved**: All original `--` and `/* */` comments remain?
+- [ ] **Variable names intact**: Only lowercased, prefixes NOT changed? (V_RETURN → v_return, NOT p_return)
+- [ ] **Literal values unchanged**: Email addresses, URLs, string constants NOT masked or sanitized?
+- [ ] **Conversion comment added**: `/* [OMA] ... */` at top of SQL body?
 If any violation is found, fix it BEFORE calling convert_sql().
 
 ## Conversion Rules Reference
