@@ -91,6 +91,7 @@ Common Oracle functions to check ({{TARGET_DB}} equivalents differ — see Gener
 
 ### Always Check
 - [ ] Parameter casting (PostgreSQL only): `#{param}` in WHERE/LIMIT/OFFSET should have `::type` cast. MySQL does NOT use `::type` — skip this check for MySQL.
+- [ ] CDATA preserved: if original used `<![CDATA[...]]>`, converted must keep CDATA (not replace with `&lt;`)
 - [ ] XML escaping: raw `<` or `<=` outside CDATA must be `&lt;` / `&lt;=`
 - [ ] MyBatis tags intact: `#{}`, `${}`, `<if>`, `<choose>`, `<foreach>`, `<where>`, `<set>`
 
