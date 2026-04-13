@@ -231,7 +231,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
         return {'status': 'skipped', 'error': f'No {display_name} connection info'}
 
     if not test_folder:
-        test_folder = str(TRANSFORM_DIR / "main")
+        test_folder = str(TRANSFORM_DIR)
 
     # Run Java test
     try:
