@@ -1,5 +1,6 @@
 """Source Analyzer Agent - Strands Framework"""
 from pathlib import Path
+from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from utils.project_paths import MODEL_ID, load_prompt_text
@@ -23,7 +24,8 @@ def create_source_analyzer_agent() -> Agent:
 
     model = BedrockModel(
         model_id=MODEL_ID,
-        max_tokens=64000
+        max_tokens=32000,
+        boto_client_config=BotocoreConfig(read_timeout=300),
     )
 
     return Agent(
