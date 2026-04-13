@@ -675,6 +675,18 @@ TO_DATE(#{param}, 'YYYYMMDD')  →  to_date(#{param}, 'YYYYMMDD')
 -- ::date cast is safe ONLY for ISO format ('2026-03-15') or date-typed values
 ```
 
+### 9. User-Defined Package Function Mapped to Built-in
+```sql
+-- ❌ WRONG: PKG_CRYPTO is user-defined, NOT Oracle standard
+PKG_CRYPTO.ENCRYPT(col, key)  →  pgp_sym_encrypt(col, key)
+PKG_CRYPTO.DECRYPT(col, key)  →  pgp_sym_decrypt(col, key)
+
+-- ✅ RIGHT: flatten with underscore
+PKG_CRYPTO.ENCRYPT(col, key)  →  pkg_crypto_encrypt(col, key)
+PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
+```
+**Only `DBMS_*` and `UTL_*` are Oracle standard.** All other `PACKAGE.FUNCTION()` calls must be flattened to `package_function()`. Never map to target DB built-in functions based on name similarity.
+
 ---
 
 ## Critical Rules
