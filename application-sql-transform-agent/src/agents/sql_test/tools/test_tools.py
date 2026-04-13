@@ -165,6 +165,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 _update_tested(mapper_file, sql_id)
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
+                _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
                 failed += 1
                 failures.append({
                     'mapper_file': mapper_file,
@@ -172,6 +173,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                     'error': error_msg,
                 })
         except subprocess.TimeoutExpired:
+            _update_tested(mapper_file, sql_id, result="FAIL", error="EXPLAIN timeout (15s)")
             failed += 1
             failures.append({
                 'mapper_file': mapper_file,
@@ -292,7 +294,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
                     # Match by filename in target_file path (ends with filename)
                     cursor.execute("""
                         UPDATE transform_target_list
-                        SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
+                        SET tested = 'Y', test_result = 'PASS', updated_at = CURRENT_TIMESTAMP
                         WHERE target_file LIKE ? AND sql_id = ?
                     """, (f'%/{filename}', sql_id))
 
@@ -304,7 +306,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
                         # Try without leading slash for Windows paths
                         cursor.execute("""
                             UPDATE transform_target_list
-                            SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
+                            SET tested = 'Y', test_result = 'PASS', updated_at = CURRENT_TIMESTAMP
                             WHERE target_file LIKE ? AND sql_id = ?
                         """, (f'%{filename}', sql_id))
                         if cursor.rowcount > 0:
@@ -321,6 +323,13 @@ def run_bulk_test(test_folder: str = "") -> dict:
                     """, (f'%/{filename}', f'%{filename}', sql_id))
                     row = cursor.fetchone()
                     mapper_file = row[0] if row else filename
+
+                    # Record failure in DB
+                    cursor.execute("""
+                        UPDATE transform_target_list
+                        SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE (target_file LIKE ? OR target_file LIKE ?) AND sql_id = ?
+                    """, (error[:500] if error else 'FAIL', f'%/{filename}', f'%{filename}', sql_id))
 
                     fail_count += 1
                     failures.append({
@@ -421,6 +430,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
                 error_pattern = rf'{re.escape(sql_id)}.*?❌ Failed:(.*?)(?=\n\rProgress:|\n  |\Z)'
                 error_match = re.search(error_pattern, output, re.DOTALL)
                 error_msg = error_match.group(1).strip() if error_match else "Unknown error"
+                _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
                 return {'status': 'FAIL', 'sql_id': sql_id, 'error': error_msg}
             elif match or f'{sql_id}' in output:
                 # Check final summary line for this file
@@ -432,6 +442,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
                     # Extract error
                     error_lines = [line for line in output.split('\n') if 'Error' in line or 'Exception' in line]
                     error_msg = '\n'.join(error_lines[-5:]) if error_lines else output[-1000:]
+                    _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
                     return {'status': 'FAIL', 'sql_id': sql_id, 'error': error_msg}
             
             # Default: assume success if no error found
@@ -475,19 +486,19 @@ def get_test_failures() -> dict:
     return {'total': total, 'mappers_count': len(pending), 'pending': pending}
 
 
-def _update_tested(mapper_file: str, sql_id: str):
+def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: str = ""):
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
                 conn.execute("""
                     UPDATE transform_target_list
-                    SET tested = 'Y', updated_at = CURRENT_TIMESTAMP
+                    SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE mapper_file = ? AND sql_id = ?
-                """, (mapper_file, sql_id))
+                """, (result if result == "PASS" else error or result, mapper_file, sql_id))
                 conn.commit()
             # Emit progress event via thread-safe queue
             from core.progress import emit_progress
-            emit_progress(mapper_file, sql_id, "PASS")
+            emit_progress(mapper_file, sql_id, result)
             return
         except sqlite3.OperationalError as e:
             if "locked" in str(e) and i < 4:

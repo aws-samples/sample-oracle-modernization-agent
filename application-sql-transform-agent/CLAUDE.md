@@ -11,6 +11,7 @@ Application SQL Transform Agent — a sub-module of OMA (Oracle Modernization Ag
 ```bash
 # Install
 uv sync
+source .venv/bin/activate
 
 # Configure (interactive — creates OUTPUT_DIR/oma_control.db)
 cd src && PYTHONPATH=. python3 run_setup.py
