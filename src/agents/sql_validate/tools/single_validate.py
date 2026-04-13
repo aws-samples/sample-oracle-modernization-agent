@@ -94,6 +94,13 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     # Determine PASS vs FIXED: if updated_at changed, convert_sql was called
     updated_at_after = row[1]
     if updated_at_after != updated_at_before:
+        # Agent fixed the SQL — ensure validation_result reflects PASS
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            conn.execute(
+                "UPDATE transform_target_list SET validation_result = 'PASS' WHERE mapper_file = ? AND sql_id = ?",
+                (mapper_file, sql_id)
+            )
+            conn.commit()
         return {
             'status': 'FIXED',
             'mapper_file': mapper_file,

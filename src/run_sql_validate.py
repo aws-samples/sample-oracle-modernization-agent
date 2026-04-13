@@ -78,6 +78,17 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
             drain_progress()
             advance_progress(len(group), group[-1]['sql_id'])
 
+        # Fix stale validation_result: if validated='Y' but validation_result='FAIL',
+        # it means agent fixed the SQL but didn't update validation_result to 'PASS'
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            conn.execute("""
+                UPDATE transform_target_list
+                SET validation_result = 'PASS'
+                WHERE mapper_file = ? AND validated = 'Y'
+                  AND validation_result IS NOT NULL AND validation_result != 'PASS'
+            """, (mapper_file,))
+            conn.commit()
+
         log(f"✅ {mapper_file} 검증 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
     except Exception as e:

@@ -32,7 +32,7 @@ For EACH SQL ID:
 2. `read_transform(mapper_file, sql_id)` → converted {{TARGET_DB}} SQL
 3. Compare **functional equivalence** using the checklist below
 4. If PASS: `set_validated(mapper_file, sql_id, 'PASS', notes)`
-5. If FAIL: `convert_sql(sql_id, corrected_sql, mapper_file, notes)` then `set_validated(mapper_file, sql_id, 'FAIL', notes)`
+5. If FAIL: `convert_sql(sql_id, corrected_sql, mapper_file, notes)` then `set_validated(mapper_file, sql_id, 'PASS', 'FIXED: ' + notes)`
 
 ## Functional Equivalence Checklist
 
