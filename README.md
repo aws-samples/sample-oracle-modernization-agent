@@ -177,6 +177,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Install dependencies
 uv sync
+source .venv/bin/activate
 
 # 3. AWS credentials
 export AWS_ACCESS_KEY_ID="..."
