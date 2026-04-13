@@ -229,7 +229,19 @@ def generate_metadata() -> dict:
             for row in rows:
                 f.write('|'.join(row) + '\n')
 
-        print(f"📊 Metadata: {len(rows)} columns saved to target_metadata table + {txt_path}")
+        # Save as JSON for human readability
+        import json
+        json_path = metadata_dir / "oma_metadata.json"
+        metadata_by_table = {}
+        for schema, table, column, dtype in rows:
+            key = f"{schema}.{table}"
+            if key not in metadata_by_table:
+                metadata_by_table[key] = {"schema": schema, "table": table, "columns": {}}
+            metadata_by_table[key]["columns"][column] = dtype
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata_by_table, f, indent=2, ensure_ascii=False)
+
+        print(f"📊 Metadata: {len(rows)} columns saved to target_metadata table + {txt_path} + {json_path}")
         return {'status': 'success', 'row_count': len(rows)}
 
     except FileNotFoundError:

@@ -285,6 +285,8 @@ def run(max_workers=8, max_rounds=3):
         passed = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='F'")
         failed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y' AND reviewed='N'")
+        skipped = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='Y'")
         total = cursor.fetchone()[0]
 
@@ -292,10 +294,17 @@ def run(max_workers=8, max_rounds=3):
     rows = [
         ("Passed", str(passed)),
         ("Failed", f"[red]{failed}[/red]" if failed > 0 else "0"),
-        ("Total", str(total)),
     ]
-    if failed > 0:
-        rows.append(("Note", f"[yellow]{failed} SQL require manual review[/yellow]"))
+    if skipped > 0:
+        rows.append(("Skipped", f"[yellow]{skipped}[/yellow]"))
+    rows.append(("Total", str(total)))
+    if failed > 0 or skipped > 0:
+        notes = []
+        if failed > 0:
+            notes.append(f"{failed} failed (manual review needed)")
+        if skipped > 0:
+            notes.append(f"{skipped} not reviewed (check logs)")
+        rows.append(("Note", f"[yellow]{'; '.join(notes)}[/yellow]"))
     else:
         rows.append(("Status", "[green]All passed[/green]"))
     rows.append(("Logs", str(_log_dir)))

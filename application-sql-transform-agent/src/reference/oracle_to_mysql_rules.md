@@ -536,6 +536,16 @@ CAST(#{param} AS SIGNED)
 - `<if>`, `<choose>`, `<when>`, `<otherwise>` → no change
 - `<foreach>`, `<where>`, `<set>`, `<trim>` → no change
 
+## MyBatis resultMap: jdbcType Conversion
+When converting `<resultMap>` elements, update Oracle jdbcType values:
+| Oracle jdbcType | MySQL jdbcType |
+|----------------|---------------|
+| CLOB | LONGVARCHAR |
+| BLOB | LONGVARBINARY |
+| NUMBER | NUMERIC |
+| VARCHAR2 | VARCHAR |
+Other jdbcType values (VARCHAR, INTEGER, BIGINT, DATE, TIMESTAMP, etc.) remain unchanged.
+
 ## Dynamic WHERE Condition Scope (IMPORTANT)
 When converting comma JOINs to explicit JOINs with subqueries:
 - Analyze which tables each `<if test>` condition references

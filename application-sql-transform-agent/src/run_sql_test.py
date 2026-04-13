@@ -246,17 +246,30 @@ def run(max_workers=8):
     # Final status
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y'")
-        tested = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        total_sql = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+        passed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS'")
+        failed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N'")
+        not_tested = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
+        total_validated = cursor.fetchone()[0]
 
     from core.display import print_step_result
 
-    rows = [("Tested", f"{tested}/{total_sql} SQL IDs")]
-    remaining = total_sql - tested
-    if remaining > 0:
-        rows.append(("Remaining", f"[yellow]{remaining} SQL IDs[/yellow]"))
+    tested = passed + failed
+    rows = [
+        ("Passed", str(passed)),
+    ]
+    if failed > 0:
+        rows.append(("Failed", f"[red]{failed}[/red]"))
+    else:
+        rows.append(("Failed", "0"))
+    if not_tested > 0:
+        rows.append(("Not Tested", f"[yellow]{not_tested}[/yellow]"))
+    rows.append(("Total", f"{tested}/{total_validated} SQL IDs"))
+
+    if failed > 0 or not_tested > 0:
         # Auto-generate test failure report via ReviewManager
         report_path = _generate_test_failure_report()
         if report_path:

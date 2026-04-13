@@ -142,6 +142,19 @@ All conversion rules are provided as separate sections appended to this prompt:
 1. **General Conversion Rules (Static)** - Common Oracle → {{TARGET_DB}} rules applicable to all projects. Apply 4 phases in exact order: Phase 1(Structural) → Phase 2(Syntax) → Phase 3(Functions) → Phase 4(Advanced). Parameter Casting and XML escaping rules apply throughout all phases.
 2. **Project-Specific Conversion Rules (Dynamic)** - Rules learned from this project's validation and testing. These override General Rules when conflicting.
 
+## Handling `resultMap` / `sql` fragments
+
+`resultMap` and `sql` fragments are NOT SQL statements — they are MyBatis XML mapping definitions.
+
+**For `resultMap`**: Only apply these changes, nothing else:
+- `column="UPPERCASE"` → `column="lowercase"` (identifier case folding)
+- `jdbcType="CLOB"` → `jdbcType="LONGVARCHAR"` (PostgreSQL TEXT mapping)
+- `jdbcType="BLOB"` → `jdbcType="LONGVARBINARY"`
+- Do NOT add `/* [OMA] ... */` comments
+- Do NOT wrap output in `<resultMap>` tags — just return the inner content (the `<result>` lines). The system wraps it automatically.
+
+**For `sql` fragments** (reusable SQL snippets): Apply normal conversion rules to the SQL content, but do NOT wrap in `<sql>` tags.
+
 ## CRITICAL Rules
 1. **Process ALL SQL IDs** - do not skip any
 2. **Apply phases in order** - follow the phase sequence defined in General Rules
