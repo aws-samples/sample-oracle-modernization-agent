@@ -185,6 +185,172 @@ def generate_diff_report(mapper_file: str = None) -> dict:
 
 
 @tool
+def generate_test_failure_report() -> dict:
+    """Generate test failure report with per-SQL briefing.
+
+    After the Test phase, ReviewManager calls this to:
+    1. Identify all SQLs that failed testing
+    2. Read original Oracle SQL and converted SQL for each failure
+    3. Categorize failure reasons (missing function, missing table, syntax error, etc.)
+    4. Generate an MD report with per-SQL ID briefing (including XML file info)
+
+    Returns:
+        Dict with report_path, summary, and per-SQL failure briefings
+    """
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+
+        # Get all test results
+        cursor.execute("""
+            SELECT COUNT(*) FROM transform_target_list WHERE tested = 'Y'
+        """)
+        total_tested = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT COUNT(*) FROM transform_target_list
+            WHERE tested = 'Y' AND test_result = 'PASS'
+        """)
+        passed = cursor.fetchone()[0]
+
+        # Get failures with details
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, seq_no,
+                   source_file, target_file, test_result,
+                   review_notes, validation_result
+            FROM transform_target_list
+            WHERE tested = 'Y' AND (test_result IS NULL OR test_result != 'PASS')
+            ORDER BY mapper_file, seq_no
+        """)
+        failures = cursor.fetchall()
+
+    failed = len(failures)
+    pass_rate = (passed * 100 // total_tested) if total_tested else 0
+
+    # Build briefings per SQL
+    briefings = []
+    categories = {}
+    for mapper, sql_id, sql_type, seq, source_file, target_file, test_result, notes, val_result in failures:
+        # Read source and target SQL
+        source_sql = ""
+        target_sql = ""
+        if source_file and Path(source_file).exists():
+            source_sql = Path(source_file).read_text(encoding='utf-8').strip()
+        if target_file and Path(target_file).exists():
+            target_sql = Path(target_file).read_text(encoding='utf-8').strip()
+
+        # Categorize
+        reason = _categorize_failure(test_result or "", notes or "")
+        if reason not in categories:
+            categories[reason] = []
+        categories[reason].append(f"{mapper}/{sql_id}")
+
+        briefings.append({
+            'mapper_file': mapper,
+            'sql_id': sql_id,
+            'sql_type': sql_type,
+            'category': reason,
+            'error': test_result or "Unknown",
+            'source_sql': source_sql,
+            'target_sql': target_sql,
+        })
+
+    # Build report
+    lines = [
+        "# Test Failure Report",
+        f"\n**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"\n## Summary",
+        f"| Metric | Value |",
+        f"|--------|-------|",
+        f"| Total Tested | {total_tested} |",
+        f"| Passed | {passed} |",
+        f"| **Failed** | **{failed}** |",
+        f"| **Pass Rate** | **{pass_rate}%** |",
+    ]
+
+    # Failure categories
+    if categories:
+        lines.append(f"\n## Failure Categories\n")
+        for reason, sqls in sorted(categories.items(), key=lambda x: -len(x[1])):
+            lines.append(f"### {reason} ({len(sqls)} cases)")
+            for sql in sqls:
+                lines.append(f"- `{sql}`")
+            lines.append("")
+
+    # Per-SQL briefing
+    if briefings:
+        lines.append(f"\n## Per-SQL Failure Briefing\n")
+        current_mapper = None
+        for b in briefings:
+            if b['mapper_file'] != current_mapper:
+                current_mapper = b['mapper_file']
+                lines.append(f"\n### {current_mapper}\n")
+
+            lines.append(f"#### `{b['sql_id']}` ({b['sql_type']})")
+            lines.append(f"- **Category**: {b['category']}")
+            lines.append(f"- **Error**: `{b['error'][:200]}`")
+            lines.append("")
+
+            if b['target_sql']:
+                lines.append("<details>")
+                lines.append(f"<summary>Converted SQL (click to expand)</summary>\n")
+                lines.append("```sql")
+                lines.append(b['target_sql'])
+                lines.append("```")
+                lines.append("</details>\n")
+
+    # Recommended actions
+    lines.append(f"\n## Recommended Actions\n")
+    for reason, sqls in sorted(categories.items(), key=lambda x: -len(x[1])):
+        count = len(sqls)
+        if "missing function" in reason.lower():
+            lines.append(f"1. **{reason}** ({count} cases): Create user-defined functions in target DB, then re-test")
+        elif "missing table" in reason.lower():
+            lines.append(f"1. **{reason}** ({count} cases): Verify table migration or schema setup")
+        elif "syntax" in reason.lower():
+            lines.append(f"1. **{reason}** ({count} cases): Review conversion rules, fix SQL, re-transform")
+        elif "type" in reason.lower():
+            lines.append(f"1. **{reason}** ({count} cases): Check parameter casting with metadata lookup")
+        else:
+            lines.append(f"1. **{reason}** ({count} cases): Manual review required")
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORTS_DIR / "test_failure_report.md"
+    report_path.write_text('\n'.join(lines), encoding='utf-8')
+
+    print(f"📊 Test Failure Report: {report_path} (failed: {failed}/{total_tested}, rate: {pass_rate}%)")
+    return {
+        'report_path': str(report_path),
+        'summary': {
+            'total_tested': total_tested,
+            'passed': passed,
+            'failed': failed,
+            'pass_rate': pass_rate,
+        },
+        'briefings': briefings,
+    }
+
+
+def _categorize_failure(result: str, notes: str) -> str:
+    """Categorize failure reason from error message."""
+    text = ((result or "") + " " + (notes or "")).lower()
+    if "does not exist" in text and "function" in text:
+        return "Missing Function"
+    if "does not exist" in text and ("table" in text or "relation" in text):
+        return "Missing Table/Relation"
+    if "syntax error" in text:
+        return "Syntax Error"
+    if ("type" in text or "cast" in text) and ("mismatch" in text or "error" in text):
+        return "Type Mismatch"
+    if "column" in text and "does not exist" in text:
+        return "Missing Column"
+    if "permission" in text or "denied" in text:
+        return "Permission Denied"
+    if result:
+        return "Other"
+    return "Unknown"
+
+
+@tool
 def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
     """Approve SQL conversion after manual review.
 

@@ -7,7 +7,7 @@ from utils.project_paths import MODEL_ID, load_prompt_text
 
 from .tools.diff_tools import (
     show_sql_diff, generate_diff_report, get_review_candidates,
-    approve_conversion, suggest_revision
+    approve_conversion, suggest_revision, generate_test_failure_report
 )
 
 
@@ -36,6 +36,7 @@ def create_review_manager_agent() -> Agent:
             generate_diff_report,
             get_review_candidates,
             approve_conversion,
-            suggest_revision
+            suggest_revision,
+            generate_test_failure_report
         ]
     )

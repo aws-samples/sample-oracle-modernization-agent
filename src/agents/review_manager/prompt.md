@@ -81,6 +81,23 @@ Apply improved SQL suggested by user.
 
 ---
 
+### 6. generate_test_failure_report()
+Generate a comprehensive test failure report after the Test phase.
+
+**Returns:**
+- Report path: `reports/test_failure_report.md`
+- Per-SQL briefing with: mapper file, SQL ID, failure category, error message, converted SQL
+
+**Use when:** User asks "generate test report", "show test failures", or after test phase completes with failures.
+
+**Report includes:**
+- Summary (total tested, passed, failed, pass rate)
+- Failure categories (Missing Function, Missing Table, Syntax Error, Type Mismatch, etc.)
+- Per-SQL briefing with converted SQL (expandable)
+- Recommended actions per category
+
+---
+
 ## Typical Workflows
 
 ### Workflow 1: Review All Conversions
@@ -118,6 +135,20 @@ User: "The conversion is wrong, use CONCAT instead of ||"
 1. Extract revised SQL from user's description
 2. suggest_revision(mapper_file, sql_id, revised_sql, reason)
 3. Confirm revision applied
+```
+
+### Workflow 5: Test Failure Briefing
+```
+User: "Generate test report" or "Show test failures"
+
+1. generate_test_failure_report()
+2. Brief user on each failed SQL ID:
+   - Mapper file + SQL ID
+   - Failure category (Missing Function, Missing Table, etc.)
+   - Error message
+   - Converted SQL snippet
+3. Report saved to reports/test_failure_report.md
+4. Suggest next actions per failure category
 ```
 
 ---
