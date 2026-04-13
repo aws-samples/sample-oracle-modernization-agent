@@ -75,7 +75,10 @@ MySQL identifier case sensitivity depends on `lower_case_table_names` system var
 - `SCHEMA.PACKAGE.PROC()` → `PACKAGE_PROC()`
 - `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot notation to underscore)
 
-**User-defined packages** (PKG_*, custom packages) use the same flattening rule:
+**Only Oracle standard packages (`DBMS_*`, `UTL_*`) get special handling** (see Phase 4 §6 PL/SQL Constructs).
+**ALL other packages are user-defined** — apply flattening unconditionally, regardless of the name.
+Do NOT interpret package names (e.g., CRYPTO, ENCRYPT, HTTP, MAIL) as functionality hints.
+Examples of user-defined packages:
 ```sql
 -- Oracle
 SELECT PKG_CRYPTO.ENCRYPT(col, 'key') FROM users
