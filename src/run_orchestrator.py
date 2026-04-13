@@ -83,8 +83,15 @@ def run():
         try:
             agent(user_input)
         except Exception as e:
-            print(f"⚠️  오류 발생: {e}")
-            print("다시 입력해주세요.")
+            error_str = str(e)
+            if "ValidationException" in error_str or "not valid JSON" in error_str:
+                print("⚠️  대화 컨텍스트 초과 — 에이전트를 리셋합니다.")
+                agent = create_orchestrator_agent()
+                agent("현재 파이프라인 상태를 확인해줘.")
+                print("✅ 리셋 완료. 다시 입력해주세요.")
+            else:
+                print(f"⚠️  오류 발생: {e}")
+                print("다시 입력해주세요.")
 
 
 if __name__ == "__main__":
