@@ -63,6 +63,11 @@ def run():
         try:
             user_input = input("\n⚛️  > ").strip()
         except UnicodeDecodeError:
+            # Flush broken bytes from stdin buffer
+            try:
+                sys.stdin.buffer.read1(4096)
+            except Exception:
+                pass
             print("⚠️  입력 인코딩 오류 — 한영 전환 후 다시 입력해주세요.")
             continue
         except (KeyboardInterrupt, EOFError):
