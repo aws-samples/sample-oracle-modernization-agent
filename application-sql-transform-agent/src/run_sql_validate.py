@@ -115,23 +115,40 @@ def run(max_workers=8):
     # 결과
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-        validated = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND validation_result='PASS'")
+        passed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND validation_result IS NOT NULL AND validation_result != 'PASS'")
+        val_failed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y' AND validated='N'")
+        skipped = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
         total = cursor.fetchone()[0]
 
     from core.display import print_step_result
 
-    rows = [("Validated", f"{validated}/{total} SQL IDs")]
+    rows = [
+        ("Passed", str(passed)),
+    ]
+    if val_failed > 0:
+        rows.append(("Failed", f"[red]{val_failed}[/red]"))
+    else:
+        rows.append(("Failed", "0"))
+    if skipped > 0:
+        rows.append(("Skipped", f"[yellow]{skipped}[/yellow]"))
+    rows.append(("Total", f"{passed + val_failed}/{total} SQL IDs"))
 
-    failed = [r for r in results if r['status'] != 'success']
-    if failed:
-        for r in failed:
-            rows.append(("Failed", f"[red]{r['mapper']}: {r.get('error', 'unknown')}[/red]"))
+    agent_errors = [r for r in results if r['status'] != 'success']
+    if agent_errors:
+        for r in agent_errors:
+            rows.append(("Agent Error", f"[red]{r['mapper']}: {r.get('error', 'unknown')}[/red]"))
 
-    remaining = total - validated
-    if remaining > 0:
-        rows.append(("Remaining", f"[yellow]{remaining} SQL IDs[/yellow]"))
+    if val_failed > 0 or skipped > 0:
+        notes = []
+        if val_failed > 0:
+            notes.append(f"{val_failed} failed validation")
+        if skipped > 0:
+            notes.append(f"{skipped} not validated (check logs)")
+        rows.append(("Note", f"[yellow]{'; '.join(notes)}[/yellow]"))
     else:
         rows.append(("Status", "[green]All validated[/green]"))
         if _refine_strategy_from_logs():
