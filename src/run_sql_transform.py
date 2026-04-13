@@ -64,7 +64,7 @@ def create_agent():
             boto_client_config=BotocoreConfig(read_timeout=300),
         ),
         system_prompt=load_prompt(),
-        tools=[get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
+        tools=[load_mapper_list, get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
         callback_handler=None,
     )
 
