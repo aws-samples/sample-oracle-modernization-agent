@@ -360,7 +360,9 @@ def _human_readable_reason(category: str, error: str) -> str:
         return f"테이블 {tbl_name}이 타겟 DB에 미존재 (스키마 마이그레이션 필요)"
 
     if "column" in error_lower and "does not exist" in error_lower:
-        return "컬럼 미존재 — 스키마 확인 필요"
+        col_match = re.search(r'column\s+"?(\w+)"?', error_lower)
+        col_name = col_match.group(1) if col_match else "unknown"
+        return f"컬럼 {col_name} 미존재 — 스키마 확인 필요"
 
     if "syntax error" in error_lower:
         return "SQL 문법 오류 — 재변환 필요"

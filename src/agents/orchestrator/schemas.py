@@ -66,6 +66,21 @@ class SearchSqlResult(TypedDict):
     results: Dict[str, List[SqlIdMatch]]  # {mapper_file: [{sql_id, sql_type}]}
 
 
+class FailureItem(TypedDict):
+    """Single failure item"""
+    mapper_file: str
+    sql_id: str
+    sql_type: str
+    reason: str
+
+
+class GetFailuresResult(TypedDict):
+    """Result from get_failures()"""
+    step: str
+    total: int
+    failures: List[FailureItem]
+
+
 class StrategyGenerateResult(TypedDict):
     """Result from generate_project_strategy()"""
     status: str  # 'success' | 'failed'

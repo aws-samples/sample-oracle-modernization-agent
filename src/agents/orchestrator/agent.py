@@ -7,7 +7,7 @@ from strands.types.content import SystemContentBlock
 
 from .tools.orchestrator_tools import (
     check_setup, check_step_status, reset_step, run_step, get_summary, search_sql_ids,
-    generate_project_strategy, refine_project_strategy, compact_strategy
+    generate_project_strategy, refine_project_strategy, compact_strategy, get_failures
 )
 from agents.sql_test.tools.test_tools import run_single_test
 from agents.sql_test.tools.single_test_fix import test_and_fix_single_sql
@@ -63,8 +63,8 @@ def create_orchestrator_agent() -> Agent:
         model=model,
         system_prompt=_load_system_prompt(),
         tools=[
-            # Pipeline control (6 tools)
-            check_setup, check_step_status, reset_step, run_step, get_summary, search_sql_ids,
+            # Pipeline control (7 tools)
+            check_setup, check_step_status, reset_step, run_step, get_summary, search_sql_ids, get_failures,
             # Strategy management (3 tools)
             generate_project_strategy, refine_project_strategy, compact_strategy,
             # Single SQL operations (4 tools)
