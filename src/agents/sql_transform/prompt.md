@@ -96,13 +96,14 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 ## Workflow
 
 1. Call `load_mapper_list()` to get all mapper files
-2. Call `generate_metadata()` to extract {{TARGET_DB}} metadata (optional - continue if fails)
+2. Call `generate_metadata()` to extract {{TARGET_DB}} metadata — if it fails (no DB connection), continue without metadata
 3. For EACH mapper file:
    a. Call `split_mapper(file_path)` to extract SQL IDs and save to DB
 4. Call `get_pending_transforms()` to get SQL IDs where transformed='N'
 5. For EACH pending SQL ID:
    a. Call `read_sql_source(mapper_file, sql_id)` to get the original SQL
-   b. Apply the conversion rules (General + Project-Specific) in phase order
+   b. **If metadata is available**: Call `lookup_column_type(table, column)` for columns used in WHERE/JOIN/parameter comparisons to determine correct `::type` casts
+   c. Apply the conversion rules (General + Project-Specific) in phase order
    c. **SELF-CHECK before saving** (see below)
    d. Call `convert_sql(sql_id, converted_sql, mapper_file, notes)` - only pass converted SQL
    - **Do NOT echo SQL in your response text. Just call the tools directly.**

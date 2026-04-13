@@ -524,7 +524,7 @@ RETURNING id
 ## Reference Rule: Parameter Casting (apply during each Phase)
 
 **Principle**: Cast parameters to match the compared column's data type.
-**With metadata**: Use `lookup_column_type(table_name, column_name)` for actual type.
+**With metadata (MANDATORY when available)**: Call `lookup_column_type(table_name, column_name)` to get the actual column type, then apply the exact cast. This is especially important when MyBatis XML does not specify `jdbcType` — Oracle handles implicit conversion but PostgreSQL requires explicit casts.
 **Without metadata**: Use context clues (column name patterns, SQL context). Skip if uncertain.
 
 #### Casting Decision Rules
