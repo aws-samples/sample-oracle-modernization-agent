@@ -25,7 +25,7 @@ def create_review_manager_agent() -> Agent:
     """Create ReviewManager Agent for SQL review and approval"""
     model = BedrockModel(
         model_id=MODEL_ID,
-        max_tokens=16000
+        max_tokens=32000
     )
     return Agent(
         name="ReviewManager",
