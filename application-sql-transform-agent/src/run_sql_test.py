@@ -205,17 +205,40 @@ def run(max_workers=8):
     if not failures:
         with sqlite3.connect(str(DB_PATH)) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y'")
-            tested = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-            total_sql = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+            pass_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS'")
+            fail_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N'")
+            not_tested = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
+            total_validated = cursor.fetchone()[0]
 
         from core.display import print_step_result
-        print_step_result("Test Result", [
-            ("Tested", f"{tested}/{total_sql} SQL IDs"),
-            ("Status", "[green]All tests passed[/green]"),
-            ("Log", str(test_log_file)),
-        ])
+        rows = [("Passed", str(pass_count))]
+        if fail_count > 0:
+            rows.append(("Failed", f"[red]{fail_count}[/red]"))
+        else:
+            rows.append(("Failed", "0"))
+        if not_tested > 0:
+            rows.append(("Not Tested", f"[yellow]{not_tested}[/yellow]"))
+        rows.append(("Total", f"{pass_count + fail_count}/{total_validated} SQL IDs"))
+
+        if fail_count > 0 or not_tested > 0:
+            report_path = _generate_test_failure_report()
+            if report_path:
+                rows.append(("Failure Report", str(report_path)))
+            notes = []
+            if fail_count > 0:
+                notes.append(f"{fail_count} failed")
+            if not_tested > 0:
+                notes.append(f"{not_tested} not tested (no bulk test coverage)")
+            rows.append(("Note", f"[yellow]{'; '.join(notes)}[/yellow]"))
+        else:
+            rows.append(("Status", "[green]All tests passed[/green]"))
+
+        rows.append(("Log", str(test_log_file)))
+        print_step_result("Test Result", rows)
         return
 
     # Phase 2: Agent fixes failures
