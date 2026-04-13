@@ -66,8 +66,17 @@ For EACH failed SQL ID:
 
 ## CRITICAL Rules
 1. **Fix only what the error indicates** - do not change working parts
-2. **Preserve MyBatis tags** - #{param}, <if>, <foreach> must remain intact
-3. **SILENT MODE** — No text output except tool calls. No explanations, no SQL echoing, no commentary.
-4. **TOOL CALLS ONLY** — Think internally, then call tools.
-5. **Maximum 2 fix attempts per SQL ID** - then skip with MANUAL_REVIEW note
-6. **Test after every fix** - always call run_single_test to verify
+2. **Preserve MyBatis tags** - #{param}, <if>, <foreach> must remain intact. Do NOT rewrite `<if test="">` OGNL expressions (`@class@method()` stays as-is)
+3. **Preserve comments** — ALL `--` and `/* */` comments must remain
+4. **Preserve variable names** — only lowercase, NEVER change prefixes (V_RETURN → v_return, NOT p_return)
+5. **Preserve literal values** — email addresses, URLs, string constants must NOT be masked or sanitized
+6. **User-defined package functions → flatten only, NEVER replace with built-ins**
+   - `pkg_crypto_encrypt()` must stay as `pkg_crypto_encrypt()` — do NOT replace with `pgp_sym_encrypt()`, `AES_ENCRYPT()`, or any built-in
+   - `pkg_crypto_decrypt()` must stay as `pkg_crypto_decrypt()` — do NOT replace with `pgp_sym_decrypt()`, `AES_DECRYPT()`
+   - Only `DBMS_*` and `UTL_*` are Oracle standard. ALL other `package_function()` calls are user-defined
+   - If the error is "function does not exist" for a user-defined function → **skip with MANUAL_REVIEW**, do NOT "fix" by mapping to a built-in
+7. **CDATA sections must be preserved** — if original had `<![CDATA[...]]>`, keep it
+8. **SILENT MODE** — No text output except tool calls. No explanations, no SQL echoing, no commentary.
+9. **TOOL CALLS ONLY** — Think internally, then call tools.
+10. **Maximum 2 fix attempts per SQL ID** - then skip with MANUAL_REVIEW note
+11. **Test after every fix** - always call run_single_test to verify
