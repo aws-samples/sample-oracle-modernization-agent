@@ -70,9 +70,24 @@ MySQL identifier case sensitivity depends on `lower_case_table_names` system var
 - **Record the removed DB Link name in the `[OMA]` conversion comment** so the origin is traceable
   - e.g., `FROM TEST_01@NDS01 A` → `FROM test_01 a` + comment includes `@DBLINK removed(NDS01)`
 
-#### 6. Stored Procedure Conversion
+#### 6. Stored Procedure / Package Function Conversion
 - `{call PROC()}` → `CALL PROC()`
 - `SCHEMA.PACKAGE.PROC()` → `PACKAGE_PROC()`
+- `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot notation to underscore)
+
+**User-defined packages** (PKG_*, custom packages) use the same flattening rule:
+```sql
+-- Oracle
+SELECT PKG_CRYPTO.ENCRYPT(col, 'key') FROM users
+WHERE PKG_UTIL.IS_VALID(status) = 'Y'
+
+-- MySQL
+SELECT pkg_crypto_encrypt(col, 'key') FROM users
+WHERE pkg_util_is_valid(status) = 'Y'
+```
+- `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` (dot → underscore + lowercase)
+- This rule applies to ALL package.function calls, not just Oracle standard packages
+- The actual function must exist in the target DB (created separately during migration)
 
 ---
 
