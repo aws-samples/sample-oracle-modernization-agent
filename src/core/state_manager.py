@@ -253,6 +253,20 @@ class StateManager:
             tested = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.tested == 'Y').scalar()
 
+            test_failed = session.query(func.count(TransformTargetList.id))\
+                .filter(
+                    TransformTargetList.tested == 'Y',
+                    TransformTargetList.test_result.isnot(None),
+                    TransformTargetList.test_result != 'PASS'
+                ).scalar()
+
+            validate_failed = session.query(func.count(TransformTargetList.id))\
+                .filter(
+                    TransformTargetList.validated == 'Y',
+                    TransformTargetList.validation_result.isnot(None),
+                    TransformTargetList.validation_result != 'PASS'
+                ).scalar()
+
             # Completion flags: step is complete when no 'N' remains
             # (all items are either 'Y' or 'F')
             transform_complete = (extracted > 0 and transformed == extracted)
@@ -267,7 +281,9 @@ class StateManager:
                 'reviewed': reviewed,
                 'review_failed': review_failed,
                 'validated': validated,
+                'validate_failed': validate_failed,
                 'tested': tested,
+                'test_failed': test_failed,
                 'merged': self._count_merge_files(),
                 'transform_complete': transform_complete,
                 'review_complete': review_complete,

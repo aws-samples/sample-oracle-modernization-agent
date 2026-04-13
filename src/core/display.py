@@ -52,17 +52,21 @@ def print_pipeline_status(status: dict) -> None:
 
     # Validate
     validated = status.get('validated', 0)
+    validate_failed = status.get('validate_failed', 0)
+    validate_extra = f" [red]({validate_failed} FAIL)[/red]" if validate_failed > 0 else ""
     table.add_row(
         "Validate",
-        f"{validated}/{total}",
+        f"{validated}/{total}{validate_extra}",
         _status_style(validated, total, status.get('validate_complete', False)),
     )
 
     # Test
     tested = status.get('tested', 0)
+    test_failed = status.get('test_failed', 0)
+    test_extra = f" [red]({test_failed} FAIL)[/red]" if test_failed > 0 else ""
     table.add_row(
         "Test",
-        f"{tested}/{total}",
+        f"{tested}/{total}{test_extra}",
         _status_style(tested, total, status.get('test_complete', False)),
     )
 
