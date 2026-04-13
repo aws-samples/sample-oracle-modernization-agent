@@ -567,6 +567,17 @@ Apply the same casting rules inside CDATA:
 - `<if>`, `<choose>`, `<when>`, `<otherwise>` → no change
 - `<foreach>`, `<where>`, `<set>`, `<trim>` → no change
 
+## MyBatis resultMap: jdbcType Conversion
+When converting `<resultMap>` elements, update Oracle jdbcType values:
+| Oracle jdbcType | PostgreSQL jdbcType |
+|----------------|-------------------|
+| CLOB | LONGVARCHAR |
+| BLOB | LONGVARBINARY |
+| NUMBER | NUMERIC |
+| VARCHAR2 | VARCHAR |
+| DATE | TIMESTAMP |
+Other jdbcType values (VARCHAR, INTEGER, BIGINT, etc.) remain unchanged.
+
 ## Dynamic WHERE Condition Scope (IMPORTANT)
 When converting comma JOINs to explicit JOINs with subqueries:
 - Analyze which tables each `<if test>` condition references
