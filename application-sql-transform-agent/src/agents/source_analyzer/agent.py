@@ -23,7 +23,7 @@ def create_source_analyzer_agent() -> Agent:
 
     model = BedrockModel(
         model_id=MODEL_ID,
-        max_tokens=16000
+        max_tokens=64000
     )
 
     return Agent(

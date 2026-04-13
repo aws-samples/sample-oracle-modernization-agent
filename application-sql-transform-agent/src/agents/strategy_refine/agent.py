@@ -22,7 +22,7 @@ def _load_system_prompt():
 def create_strategy_refine_agent(*, suppress_streaming: bool = False) -> Agent:
     kwargs: dict = {
         "name": "StrategyRefine",
-        "model": BedrockModel(model_id=MODEL_ID, max_tokens=16000),
+        "model": BedrockModel(model_id=MODEL_ID, max_tokens=32000),
         "system_prompt": _load_system_prompt(),
         "tools": [read_strategy, get_feedback_patterns, append_patterns, write_strategy],
     }
