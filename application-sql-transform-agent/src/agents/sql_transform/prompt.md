@@ -17,6 +17,7 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 - **Comments**: ALL SQL comments (`--`, `/* */`) must be preserved exactly as-is
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
+- **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.kns.framework.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
 
 **User-defined package functions (PKG_*, custom) → flatten with underscore, NOTHING ELSE.**
 - `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` — NOT `pgp_sym_encrypt()`, NOT `AES_ENCRYPT()`
@@ -125,7 +126,7 @@ Scan your output SQL line by line and verify:
 - [ ] **XML ESCAPE CHECK**: Search for any raw `<` or `<=` outside `<![CDATA[]]>`. If found, replace with `&lt;` `&lt;=`. (`>` `>=` do NOT need escaping)
 - [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
-- [ ] MyBatis tags and #{param} references are intact?
+- [ ] MyBatis tags, #{param} references, and `<if test="">` OGNL expressions are intact? (Do NOT rewrite `@class@method()` expressions)
 - [ ] **Package functions flattened**: Any `PKG_*.FUNC()` converted to `pkg_*_func()` with underscore? NOT mapped to built-in functions like `pgp_sym_encrypt`, `AES_ENCRYPT`, etc.?
 - [ ] **Comments preserved**: All original `--` and `/* */` comments remain?
 - [ ] **Variable names intact**: Only lowercased, prefixes NOT changed? (V_RETURN → v_return, NOT p_return)
