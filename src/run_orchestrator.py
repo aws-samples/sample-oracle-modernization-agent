@@ -61,11 +61,17 @@ def run():
 
     while True:
         try:
-            user_input = input("\n⚛️  > ").strip()
+            raw_input = input("\n⚛️  > ")
+            # Sanitize: remove non-printable chars and invalid UTF-8 surrogates
+            user_input = raw_input.encode('utf-8', errors='ignore').decode('utf-8').strip()
         except UnicodeDecodeError:
             # Flush broken bytes from stdin buffer
             try:
-                sys.stdin.buffer.read1(4096)
+                if hasattr(sys.stdin, 'buffer'):
+                    while sys.stdin.buffer.readable():
+                        chunk = sys.stdin.buffer.read1(4096) if hasattr(sys.stdin.buffer, 'read1') else sys.stdin.buffer.read(4096)
+                        if len(chunk) < 4096:
+                            break
             except Exception:
                 pass
             print("⚠️  입력 인코딩 오류 — 한영 전환 후 다시 입력해주세요.")
@@ -85,7 +91,7 @@ def run():
         except Exception as e:
             error_str = str(e)
             if "ValidationException" in error_str or "not valid JSON" in error_str:
-                print("⚠️  대화 컨텍스트 초과 — 에이전트를 리셋합니다.")
+                print("⚠️  대화 내 잘못된 문자로 인해 에이전트를 리셋합니다.")
                 agent = create_orchestrator_agent()
                 agent("현재 파이프라인 상태를 확인해줘.")
                 print("✅ 리셋 완료. 다시 입력해주세요.")
