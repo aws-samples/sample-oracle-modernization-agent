@@ -16,8 +16,11 @@ class StepStatusResult(TypedDict):
     transformed: int
     reviewed: int
     review_failed: int
+    review_warnings: int
     validated: int
+    validate_failed: int
     tested: int
+    test_failed: int
     merged: int
     transform_complete: bool
     review_complete: bool
