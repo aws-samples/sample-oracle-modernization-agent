@@ -18,6 +18,12 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
 
+**User-defined package functions (PKG_*, custom) → flatten with underscore, NOTHING ELSE.**
+- `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` — NOT `pgp_sym_encrypt()`, NOT `AES_ENCRYPT()`
+- `PKG_CRYPTO.DECRYPT()` → `pkg_crypto_decrypt()` — NOT `pgp_sym_decrypt()`, NOT `AES_DECRYPT()`
+- Only `DBMS_*` and `UTL_*` are Oracle standard packages. ALL others are user-defined.
+- Do NOT interpret package names as functionality hints. Do NOT map to target DB built-in functions.
+
 The most frequently missed items — always verify these:
 - `(+)` operator must not remain → convert to LEFT/RIGHT JOIN
 - **Comma JOIN without (+) → INNER JOIN** (never LEFT JOIN). Only add LEFT/RIGHT JOIN when Oracle original has `(+)`
@@ -120,6 +126,7 @@ Scan your output SQL line by line and verify:
 - [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags and #{param} references are intact?
+- [ ] **Package functions flattened**: Any `PKG_*.FUNC()` converted to `pkg_*_func()` with underscore? NOT mapped to built-in functions like `pgp_sym_encrypt`, `AES_ENCRYPT`, etc.?
 - [ ] **Comments preserved**: All original `--` and `/* */` comments remain?
 - [ ] **Variable names intact**: Only lowercased, prefixes NOT changed? (V_RETURN → v_return, NOT p_return)
 - [ ] **Literal values unchanged**: Email addresses, URLs, string constants NOT masked or sanitized?
