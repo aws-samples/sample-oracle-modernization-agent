@@ -64,17 +64,18 @@ def create_agent():
             boto_client_config=BotocoreConfig(read_timeout=300),
         ),
         system_prompt=load_prompt(),
-        tools=[load_mapper_list, get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
+        tools=[load_mapper_list, get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper, generate_metadata],
         callback_handler=None,
     )
 
 
-def _group_by_file_size(sql_ids: list, max_group_bytes=15000) -> list:
+def _group_by_file_size(sql_ids: list, max_group_bytes=10000, max_group_count=5) -> list:
+    """Group SQL IDs by estimated size AND count to prevent context overflow."""
     groups, current, size = [], [], 0
     for s in sql_ids:
         src = Path(s.get('source_file', ''))
         fs = src.stat().st_size if src.exists() else 1000
-        if current and size + fs > max_group_bytes:
+        if current and (size + fs > max_group_bytes or len(current) >= max_group_count):
             groups.append(current)
             current, size = [], 0
         current.append(s)
