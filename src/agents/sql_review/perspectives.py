@@ -31,7 +31,8 @@ def _load_prompt_with_rules(prompt_filename: str) -> list:
 
 def create_syntax_review_agent() -> Agent:
     """Create an agent focused on PostgreSQL syntax rule compliance."""
-    model = BedrockModel(model_id=MODEL_ID, max_tokens=16000)
+    from botocore.config import Config as BotocoreConfig
+    model = BedrockModel(model_id=MODEL_ID, max_tokens=32000, boto_client_config=BotocoreConfig(read_timeout=300))
     return Agent(
         name="SyntaxReview",
         model=model,
@@ -43,7 +44,8 @@ def create_syntax_review_agent() -> Agent:
 
 def create_equivalence_review_agent() -> Agent:
     """Create an agent focused on Oracle-to-PostgreSQL functional equivalence."""
-    model = BedrockModel(model_id=MODEL_ID, max_tokens=16000)
+    from botocore.config import Config as BotocoreConfig
+    model = BedrockModel(model_id=MODEL_ID, max_tokens=32000, boto_client_config=BotocoreConfig(read_timeout=300))
     return Agent(
         name="EquivalenceReview",
         model=model,
