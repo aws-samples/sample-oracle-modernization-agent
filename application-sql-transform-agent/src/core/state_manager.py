@@ -263,14 +263,14 @@ class StateManager:
                 .filter(
                     TransformTargetList.tested == 'Y',
                     TransformTargetList.test_result.isnot(None),
-                    TransformTargetList.test_result != 'PASS'
+                    TransformTargetList.test_result.notin_(['PASS', 'FIXED'])
                 ).scalar()
 
             validate_failed = session.query(func.count(TransformTargetList.id))\
                 .filter(
                     TransformTargetList.validated == 'Y',
                     TransformTargetList.validation_result.isnot(None),
-                    TransformTargetList.validation_result != 'PASS'
+                    TransformTargetList.validation_result.notin_(['PASS', 'FIXED'])
                 ).scalar()
 
             # Completion flags: step is complete when no 'N' remains
