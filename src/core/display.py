@@ -43,7 +43,13 @@ def print_pipeline_status(status: dict) -> None:
     # Review
     reviewed = status.get('reviewed', 0)
     review_failed = status.get('review_failed', 0)
-    review_extra = f" [red]({review_failed} FAIL)[/red]" if review_failed > 0 else ""
+    review_warnings = status.get('review_warnings', 0)
+    review_extras = []
+    if review_failed > 0:
+        review_extras.append(f"[red]{review_failed} FAIL[/red]")
+    if review_warnings > 0:
+        review_extras.append(f"[yellow]{review_warnings} WARN[/yellow]")
+    review_extra = f" ({', '.join(review_extras)})" if review_extras else ""
     table.add_row(
         "Review",
         f"{reviewed}/{total}{review_extra}",

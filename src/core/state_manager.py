@@ -247,6 +247,12 @@ class StateManager:
             review_failed = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.reviewed == 'F').scalar()
 
+            review_warnings = session.query(func.count(TransformTargetList.id))\
+                .filter(
+                    TransformTargetList.reviewed == 'Y',
+                    TransformTargetList.review_result.like('%PASS_WITH_WARNINGS%')
+                ).scalar()
+
             validated = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.validated == 'Y').scalar()
 
@@ -280,6 +286,7 @@ class StateManager:
                 'transformed': transformed,
                 'reviewed': reviewed,
                 'review_failed': review_failed,
+                'review_warnings': review_warnings,
                 'validated': validated,
                 'validate_failed': validate_failed,
                 'tested': tested,
