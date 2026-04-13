@@ -31,9 +31,11 @@ def _load_system_prompt():
 
 def create_sql_review_agent() -> Agent:
     """Create the original single-perspective review agent (backward compatible)."""
+    from botocore.config import Config as BotocoreConfig
     model = BedrockModel(
         model_id=MODEL_ID,
-        max_tokens=32000
+        max_tokens=32000,
+        boto_client_config=BotocoreConfig(read_timeout=300),
     )
     return Agent(
         name="SQLReview",

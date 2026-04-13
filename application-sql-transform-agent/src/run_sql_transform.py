@@ -55,16 +55,21 @@ def create_agent():
     with _counter_lock:
         model_id = _model_profiles[_agent_counter % len(_model_profiles)]
         _agent_counter += 1
+    from botocore.config import Config as BotocoreConfig
     return Agent(
         name="SQLTransform",
-        model=BedrockModel(model_id=model_id, max_tokens=64000),
+        model=BedrockModel(
+            model_id=model_id,
+            max_tokens=64000,
+            boto_client_config=BotocoreConfig(read_timeout=300),
+        ),
         system_prompt=load_prompt(),
-        tools=[get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
+        tools=[load_mapper_list, get_pending_transforms, read_sql_source, convert_sql, lookup_column_type, split_mapper],
         callback_handler=None,
     )
 
 
-def _group_by_file_size(sql_ids: list, max_group_bytes=30000) -> list:
+def _group_by_file_size(sql_ids: list, max_group_bytes=15000) -> list:
     groups, current, size = [], [], 0
     for s in sql_ids:
         src = Path(s.get('source_file', ''))
@@ -112,11 +117,27 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
             log(f"   SQL IDs: {ids_str}")
 
             # Run agent (callback_handler=None suppresses streaming output)
-            agent = create_agent()
-            agent(
-                f"{mapper_file}의 다음 SQL ID들을 {get_target_db_display_name()}로 변환해줘: {ids_str}\n"
-                f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
-            )
+            try:
+                agent = create_agent()
+                agent(
+                    f"{mapper_file}의 다음 SQL ID들을 {get_target_db_display_name()}로 변환해줘: {ids_str}\n"
+                    f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
+                )
+            except Exception as e:
+                error_str = str(e)
+                if "context window" in error_str.lower() or "overflow" in error_str.lower():
+                    log(f"⚠️  Context overflow in group {g_num}, processing individually...")
+                    for s in group:
+                        try:
+                            single_agent = create_agent()
+                            single_agent(
+                                f"{mapper_file}의 {s['sql_id']}를 {get_target_db_display_name()}로 변환해줘.\n"
+                                f"read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
+                            )
+                        except Exception as inner_e:
+                            log(f"❌ {s['sql_id']}: {inner_e}")
+                else:
+                    log(f"❌ Group {g_num} error: {error_str[:200]}")
 
             # Drain queue (best-effort) but advance by group size regardless
             drain_progress()
