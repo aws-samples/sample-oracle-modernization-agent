@@ -231,7 +231,35 @@ def run_bulk_test(test_folder: str = "") -> dict:
         return {'status': 'skipped', 'error': f'No {display_name} connection info'}
 
     if not test_folder:
-        test_folder = str(TRANSFORM_DIR)
+        # Only pass SELECT SQLs to Java executor (DML is tested via EXPLAIN in Phase 0)
+        import shutil
+        import tempfile
+
+        select_files = []
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT target_file FROM transform_target_list
+                WHERE validated = 'Y' AND tested = 'N' AND sql_type = 'select'
+            """)
+            select_files = [row[0] for row in cursor.fetchall() if row[0]]
+
+        if not select_files:
+            print("  ℹ️  No SELECT SQLs to test", flush=True)
+            return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
+
+        # Copy SELECT XMLs to temp folder preserving directory structure
+        tmpdir = tempfile.mkdtemp(prefix="oma_select_test_")
+        for src in select_files:
+            src_path = Path(src)
+            if src_path.exists():
+                rel = src_path.relative_to(TRANSFORM_DIR)
+                dst = Path(tmpdir) / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dst)
+
+        test_folder = tmpdir
+        print(f"  📋 SELECT 대상: {len(select_files)}개 (DML 제외)", flush=True)
 
     # Run Java test
     try:
@@ -362,6 +390,11 @@ def run_bulk_test(test_folder: str = "") -> dict:
         return {'status': 'error', 'error': f'Java or {test_script} not found'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
+    finally:
+        # Clean up temp folder if we created one
+        if 'tmpdir' in dir() and tmpdir and Path(tmpdir).exists():
+            import shutil as _shutil
+            _shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @tool

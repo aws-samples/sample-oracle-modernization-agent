@@ -5,7 +5,7 @@ from utils.project_paths import PROJECT_ROOT, DB_PATH, OUTPUT_DIR, STRATEGY_DIR
 from core.state_manager import StateManager
 from agents.orchestrator.schemas import (
     SetupCheckResult, StepStatusResult, RunStepResult, ResetStepResult,
-    SummaryResult, SearchSqlResult
+    SummaryResult, SearchSqlResult, GetFailuresResult
 )
 
 
@@ -262,6 +262,112 @@ def search_sql_ids(keyword: str = "") -> SearchSqlResult:
         'results': results
     }
     return result
+
+
+@tool
+def get_failures(step_name: str = "all") -> GetFailuresResult:
+    """Get failed SQL IDs for a specific pipeline step or all steps.
+
+    Use this when user asks: "어떤 SQL이 실패했어?", "FAIL된 거 보여줘",
+    "review 실패 목록", "test 실패한 SQL ID", etc.
+
+    Args:
+        step_name: 'review', 'validate', 'test', or 'all' (default: all)
+
+    Returns:
+        GetFailuresResult with failed SQL IDs, mapper files, and reasons
+    """
+    import sqlite3
+
+    failures = []
+
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+
+        if step_name in ('review', 'all'):
+            cursor.execute("""
+                SELECT mapper_file, sql_id, sql_type, review_result
+                FROM transform_target_list
+                WHERE reviewed = 'F'
+                ORDER BY mapper_file, seq_no
+            """)
+            for mapper, sql_id, sql_type, result in cursor.fetchall():
+                reason = _extract_review_reason(result)
+                failures.append({
+                    'mapper_file': mapper, 'sql_id': sql_id,
+                    'sql_type': sql_type, 'reason': f"[Review] {reason}"
+                })
+
+        if step_name in ('validate', 'all'):
+            cursor.execute("""
+                SELECT mapper_file, sql_id, sql_type, validation_result
+                FROM transform_target_list
+                WHERE validated = 'Y' AND validation_result IS NOT NULL AND validation_result != 'PASS'
+                ORDER BY mapper_file, seq_no
+            """)
+            for mapper, sql_id, sql_type, result in cursor.fetchall():
+                failures.append({
+                    'mapper_file': mapper, 'sql_id': sql_id,
+                    'sql_type': sql_type, 'reason': f"[Validate] {(result or '')[:100]}"
+                })
+
+        if step_name in ('test', 'all'):
+            cursor.execute("""
+                SELECT mapper_file, sql_id, sql_type, test_result
+                FROM transform_target_list
+                WHERE tested = 'Y' AND test_result IS NOT NULL AND test_result != 'PASS'
+                ORDER BY mapper_file, seq_no
+            """)
+            for mapper, sql_id, sql_type, result in cursor.fetchall():
+                failures.append({
+                    'mapper_file': mapper, 'sql_id': sql_id,
+                    'sql_type': sql_type, 'reason': f"[Test] {(result or '')[:100]}"
+                })
+
+    # Print as Rich table
+    if failures:
+        from rich.table import Table
+        from core.display import console_err
+
+        title = f"Failed SQLs ({step_name})" if step_name != 'all' else "Failed SQLs (all steps)"
+        table = Table(title=title, show_lines=True)
+        table.add_column("Step", style="bold", no_wrap=True)
+        table.add_column("XML", style="cyan")
+        table.add_column("SQL ID", style="bold")
+        table.add_column("Reason", style="red")
+
+        for f in failures:
+            step_tag = f['reason'].split(']')[0] + ']'
+            reason = f['reason'].split('] ', 1)[-1]
+            table.add_row(step_tag, f['mapper_file'], f['sql_id'], reason[:80])
+
+        console_err.print(table)
+    else:
+        print(f"✅ No failures found for step: {step_name}")
+
+    return {
+        'step': step_name,
+        'total': len(failures),
+        'failures': failures
+    }
+
+
+def _extract_review_reason(review_result: str) -> str:
+    """Extract human-readable reason from review_result JSON."""
+    if not review_result:
+        return "Review failed"
+    try:
+        import json
+        parsed = json.loads(review_result)
+        issues = parsed.get('issues', [])
+        if issues:
+            first = issues[0]
+            if isinstance(first, dict):
+                return first.get('description', '')[:100]
+            return str(first)[:100]
+    except (ValueError, TypeError):
+        pass
+    return review_result[:100]
 
 
 @tool
