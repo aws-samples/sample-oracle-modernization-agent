@@ -88,6 +88,7 @@ WHERE pkg_util_is_valid(status) = 'Y'
 - `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` (dot → underscore + lowercase)
 - This rule applies to ALL package.function calls, not just Oracle standard packages
 - The actual function must exist in the target DB (created separately during migration)
+- **Crypto/encryption packages (PKG_CRYPTO, PKG_ENCRYPT, etc.) are user-defined packages** — apply the same flattening rule. Do NOT replace with MySQL built-in crypto functions (e.g., `AES_ENCRYPT()`, `AES_DECRYPT()`, `SHA2()`). Do NOT flag as CRITICAL during review for "encryption equivalence" — the migrated function handles this.
 
 ---
 
