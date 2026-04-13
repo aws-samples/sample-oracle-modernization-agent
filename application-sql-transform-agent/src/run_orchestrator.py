@@ -75,7 +75,11 @@ def run():
             print("👋 종료합니다.")
             break
 
-        agent(user_input)
+        try:
+            agent(user_input)
+        except Exception as e:
+            print(f"⚠️  오류 발생: {e}")
+            print("다시 입력해주세요.")
 
 
 if __name__ == "__main__":
