@@ -254,64 +254,58 @@ def generate_test_failure_report() -> dict:
             'target_sql': target_sql,
         })
 
-    # Build report
+    # Build report — clean, human-readable format
     lines = [
         "# Test Failure Report",
         f"\n**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"\n## Summary",
-        f"| Metric | Value |",
-        f"|--------|-------|",
-        f"| Total Tested | {total_tested} |",
-        f"| Passed | {passed} |",
-        f"| **Failed** | **{failed}** |",
-        f"| **Pass Rate** | **{pass_rate}%** |",
+        f"\n## 실패 목록\n",
+        "| XML | SQL ID | 오류 이유 |",
+        "|-----|--------|----------|",
     ]
 
-    # Failure categories
-    if categories:
-        lines.append(f"\n## Failure Categories\n")
-        for reason, sqls in sorted(categories.items(), key=lambda x: -len(x[1])):
-            lines.append(f"### {reason} ({len(sqls)} cases)")
-            for sql in sqls:
-                lines.append(f"- `{sql}`")
-            lines.append("")
+    for b in briefings:
+        reason = _human_readable_reason(b['category'], b['error'])
+        lines.append(f"| {b['mapper_file']} | {b['sql_id']} | {reason} |")
 
-    # Per-SQL briefing
+    lines.append(f"\n전체 {total_tested}개 SQL 중 {passed}개 통과, {failed}개 실패 (Pass Rate: {pass_rate}%)\n")
+
+    # Actionable advice grouped by category
+    for cat, sqls in sorted(categories.items(), key=lambda x: -len(x[1])):
+        ids = ", ".join(s.split("/")[-1] for s in sqls)
+        if "missing function" in cat.lower():
+            lines.append(
+                f"- {ids}: SQL 변환 자체는 정상이나, "
+                f"Oracle 패키지 함수를 타겟 DB 함수로 별도 마이그레이션해야 합니다."
+            )
+        elif "missing table" in cat.lower():
+            lines.append(
+                f"- {ids}: SQL 문법은 정상이나, "
+                f"테스트 DB에 해당 테이블이 없어서 실패한 케이스입니다."
+            )
+        elif "syntax" in cat.lower():
+            lines.append(
+                f"- {ids}: SQL 문법 오류 — 변환 규칙 확인 후 재변환이 필요합니다."
+            )
+        elif "type" in cat.lower():
+            lines.append(
+                f"- {ids}: 타입 불일치 — 메타데이터 기반 파라미터 캐스팅 확인이 필요합니다."
+            )
+        else:
+            lines.append(f"- {ids}: {cat} — 수동 확인이 필요합니다.")
+
+    # Per-SQL detail (collapsible)
     if briefings:
-        lines.append(f"\n## Per-SQL Failure Briefing\n")
-        current_mapper = None
+        lines.append(f"\n---\n\n## 상세 (변환된 SQL)\n")
         for b in briefings:
-            if b['mapper_file'] != current_mapper:
-                current_mapper = b['mapper_file']
-                lines.append(f"\n### {current_mapper}\n")
-
-            lines.append(f"#### `{b['sql_id']}` ({b['sql_type']})")
-            lines.append(f"- **Category**: {b['category']}")
-            lines.append(f"- **Error**: `{b['error'][:200]}`")
-            lines.append("")
-
+            lines.append(f"### {b['mapper_file']} / `{b['sql_id']}`\n")
+            lines.append(f"**오류**: `{b['error'][:200]}`\n")
             if b['target_sql']:
                 lines.append("<details>")
-                lines.append(f"<summary>Converted SQL (click to expand)</summary>\n")
+                lines.append(f"<summary>변환된 SQL 보기</summary>\n")
                 lines.append("```sql")
                 lines.append(b['target_sql'])
                 lines.append("```")
                 lines.append("</details>\n")
-
-    # Recommended actions
-    lines.append(f"\n## Recommended Actions\n")
-    for reason, sqls in sorted(categories.items(), key=lambda x: -len(x[1])):
-        count = len(sqls)
-        if "missing function" in reason.lower():
-            lines.append(f"1. **{reason}** ({count} cases): Create user-defined functions in target DB, then re-test")
-        elif "missing table" in reason.lower():
-            lines.append(f"1. **{reason}** ({count} cases): Verify table migration or schema setup")
-        elif "syntax" in reason.lower():
-            lines.append(f"1. **{reason}** ({count} cases): Review conversion rules, fix SQL, re-transform")
-        elif "type" in reason.lower():
-            lines.append(f"1. **{reason}** ({count} cases): Check parameter casting with metadata lookup")
-        else:
-            lines.append(f"1. **{reason}** ({count} cases): Manual review required")
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORTS_DIR / "test_failure_report.md"
@@ -348,6 +342,33 @@ def _categorize_failure(result: str, notes: str) -> str:
     if result:
         return "Other"
     return "Unknown"
+
+
+def _human_readable_reason(category: str, error: str) -> str:
+    """Convert error message to human-readable Korean reason."""
+    import re
+    error_lower = error.lower()
+
+    if "does not exist" in error_lower and "function" in error_lower:
+        func_match = re.search(r'function\s+(\w+)', error_lower)
+        func_name = func_match.group(1) if func_match else "unknown"
+        return f"{func_name} 함수가 타겟 DB에 미존재 (패키지 함수 마이그레이션 필요)"
+
+    if "does not exist" in error_lower and ("relation" in error_lower or "table" in error_lower):
+        tbl_match = re.search(r'relation\s+"?(\w+)"?', error_lower) or re.search(r'table\s+"?(\w+)"?', error_lower)
+        tbl_name = tbl_match.group(1) if tbl_match else "unknown"
+        return f"테이블 {tbl_name}이 타겟 DB에 미존재 (스키마 마이그레이션 필요)"
+
+    if "column" in error_lower and "does not exist" in error_lower:
+        return "컬럼 미존재 — 스키마 확인 필요"
+
+    if "syntax error" in error_lower:
+        return "SQL 문법 오류 — 재변환 필요"
+
+    if "type" in error_lower and ("mismatch" in error_lower or "cast" in error_lower):
+        return "타입 불일치 — 파라미터 캐스팅 확인 필요"
+
+    return error[:100] if len(error) > 100 else error
 
 
 @tool

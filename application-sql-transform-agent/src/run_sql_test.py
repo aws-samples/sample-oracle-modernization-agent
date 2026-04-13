@@ -285,19 +285,117 @@ def run(max_workers=8):
 
 
 def _generate_test_failure_report():
-    """Auto-generate test failure report via ReviewManager tool."""
-    print("📋 테스트 실패 리포트 생성 중...", flush=True)
+    """Auto-generate test failure report via ReviewManager tool and print summary."""
     try:
         from agents.review_manager.tools.diff_tools import generate_test_failure_report
         result = generate_test_failure_report()
-        if result.get('report_path'):
-            summary = result.get('summary', {})
-            print(f"✅ 리포트 생성 완료 (실패: {summary.get('failed', '?')}, "
-                  f"통과율: {summary.get('pass_rate', '?')}%)", flush=True)
-            return result['report_path']
+        if not result.get('report_path'):
+            return None
+
+        summary = result.get('summary', {})
+        briefings = result.get('briefings', [])
+
+        # Print failure summary table to console
+        _print_failure_summary(summary, briefings)
+
+        return result['report_path']
     except Exception as e:
         print(f"⚠️ 리포트 생성 실패: {e}", flush=True)
     return None
+
+
+def _print_failure_summary(summary: dict, briefings: list):
+    """Print human-readable failure summary to console."""
+    from core.display import console_err
+    from rich.table import Table
+    from rich.panel import Panel
+
+    passed = summary.get('passed', 0)
+    failed = summary.get('failed', 0)
+    total = passed + failed
+    rate = summary.get('pass_rate', 0)
+
+    # Failure table
+    if briefings:
+        table = Table(title="테스트 실패 리포트", show_lines=True)
+        table.add_column("XML", style="cyan", no_wrap=True)
+        table.add_column("SQL ID", style="bold")
+        table.add_column("오류 이유", style="red")
+
+        for b in briefings:
+            error = b.get('error', 'Unknown')
+            reason = _human_readable_reason(b.get('category', ''), error)
+            table.add_row(b['mapper_file'], b['sql_id'], reason)
+
+        console_err.print(table)
+
+    # Summary text
+    summary_lines = [
+        f"전체 {total}개 SQL 중 {passed}개 통과, {failed}개 실패 (Pass Rate: {rate}%)",
+    ]
+
+    # Group by category for actionable advice
+    categories = {}
+    for b in briefings:
+        cat = b.get('category', 'Other')
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(b)
+
+    for cat, items in sorted(categories.items()):
+        ids = ", ".join(b['sql_id'] for b in items)
+        if "missing function" in cat.lower():
+            summary_lines.append(
+                f"- {ids}: SQL 변환 자체는 정상이나, Oracle 패키지 함수를 타겟 DB 함수로 별도 마이그레이션해야 합니다."
+            )
+        elif "missing table" in cat.lower():
+            summary_lines.append(
+                f"- {ids}: SQL 문법은 정상이나, 테스트 DB에 해당 테이블이 없어서 실패한 케이스입니다."
+            )
+        elif "syntax" in cat.lower():
+            summary_lines.append(
+                f"- {ids}: SQL 문법 오류 — 변환 규칙 확인 후 재변환이 필요합니다."
+            )
+        elif "type" in cat.lower():
+            summary_lines.append(
+                f"- {ids}: 타입 불일치 — 메타데이터 기반 파라미터 캐스팅 확인이 필요합니다."
+            )
+        else:
+            summary_lines.append(
+                f"- {ids}: {cat} — 수동 확인이 필요합니다."
+            )
+
+    console_err.print(Panel("\n".join(summary_lines), title="요약", border_style="yellow"))
+
+
+def _human_readable_reason(category: str, error: str) -> str:
+    """Convert error message to human-readable Korean reason."""
+    error_lower = error.lower()
+
+    if "does not exist" in error_lower and "function" in error_lower:
+        # Extract function name
+        import re
+        func_match = re.search(r'function\s+(\w+)', error_lower)
+        func_name = func_match.group(1) if func_match else "unknown"
+        return f"{func_name} 함수가 타겟 DB에 미존재 (패키지 함수 마이그레이션 필요)"
+
+    if "does not exist" in error_lower and ("relation" in error_lower or "table" in error_lower):
+        import re
+        tbl_match = re.search(r'relation\s+"?(\w+)"?', error_lower) or re.search(r'table\s+"?(\w+)"?', error_lower)
+        tbl_name = tbl_match.group(1) if tbl_match else "unknown"
+        return f"테이블 {tbl_name}이 타겟 DB에 미존재 (스키마 마이그레이션 필요)"
+
+    if "column" in error_lower and "does not exist" in error_lower:
+        return f"컬럼 미존재 — 스키마 확인 필요"
+
+    if "syntax error" in error_lower:
+        return f"SQL 문법 오류 — 재변환 필요"
+
+    if "type" in error_lower and ("mismatch" in error_lower or "cast" in error_lower):
+        return f"타입 불일치 — 파라미터 캐스팅 확인 필요"
+
+    # Fallback: truncate error
+    return error[:100] if len(error) > 100 else error
 
 
 def _refine_strategy_from_logs():
