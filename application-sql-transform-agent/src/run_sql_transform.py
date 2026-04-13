@@ -69,7 +69,7 @@ def create_agent():
     )
 
 
-def _group_by_file_size(sql_ids: list, max_group_bytes=10000, max_group_count=5) -> list:
+def _group_by_file_size(sql_ids: list, max_group_bytes=30000, max_group_count=15) -> list:
     """Group SQL IDs by estimated size AND count to prevent context overflow."""
     groups, current, size = [], [], 0
     for s in sql_ids:

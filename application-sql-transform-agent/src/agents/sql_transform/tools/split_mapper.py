@@ -200,9 +200,7 @@ def split_mapper(file_path: str) -> dict:
 
             sql_ids.append({
                 'id': elem['id'], 'type': elem['type'], 'seq_no': seq,
-                'sql': sql_body, 'full_tag': elem['full_tag'],
-                'preceding_comment': elem['preceding_comment'],
-                'line_count': elem['line_count'], 'target_file': target_file
+                'line_count': elem['line_count'],
             })
 
         conn.commit()
@@ -212,5 +210,5 @@ def split_mapper(file_path: str) -> dict:
     print(f"✂️  Split {path.name}: {len(sql_ids)} SQL IDs → origin/ + extract/ + DB")
     return {
         'mapper': path.name, 'namespace': namespace,
-        'xml_header': xml_header, 'xml_doctype': xml_doctype, 'sql_ids': sql_ids
+        'total': len(sql_ids), 'sql_ids': sql_ids
     }
