@@ -1,6 +1,7 @@
 """SQL Validate Agent - Strands Framework"""
 from utils.project_paths import MODEL_ID, get_rules_path, load_prompt_text
 from pathlib import Path
+from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
@@ -30,7 +31,8 @@ def _load_system_prompt():
 def create_sql_validate_agent(*, suppress_streaming: bool = False) -> Agent:
     model = BedrockModel(
         model_id=MODEL_ID,
-        max_tokens=64000
+        max_tokens=64000,
+        boto_client_config=BotocoreConfig(read_timeout=300),
     )
     kwargs: dict = {
         "name": "SQLValidate",
