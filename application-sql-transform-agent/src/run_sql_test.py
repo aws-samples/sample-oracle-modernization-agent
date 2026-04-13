@@ -257,6 +257,10 @@ def run(max_workers=8):
     remaining = total_sql - tested
     if remaining > 0:
         rows.append(("Remaining", f"[yellow]{remaining} SQL IDs[/yellow]"))
+        # Auto-generate test failure report via ReviewManager
+        report_path = _generate_test_failure_report()
+        if report_path:
+            rows.append(("Failure Report", str(report_path)))
     else:
         rows.append(("Status", "[green]All tests passed[/green]"))
         if _refine_strategy_from_logs():
@@ -265,6 +269,22 @@ def run(max_workers=8):
     rows.append(("Logs", str(_log_dir)))
     rows.append(("Execution log", str(test_log_file)))
     print_step_result("Test Result", rows)
+
+
+def _generate_test_failure_report():
+    """Auto-generate test failure report via ReviewManager tool."""
+    print("📋 테스트 실패 리포트 생성 중...", flush=True)
+    try:
+        from agents.review_manager.tools.diff_tools import generate_test_failure_report
+        result = generate_test_failure_report()
+        if result.get('report_path'):
+            summary = result.get('summary', {})
+            print(f"✅ 리포트 생성 완료 (실패: {summary.get('failed', '?')}, "
+                  f"통과율: {summary.get('pass_rate', '?')}%)", flush=True)
+            return result['report_path']
+    except Exception as e:
+        print(f"⚠️ 리포트 생성 실패: {e}", flush=True)
+    return None
 
 
 def _refine_strategy_from_logs():
