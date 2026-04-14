@@ -418,6 +418,30 @@ def reset_step(step_name: str) -> ResetStepResult:
         return result
 
 
+@tool
+def backup_output(step_name: str = "manual") -> dict:
+    """Create a backup of DB and output files.
+
+    Use when user asks: "백업", "backup", "저장", "스냅샷"
+    Also called automatically before each pipeline step.
+
+    Args:
+        step_name: Label for the backup (default: 'manual')
+
+    Returns:
+        Dict with backup_path and size info
+    """
+    path = _backup_before_step(step_name)
+    if path:
+        import os
+        total_size = sum(
+            os.path.getsize(os.path.join(dp, f))
+            for dp, _, fns in os.walk(path) for f in fns
+        )
+        return {'status': 'success', 'backup_path': path, 'size_mb': round(total_size / 1024 / 1024, 1)}
+    return {'status': 'error', 'message': 'Nothing to backup (DB not found)'}
+
+
 def _backup_before_step(step_name: str) -> str:
     """Create a backup of DB and key output files before executing a pipeline step.
 
