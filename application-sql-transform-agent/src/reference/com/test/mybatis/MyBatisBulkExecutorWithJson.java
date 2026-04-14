@@ -944,7 +944,9 @@ public class MyBatisBulkExecutorWithJson {
                         // Use different execution methods based on SQL type
                         switch (testInfo.sqlType.toUpperCase()) {
                             case "SELECT":
-                                List<Map<String, Object>> selectResults = session.selectList(testInfo.sqlId, paramMap);
+                                // Limit to 1 row — only verifying SQL executes without errors
+                                org.apache.ibatis.session.RowBounds rowBounds = new org.apache.ibatis.session.RowBounds(0, 1);
+                                List<Map<String, Object>> selectResults = session.selectList(testInfo.sqlId, paramMap, rowBounds);
                                 resultCount = selectResults.size();
                                 break;
                                 
@@ -1045,7 +1047,9 @@ public class MyBatisBulkExecutorWithJson {
                         // Use different execution methods based on SQL type
                         switch (testInfo.sqlType.toUpperCase()) {
                             case "SELECT":
-                                results = session.selectList(testInfo.sqlId, paramMap);
+                                // Limit to 1 row — only verifying SQL executes without errors, avoid large result sets
+                                org.apache.ibatis.session.RowBounds rb = new org.apache.ibatis.session.RowBounds(0, 1);
+                                results = session.selectList(testInfo.sqlId, paramMap, rb);
                                 break;
                                 
                             case "INSERT":
