@@ -334,13 +334,37 @@ class StateManager:
             column_attr = getattr(TransformTargetList, column_name)
 
             # Reset both 'Y' and 'F' (review FAIL) back to 'N'
+            # But protect items that have progressed to later stages
+            # (e.g., don't reset transform for items already tested/validated)
+            filters = [column_attr.in_(['Y', 'F'])]
+
+            if step == 'transform':
+                # Don't reset transform for items that passed test or validate
+                # — their transform files contain fixes from later stages
+                filters.append(TransformTargetList.tested == 'N')
+                filters.append(TransformTargetList.validated == 'N')
+            elif step == 'review':
+                filters.append(TransformTargetList.tested == 'N')
+
             stmt = (
                 sql_update(TransformTargetList)
-                .where(column_attr.in_(['Y', 'F']))
+                .where(*filters)
                 .values(**{column_name: 'N', 'updated_at': func.current_timestamp()})
             )
             result = session.execute(stmt)
-            return result.rowcount
+            reset_count = result.rowcount
+
+            # Count protected items
+            protected_filters = [column_attr.in_(['Y', 'F'])]
+            if step == 'transform':
+                protected_filters.append(
+                    or_(TransformTargetList.tested != 'N', TransformTargetList.validated != 'N')
+                )
+                protected = session.query(func.count(TransformTargetList.id)).filter(*protected_filters).scalar()
+                if protected > 0:
+                    print(f"  ⚠️  {protected}개 SQL은 Test/Validate 수정 이력이 있어 보호됨 (리셋 제외)")
+
+            return reset_count
 
     # ========== Property Management ==========
 
