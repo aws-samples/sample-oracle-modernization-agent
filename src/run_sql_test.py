@@ -45,16 +45,29 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
         log(f"🔧 시작: {len(failures)} failures")
         log(f"   SQL IDs: {ids_str}")
 
-        # Filter out DB connection errors
-        sql_errors = [f for f in failures if 'Network Adapter could not establish' not in f.get('error', '')]
-        connection_errors = [f for f in failures if 'Network Adapter could not establish' in f.get('error', '')]
+        # Filter out infrastructure errors (not fixable by agent)
+        _infra_patterns = [
+            'Network Adapter could not establish',
+            'IncompleteElementException',
+            'include refid',
+            'Cannot find class:',
+            'ClassNotFoundException',
+        ]
 
-        if connection_errors:
-            log(f"⚠️  {len(connection_errors)} DB 연결 오류 (인프라 문제, 스킵)")
-            advance_progress(len(connection_errors))
+        def _is_infra_error(error: str) -> bool:
+            return any(p in error for p in _infra_patterns)
+
+        sql_errors = [f for f in failures if not _is_infra_error(f.get('error', ''))]
+        infra_errors = [f for f in failures if _is_infra_error(f.get('error', ''))]
+
+        if infra_errors:
+            log(f"⚠️  {len(infra_errors)} 인프라/환경 오류 (Agent 수정 불가, 스킵)")
+            for f in infra_errors:
+                log(f"    SKIP {f['sql_id']}: {f.get('error', '')[:80]}")
+            advance_progress(len(infra_errors))
 
         if not sql_errors:
-            log("✅ SQL 구문 오류 없음 (모두 DB 연결 오류)")
+            log("✅ Agent 수정 가능한 오류 없음 (모두 인프라/환경 오류)")
             return {'mapper': mapper_file, 'status': 'skipped', 'count': 0}
 
         errors_str = "\n\n".join(
