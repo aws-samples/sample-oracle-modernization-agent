@@ -129,6 +129,7 @@ Scan your output SQL line by line and verify:
 - [ ] **Parameter casting** (PostgreSQL only): Every `#{param}` in WHERE, LIMIT, OFFSET should have `::type` cast. MySQL does NOT use `::type`.
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags, #{param} references, and `<if test="">` OGNL expressions are intact? (Do NOT rewrite `@class@method()` expressions)
+- [ ] **JOIN conditions unchanged**: Every JOIN ON condition uses the EXACT same table aliases and column names as the original (lowercased only)? No table alias substitution (e.g., I joins L in original → must still join L, NOT changed to join B)?
 - [ ] **Package functions flattened**: Any `PKG_*.FUNC()` converted to `pkg_*_func()` with underscore? NOT mapped to built-in functions like `pgp_sym_encrypt`, `AES_ENCRYPT`, etc.?
 - [ ] **Comments preserved**: All original `--` and `/* */` comments remain?
 - [ ] **Variable names intact**: Only lowercased, prefixes NOT changed? (V_RETURN → v_return, NOT p_return)
