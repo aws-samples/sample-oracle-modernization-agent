@@ -32,20 +32,28 @@ def assemble_mapper(mapper_file: str) -> dict:
         rows = cursor.fetchall()
 
         # Get relative_path for output directory
-        cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?", (mapper_file,))
-        src_row = cursor.fetchone()
+        # mapper_file may include sub_dir prefix (e.g., "master/Mapper.xml")
+        file_name_only = Path(mapper_file).name
+        cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?", (file_name_only,))
+        src_rows = cursor.fetchall()
 
     if not rows:
         return {'error': f'No converted SQLs for {mapper_file}', 'output_path': '', 'total': 0, 'success': 0}
 
-    relative_path = src_row[0] if src_row else ''
-    sub_dir = str(Path(relative_path).parent) if relative_path else ''
+    # If mapper_file has sub_dir prefix, use it; otherwise derive from source_xml_list
+    if '/' in mapper_file:
+        sub_dir = str(Path(mapper_file).parent)
+    elif src_rows:
+        relative_path = src_rows[0][0] if src_rows else ''
+        sub_dir = str(Path(relative_path).parent) if relative_path else ''
+    else:
+        sub_dir = ''
 
     # Read original from origin/
     if sub_dir:
-        origin_path = ORIGIN_DIR / sub_dir / mapper_file
+        origin_path = ORIGIN_DIR / sub_dir / file_name_only
     else:
-        origin_path = ORIGIN_DIR / mapper_file
+        origin_path = ORIGIN_DIR / file_name_only
 
     if not origin_path.exists():
         return {'error': f'Origin file not found: {origin_path}', 'output_path': '', 'total': 0, 'success': 0}
@@ -90,7 +98,7 @@ def assemble_mapper(mapper_file: str) -> dict:
         merge_dir = MERGE_DIR
     merge_dir.mkdir(parents=True, exist_ok=True)
 
-    output_path = merge_dir / mapper_file
+    output_path = merge_dir / file_name_only
     output_path.write_text(converted_content, encoding='utf-8')
 
     print(f"📦 Merged: {output_path} ({success}/{len(conv_map)} SQLs)")
