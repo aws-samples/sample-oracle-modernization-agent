@@ -165,7 +165,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 _update_tested(mapper_file, sql_id)
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
-                _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
+                # Don't mark as tested — leave for Phase 1 Java bulk test to retry
                 failed += 1
                 failures.append({
                     'mapper_file': mapper_file,
@@ -173,7 +173,6 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                     'error': error_msg,
                 })
         except subprocess.TimeoutExpired:
-            _update_tested(mapper_file, sql_id, result="FAIL", error="EXPLAIN timeout (15s)")
             failed += 1
             failures.append({
                 'mapper_file': mapper_file,
