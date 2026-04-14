@@ -265,6 +265,18 @@ MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
 SELECT DISTINCT ON (group_col) * FROM table ORDER BY group_col, date_col
 ```
 
+#### 2-1a. Numeric TRUNC (NOT the same as ROUND)
+```sql
+-- Oracle: TRUNC truncates (floors) toward zero
+TRUNC(1.2345, 3) = 1.234
+
+-- PostgreSQL: trunc() works the same — DO NOT convert to ROUND
+trunc(1.2345, 3) = 1.234    -- ✅ CORRECT: same behavior
+ROUND(1.2345, 3) = 1.235    -- ❌ WRONG: different result!
+```
+- `TRUNC(number, precision)` → `trunc(number::numeric, precision)` — keep as trunc, just lowercase + cast
+- **NEVER convert TRUNC to ROUND** — they produce different results
+
 #### 2-2. No Conversion Needed (PostgreSQL supports directly)
 | Feature | Note |
 |---------|------|
@@ -723,6 +735,25 @@ PKG_CRYPTO.ENCRYPT(col, key)  →  pkg_crypto_encrypt(col, key)
 PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
 ```
 **Only `DBMS_*` and `UTL_*` are Oracle standard.** All other `PACKAGE.FUNCTION()` calls must be flattened to `package_function()`. Never map to target DB built-in functions based on name similarity.
+
+### 10. TRUNC(number) Converted to ROUND
+```sql
+-- ❌ WRONG: ROUND rounds, TRUNC truncates — different results
+TRUNC(weight, 3)  →  ROUND(weight::numeric, 3)
+
+-- ✅ RIGHT: keep as trunc
+TRUNC(weight, 3)  →  trunc(weight::numeric, 3)
+```
+
+### 11. JOIN Condition Changed (Column Name "Correction")
+```sql
+-- ❌ WRONG: agent "fixed" what looked like a bug in original
+A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldseq
+
+-- ✅ RIGHT: preserve original join condition exactly (lowercase only)
+A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldkey
+```
+**NEVER change column names in JOIN conditions.** Only lowercase them. Even if it looks like a bug in the original, preserve the original logic.
 
 ---
 
