@@ -150,6 +150,23 @@ Does this <if> condition need OR col IS NULL?
 -- (u is INNER JOIN, so u.EMAIL is never NULL from the join)
 ```
 
+#### 2-1. WHERE Filter on Outer-Joined Table (CRITICAL)
+When Oracle WHERE clause filters on an outer-joined (+) table column, this **excludes NULL rows**. Converting to LEFT JOIN ON clause **includes NULL rows** — different behavior!
+
+```sql
+-- Oracle: WHERE filter excludes rows where F is NULL
+FROM orders A, items F
+WHERE A.key = F.key(+) AND F.CLOSDATE >= #{sysdate}
+
+-- ❌ WRONG: filter in ON clause → includes NULL rows
+FROM orders A LEFT JOIN items F ON A.key = F.key AND F.CLOSDATE >= #{sysdate}
+
+-- ✅ RIGHT: keep filter in WHERE → excludes NULL rows (same as Oracle)
+FROM orders A LEFT JOIN items F ON A.key = F.key
+WHERE F.CLOSDATE >= #{sysdate}
+```
+**Rule**: Non-join conditions on outer-joined tables stay in WHERE, not ON. Only the join relationship (`A.key = F.key`) goes into the ON clause.
+
 #### 3. Multi-Column SET with Subquery (Oracle-specific)
 PostgreSQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to UPDATE ... FROM pattern:
 ```sql
@@ -217,6 +234,7 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | SYS_GUID() | gen_random_uuid() |
 | SUBSTR(s,p,l) | SUBSTRING(s,p,l) |
 | INSTR(s,sub) | POSITION(sub IN s) |
+| INSTR(s,sub,start,occurrence) | See note below — POSITION does not support occurrence |
 | LENGTHB(s) | OCTET_LENGTH(s) |
 | LPAD(s,len,pad) | LPAD(s::text,len,pad) |
 | LISTAGG(col,delim) WITHIN GROUP (ORDER BY x) | STRING_AGG(col, delim ORDER BY x) — move ORDER BY inside function |
@@ -225,6 +243,21 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | DBMS_LOB.GETLENGTH(col) | LENGTH(col) or OCTET_LENGTH(col) |
 | ROWID | **remove or replace with PK** — ctid changes after VACUUM, unsafe as identifier |
 | MINUS | EXCEPT |
+
+**INSTR with occurrence parameter** (4-arg form):
+```sql
+-- Oracle: find 2nd occurrence of '_' starting from position 1
+INSTR('AB_CD_EF', '_', 1, 2)  -- returns 6
+
+-- PostgreSQL: use array approach
+-- Method 1: split and calculate
+(SELECT SUM(LENGTH(elem) + 1) FROM unnest(string_to_array(LEFT(s, POSITION('_' IN SUBSTRING(s FROM POSITION('_' IN s) + 1)) + POSITION('_' IN s)), '_')) WITH ORDINALITY AS t(elem, ord) WHERE ord <= 2)
+
+-- Method 2 (simpler, recommended): use regexp
+-- Find position of Nth occurrence of pattern
+(SELECT (m.match).start FROM (SELECT regexp_matches(s, '(_)', 'g') AS match, ROW_NUMBER() OVER() AS rn FROM regexp_matches(s, '_', 'g')) m WHERE m.rn = 2)
+```
+When INSTR is used with occurrence parameter, **flag as complex conversion** and add a note. Simple nested POSITION expressions often produce wrong results.
 
 **NVL → COALESCE type mismatch:**
 Oracle NVL implicitly casts the second argument to match the first. PostgreSQL COALESCE requires matching types.
@@ -425,16 +458,43 @@ ORDER BY path
 ```
 
 #### 2. MERGE Statement
+
+**Simple MERGE** (direct key match):
 ```sql
 -- Oracle
-MERGE INTO target USING source ON (condition)
-WHEN MATCHED THEN UPDATE SET ...
-WHEN NOT MATCHED THEN INSERT ...
+MERGE INTO target USING source ON (target.key = source.key)
+WHEN MATCHED THEN UPDATE SET col1 = source.val1
+WHEN NOT MATCHED THEN INSERT (key, col1) VALUES (source.key, source.val1)
 
 -- PostgreSQL
-INSERT INTO target (...) SELECT ... FROM source
-ON CONFLICT (key) DO UPDATE SET ...
+INSERT INTO target (key, col1) SELECT key, val1 FROM source
+ON CONFLICT (key) DO UPDATE SET col1 = EXCLUDED.val1
 ```
+
+**Complex MERGE** (subquery in ON clause, MAX, conditional logic):
+```sql
+-- Oracle: MERGE with MAX subquery — finds specific row to update
+MERGE INTO detail DT USING DUAL ON (
+    DT.DTKEY = (SELECT MAX(DTKEY) FROM detail WHERE CTKEY=#{ctkey} AND QTY>0)
+)
+WHEN MATCHED THEN UPDATE SET QTY = QTY + #{qty}
+WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
+```
+Complex MERGE with subqueries in ON clause **cannot be simply converted to ON CONFLICT**. Use explicit IF-EXISTS logic:
+```sql
+-- PostgreSQL: use DO block or separate statements
+WITH target_row AS (
+    SELECT dtkey FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0
+    ORDER BY dtkey DESC LIMIT 1
+)
+UPDATE detail SET qty = qty + #{qty}::integer
+WHERE dtkey = (SELECT dtkey FROM target_row);
+
+-- If no row updated, insert
+INSERT INTO detail (...) SELECT ...
+WHERE NOT EXISTS (SELECT 1 FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0);
+```
+**Flag complex MERGE as MANUAL_REVIEW** when the ON clause contains subqueries or MAX/MIN.
 
 #### 3. Pagination: ROWNUM → LIMIT/OFFSET
 ```sql
