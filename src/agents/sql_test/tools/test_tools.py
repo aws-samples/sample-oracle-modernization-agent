@@ -270,8 +270,9 @@ def run_bulk_test(test_folder: str = "") -> dict:
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
         print(f"  ⏱️  Timeout: 600s\n", flush=True)
         
+        json_result_path = REFERENCE_DIR / "out" / "test_results.json"
         result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
-            ['bash', test_script, test_folder_abs],
+            ['bash', test_script, test_folder_abs, '--json-file', 'test_results.json'],
             capture_output=True, text=True, timeout=600,
             cwd=str(REFERENCE_DIR),
             env={**os.environ, 'TEST_FOLDER': test_folder_abs}
@@ -291,15 +292,15 @@ def run_bulk_test(test_folder: str = "") -> dict:
                 if line.strip():
                     print(f"    {line}", flush=True)
 
-        # Parse JSON results if available
-        json_result_file = Path(test_folder) / "test_results.json"
-        if json_result_file.exists():
-            print(f"  📄 Found JSON result file: {json_result_file}", flush=True)
-            with open(json_result_file, 'r') as f:
+        # Parse JSON results — Java saves to out/test_results.json (via --json-file arg)
+        if json_result_path.exists():
+            print(f"  📄 JSON result: {json_result_path}", flush=True)
+            with open(json_result_path, 'r') as f:
                 test_results = json.load(f)
+            # Clean up for next run
+            json_result_path.unlink()
         else:
-            print(f"  📄 No JSON file, parsing stdout...", flush=True)
-            # Parse stdout for results
+            print(f"  ⚠️  JSON file not found at {json_result_path}, parsing stdout...", flush=True)
             test_results = _parse_stdout_results(result.stdout)
 
         # Update DB flags
