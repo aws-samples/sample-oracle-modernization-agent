@@ -165,6 +165,14 @@ def split_mapper(file_path: str) -> dict:
         sub_dir = _get_sub_dir(cursor, str(path))
 
         _init_table(conn)
+        # Get existing records to preserve their status flags
+        cursor.execute(
+            "SELECT sql_id, transformed, reviewed, validated, tested, completed, "
+            "review_result, validation_result, test_result, review_notes, transform_count "
+            "FROM transform_target_list WHERE mapper_file = ?",
+            (path.name,)
+        )
+        existing = {row[0]: row for row in cursor.fetchall()}
         cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (path.name,))
 
         # 1. Copy original to output/origin/
@@ -191,12 +199,26 @@ def split_mapper(file_path: str) -> dict:
                 encoding='utf-8'
             )
 
-            cursor.execute("""
-                INSERT INTO transform_target_list
-                (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file,
-                 transformed, reviewed, validated, tested, completed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'N', 'N', 'N', 'N', 'N')
-            """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
+            # Restore previous status flags if SQL ID existed before
+            prev = existing.get(elem['id'])
+            if prev:
+                # Preserve: transformed, reviewed, validated, tested, completed, results, notes
+                cursor.execute("""
+                    INSERT INTO transform_target_list
+                    (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file,
+                     transformed, reviewed, validated, tested, completed,
+                     review_result, validation_result, test_result, review_notes, transform_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file,
+                      prev[1], prev[2], prev[3], prev[4], prev[5],
+                      prev[6], prev[7], prev[8], prev[9], prev[10]))
+            else:
+                cursor.execute("""
+                    INSERT INTO transform_target_list
+                    (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file,
+                     transformed, reviewed, validated, tested, completed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'N', 'N', 'N', 'N', 'N')
+                """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
 
             sql_ids.append({
                 'id': elem['id'], 'type': elem['type'], 'seq_no': seq,

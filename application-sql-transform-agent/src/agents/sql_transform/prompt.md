@@ -18,6 +18,7 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
 - **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.kns.framework.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
+- **`<include refid="..."/>`**: SQL fragment references must be preserved exactly as-is. Do NOT inline/expand the referenced SQL. Do NOT remove or replace with actual SQL content. The fragment is defined in another mapper and resolved at runtime by MyBatis.
 
 **User-defined package functions (PKG_*, custom) → flatten with underscore, NOTHING ELSE.**
 - `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` — NOT `pgp_sym_encrypt()`, NOT `AES_ENCRYPT()`
