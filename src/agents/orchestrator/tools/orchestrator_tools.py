@@ -438,7 +438,7 @@ def _backup_before_step(step_name: str) -> str:
 
     # Backup step-specific directories
     dirs_to_backup = {
-        'transform': ['xmls/transform'],
+        'transform': ['xmls/transform', 'strategy'],
         'review': ['xmls/transform'],  # review may trigger re-transform
         'validate': ['xmls/transform'],  # validate may fix SQL
         'test': ['xmls/transform'],  # test agent may fix SQL
