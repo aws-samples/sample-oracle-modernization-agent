@@ -252,6 +252,7 @@ def run(max_workers=8):
 
         rows.append(("Log", str(test_log_file)))
         print_step_result("Test Result", rows)
+        _print_sql_type_distribution()
         return
 
     # Phase 2: Agent fixes failures
@@ -318,6 +319,62 @@ def run(max_workers=8):
     rows.append(("Logs", str(_log_dir)))
     rows.append(("Execution log", str(test_log_file)))
     print_step_result("Test Result", rows)
+
+    # Show SQL type distribution table
+    _print_sql_type_distribution()
+
+
+def _print_sql_type_distribution():
+    """Print SQL type distribution with test method and status."""
+    from rich.table import Table
+    from core.display import console_err
+
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sql_type,
+                   COUNT(*) as cnt,
+                   SUM(CASE WHEN tested='Y' AND test_result='PASS' THEN 1 ELSE 0 END) as pass_cnt,
+                   SUM(CASE WHEN tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS' THEN 1 ELSE 0 END) as fail_cnt,
+                   SUM(CASE WHEN tested='N' THEN 1 ELSE 0 END) as untested
+            FROM transform_target_list
+            GROUP BY sql_type
+            ORDER BY cnt DESC
+        """)
+        type_rows = cursor.fetchall()
+
+    test_methods = {
+        'select': 'Phase 1: Java 실행 (DB 직접 실행)',
+        'insert': 'Phase 0: EXPLAIN 검증',
+        'update': 'Phase 0: EXPLAIN 검증',
+        'delete': 'Phase 0: EXPLAIN 검증',
+        'sql': '테스트 대상 아님 (SQL fragment)',
+        'resultMap': '테스트 대상 아님',
+    }
+
+    table = Table(title="SQL 타입별 테스트 현황", show_lines=True)
+    table.add_column("sql_type", style="bold")
+    table.add_column("개수", justify="right")
+    table.add_column("Pass", justify="right", style="green")
+    table.add_column("Fail", justify="right", style="red")
+    table.add_column("Test 방식")
+    table.add_column("상태")
+
+    for sql_type, cnt, pass_cnt, fail_cnt, untested in type_rows:
+        method = test_methods.get(sql_type, '기타')
+        if pass_cnt == cnt:
+            status = "✅ All Pass"
+        elif fail_cnt > 0:
+            status = f"❌ {fail_cnt} Fail"
+        elif untested == cnt:
+            status = "⏭️ Skip"
+        elif untested > 0:
+            status = f"⚠️ {untested} Not Tested"
+        else:
+            status = f"✅ {pass_cnt} Pass"
+        table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
+
+    console_err.print(table)
 
 
 def _generate_test_failure_report():
