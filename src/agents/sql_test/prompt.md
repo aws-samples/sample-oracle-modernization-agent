@@ -70,10 +70,10 @@ For EACH failed SQL ID:
 3. **Preserve comments** — ALL `--` and `/* */` comments must remain
 4. **Preserve variable names** — only lowercase, NEVER change prefixes (V_RETURN → v_return, NOT p_return)
 5. **Preserve literal values** — email addresses, URLs, string constants must NOT be masked or sanitized
-6. **IncompleteElementException → SKIP, do NOT fix**
-   - `<include refid="..."/>` references SQL fragments from other mappers
-   - Single-file test cannot resolve cross-mapper references — this is a test infrastructure limitation, NOT a conversion error
-   - Mark as SKIP with note: "SQL fragment reference — requires full mapper context for testing"
+6. **`<include refid="..."/>` → preserve as-is, do NOT inline**
+   - SQL fragment references must stay exactly as-is — do NOT expand or replace with actual SQL
+   - If test fails with IncompleteElementException → SKIP with note: "SQL fragment reference — requires full mapper context"
+   - This is a test infrastructure limitation, NOT a conversion error
 7. **User-defined package functions → flatten only, NEVER replace with built-ins**
    - `pkg_crypto_encrypt()` must stay as `pkg_crypto_encrypt()` — do NOT replace with `pgp_sym_encrypt()`, `AES_ENCRYPT()`, or any built-in
    - `pkg_crypto_decrypt()` must stay as `pkg_crypto_decrypt()` — do NOT replace with `pgp_sym_decrypt()`, `AES_DECRYPT()`
