@@ -1281,14 +1281,6 @@ public class MyBatisBulkExecutorWithJson {
                 "<!DOCTYPE mapper PUBLIC \"-//mybatis.org//DTD Mapper 3.0//EN\" \"http://mybatis.org/dtd/mybatis-3-mapper.dtd\">");
         }
 
-        // 11. Inject AND 1=0 into SELECT statements to prevent full table scans
-        // Only validates SQL syntax without reading data (parameters may be null)
-        // Case A: SELECT with WHERE clause → append AND 1=0
-        content = content.replaceAll("(?si)(\\bWHERE\\b.+?)(</select>)", "$1 AND 1=0\n$2");
-        // Case B: SELECT without WHERE clause → add WHERE 1=0 before </select>
-        // (only if no WHERE was found in the select block)
-        content = content.replaceAll("(?si)(<select[^>]*>(?:(?!\\bWHERE\\b).)*?)(</select>)", "$1\n WHERE 1=0\n$2");
-
         return content;
     }
     
