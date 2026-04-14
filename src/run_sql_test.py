@@ -165,6 +165,9 @@ def run(max_workers=8):
         log_and_print(f"run_setup.py를 다시 실행하여 {display_name} 접속 정보를 설정하세요.")
         return
 
+    # Pre-skip: mark non-testable items before test phases
+    skip_count = _pre_mark_skips(log_and_print)
+
     # Phase 0: EXPLAIN-based DML validation (no execution, no PK/NULL issues)
     log_and_print("\nPhase 0: DML 구문 검증 (EXPLAIN)...")
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
@@ -402,6 +405,63 @@ def _print_sql_type_distribution():
             table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
 
     console_err.print(table)
+
+
+def _pre_mark_skips(log_fn=print) -> int:
+    """Pre-mark non-testable SQL IDs as SKIP before running test phases.
+
+    Marks:
+    1. Non-testable types (sql, resultMap) — not executable
+    2. SQL files containing <include refid="..."/> — will fail with IncompleteElementException
+
+    Returns:
+        Number of newly marked SKIP items
+    """
+    total_marked = 0
+
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+
+        # 1. Non-testable types
+        cursor.execute("""
+            UPDATE transform_target_list
+            SET tested = 'Y', test_result = 'SKIP'
+            WHERE tested = 'N'
+              AND LOWER(sql_type) NOT IN ('select', 'insert', 'update', 'delete')
+        """)
+        type_skip = cursor.rowcount
+        total_marked += type_skip
+
+        # 2. SQL files with <include refid="..."/> — scan transform files
+        cursor.execute("""
+            SELECT id, target_file FROM transform_target_list
+            WHERE tested = 'N' AND target_file IS NOT NULL
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
+        """)
+        for record_id, target_file in cursor.fetchall():
+            try:
+                content = Path(target_file).read_text(encoding='utf-8')
+                if '<include refid=' in content:
+                    cursor.execute(
+                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP' WHERE id=?",
+                        (record_id,)
+                    )
+                    total_marked += 1
+            except (FileNotFoundError, OSError):
+                pass
+
+        conn.commit()
+
+    if total_marked > 0:
+        details = []
+        if type_skip > 0:
+            details.append(f"{type_skip} non-testable types")
+        include_skip = total_marked - type_skip
+        if include_skip > 0:
+            details.append(f"{include_skip} include-refid")
+        log_fn(f"\n⏭️  Pre-skip: {total_marked}개 ({', '.join(details)})")
+
+    return total_marked
 
 
 def _generate_test_skip_report():
