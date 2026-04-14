@@ -544,7 +544,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
 
 @tool
 def get_test_failures() -> dict:
-    """Get SQL IDs that failed testing (validated='Y' AND tested='N').
+    """Get SQL IDs that need testing — excludes non-testable types (sql fragments, resultMap).
 
     Returns:
         Dict with failures list grouped by mapper_file
@@ -555,6 +555,7 @@ def get_test_failures() -> dict:
             SELECT mapper_file, sql_id, sql_type, source_file, target_file
             FROM transform_target_list
             WHERE validated = 'Y' AND tested = 'N'
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
             ORDER BY mapper_file, seq_no
         """)
         rows = cursor.fetchall()
