@@ -76,10 +76,9 @@ def print_pipeline_status(status: dict) -> None:
     if test_skipped > 0:
         test_extras.append(f"[dim]{test_skipped} SKIP[/dim]")
     test_extra = f" ({', '.join(test_extras)})" if test_extras else ""
-    testable_total = total - test_skipped
     table.add_row(
         "Test",
-        f"{tested}/{testable_total}{test_extra}",
+        f"{tested}/{total}{test_extra}",
         _status_style(tested, total, status.get('test_complete', False)),
     )
 
