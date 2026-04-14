@@ -100,6 +100,7 @@ Common Oracle functions to check ({{TARGET_DB}} equivalents differ — see Gener
 - `||` kept as-is — also valid
 - Style differences (indentation, case, whitespace, alias naming)
 - Column aliases lowercased (e.g., `AS CHK` → `AS chk`) — resultMap `column=` is also lowercased to match, so this is correct and expected
+- `NVL(outer_col, default)` → `COALESCE(outer_col, default)` in WHERE clause on LEFT JOIN — COALESCE handles NULL the same way as NVL, outer-joined NULL rows are NOT excluded because COALESCE converts NULL to default value before comparison
 - Compatible functions left unchanged (LENGTH, ROUND, TRIM, etc.)
 - Added table/subquery aliases for clarity
 

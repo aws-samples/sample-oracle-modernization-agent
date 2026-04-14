@@ -511,21 +511,29 @@ MERGE INTO detail DT USING DUAL ON (
 WHEN MATCHED THEN UPDATE SET QTY = QTY + #{qty}
 WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
 ```
-Complex MERGE with subqueries in ON clause **cannot be simply converted to ON CONFLICT**. Use explicit IF-EXISTS logic:
+Complex MERGE with subqueries in ON clause **cannot be simply converted to ON CONFLICT**. Must be atomic (single statement) for MyBatis and concurrency safety:
 ```sql
--- PostgreSQL: use DO block or separate statements
+-- PostgreSQL: single atomic CTE (writable CTE)
 WITH target_row AS (
-    SELECT dtkey FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0
+    SELECT dtkey FROM detail
+    WHERE ctkey = #{ctkey}::varchar AND qty > 0
     ORDER BY dtkey DESC LIMIT 1
+),
+do_update AS (
+    UPDATE detail SET qty = qty + #{qty}::integer
+    WHERE dtkey = (SELECT dtkey FROM target_row)
+    RETURNING dtkey
 )
-UPDATE detail SET qty = qty + #{qty}::integer
-WHERE dtkey = (SELECT dtkey FROM target_row);
-
--- If no row updated, insert
-INSERT INTO detail (...) SELECT ...
-WHERE NOT EXISTS (SELECT 1 FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0);
+INSERT INTO detail (ctkey, qty)
+SELECT #{ctkey}::varchar, #{qty}::integer
+WHERE NOT EXISTS (SELECT 1 FROM do_update)
+  AND NOT EXISTS (SELECT 1 FROM target_row)
 ```
-**Flag complex MERGE as MANUAL_REVIEW** when the ON clause contains subqueries or MAX/MIN.
+- **Single statement** — atomic, no race conditions (like Oracle MERGE)
+- Writable CTE: UPDATE in CTE, INSERT as main query
+- `WHERE NOT EXISTS (SELECT 1 FROM do_update)` ensures INSERT only when UPDATE didn't match
+- **NEVER split into two separate statements** — causes race conditions in concurrent environments
+- **Flag complex MERGE as MANUAL_REVIEW** when the ON clause contains subqueries or MAX/MIN
 
 #### 3. Pagination: ROWNUM → LIMIT/OFFSET
 ```sql
