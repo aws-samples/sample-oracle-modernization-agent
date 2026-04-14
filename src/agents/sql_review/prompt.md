@@ -99,6 +99,7 @@ Common Oracle functions to check ({{TARGET_DB}} equivalents differ — see Gener
 - `||` converted to `CONCAT()` — both are valid {{TARGET_DB}}, this is acceptable
 - `||` kept as-is — also valid
 - Style differences (indentation, case, whitespace, alias naming)
+- Column aliases lowercased (e.g., `AS CHK` → `AS chk`) — resultMap `column=` is also lowercased to match, so this is correct and expected
 - Compatible functions left unchanged (LENGTH, ROUND, TRIM, etc.)
 - Added table/subquery aliases for clarity
 
