@@ -175,7 +175,31 @@ Does this <if> condition need OR col IS NULL?
 -- (u is INNER JOIN, so u.EMAIL is never NULL from the join)
 ```
 
-#### 3. Subquery Alias (Required in MySQL)
+#### 3. Multi-Column SET with Subquery (Oracle-specific)
+MySQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to JOIN-based UPDATE:
+```sql
+-- Oracle
+UPDATE orders o
+SET (status, updated_at, updated_by) = (
+    SELECT s.new_status, SYSDATE, s.user_id
+    FROM status_changes s WHERE s.order_id = o.order_id
+)
+WHERE EXISTS (SELECT 1 FROM status_changes s WHERE s.order_id = o.order_id)
+
+-- MySQL
+UPDATE orders o
+JOIN (
+    SELECT order_id, new_status, user_id
+    FROM status_changes
+) sub ON o.order_id = sub.order_id
+SET o.status = sub.new_status,
+    o.updated_at = NOW(),
+    o.updated_by = sub.user_id
+```
+- Move subquery to `JOIN` clause (MySQL UPDATE ... JOIN pattern)
+- Assign each column individually with table prefix: `SET o.col1 = sub.x`
+
+#### 4. Subquery Alias (Required in MySQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
 - MySQL requires aliases for derived tables
 - Preserve existing aliases
