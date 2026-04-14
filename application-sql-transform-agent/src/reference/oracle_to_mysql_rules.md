@@ -263,6 +263,18 @@ CASE status WHEN 'A' THEN 'active' WHEN 'I' THEN 'inactive'
             WHEN 'D' THEN 'deleted' ELSE 'other' END
 ```
 
+#### 2-0a. Numeric TRUNC (NOT the same as ROUND)
+```sql
+-- Oracle: TRUNC truncates (floors) toward zero
+TRUNC(1.2345, 3) = 1.234
+
+-- MySQL: TRUNCATE() — DO NOT convert to ROUND
+TRUNCATE(1.2345, 3) = 1.234   -- ✅ CORRECT
+ROUND(1.2345, 3) = 1.235      -- ❌ WRONG: different result!
+```
+- `TRUNC(number, precision)` → `TRUNCATE(number, precision)`
+- **NEVER convert TRUNC to ROUND** — they produce different results
+
 #### 2-1. Aggregate & Analytic Functions (Additional)
 | Oracle | MySQL |
 |--------|-------|

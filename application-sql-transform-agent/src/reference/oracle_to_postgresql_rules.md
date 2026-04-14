@@ -150,6 +150,23 @@ Does this <if> condition need OR col IS NULL?
 -- (u is INNER JOIN, so u.EMAIL is never NULL from the join)
 ```
 
+#### 2-1. WHERE Filter on Outer-Joined Table (CRITICAL)
+When Oracle WHERE clause filters on an outer-joined (+) table column, this **excludes NULL rows**. Converting to LEFT JOIN ON clause **includes NULL rows** — different behavior!
+
+```sql
+-- Oracle: WHERE filter excludes rows where F is NULL
+FROM orders A, items F
+WHERE A.key = F.key(+) AND F.CLOSDATE >= #{sysdate}
+
+-- ❌ WRONG: filter in ON clause → includes NULL rows
+FROM orders A LEFT JOIN items F ON A.key = F.key AND F.CLOSDATE >= #{sysdate}
+
+-- ✅ RIGHT: keep filter in WHERE → excludes NULL rows (same as Oracle)
+FROM orders A LEFT JOIN items F ON A.key = F.key
+WHERE F.CLOSDATE >= #{sysdate}
+```
+**Rule**: Non-join conditions on outer-joined tables stay in WHERE, not ON. Only the join relationship (`A.key = F.key`) goes into the ON clause.
+
 #### 3. Multi-Column SET with Subquery (Oracle-specific)
 PostgreSQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to UPDATE ... FROM pattern:
 ```sql
@@ -217,6 +234,7 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | SYS_GUID() | gen_random_uuid() |
 | SUBSTR(s,p,l) | SUBSTRING(s,p,l) |
 | INSTR(s,sub) | POSITION(sub IN s) |
+| INSTR(s,sub,start,occurrence) | See note below — POSITION does not support occurrence |
 | LENGTHB(s) | OCTET_LENGTH(s) |
 | LPAD(s,len,pad) | LPAD(s::text,len,pad) |
 | LISTAGG(col,delim) WITHIN GROUP (ORDER BY x) | STRING_AGG(col, delim ORDER BY x) — move ORDER BY inside function |
@@ -225,6 +243,21 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | DBMS_LOB.GETLENGTH(col) | LENGTH(col) or OCTET_LENGTH(col) |
 | ROWID | **remove or replace with PK** — ctid changes after VACUUM, unsafe as identifier |
 | MINUS | EXCEPT |
+
+**INSTR with occurrence parameter** (4-arg form):
+```sql
+-- Oracle: find 2nd occurrence of '_' starting from position 1
+INSTR('AB_CD_EF', '_', 1, 2)  -- returns 6
+
+-- PostgreSQL: use array approach
+-- Method 1: split and calculate
+(SELECT SUM(LENGTH(elem) + 1) FROM unnest(string_to_array(LEFT(s, POSITION('_' IN SUBSTRING(s FROM POSITION('_' IN s) + 1)) + POSITION('_' IN s)), '_')) WITH ORDINALITY AS t(elem, ord) WHERE ord <= 2)
+
+-- Method 2 (simpler, recommended): use regexp
+-- Find position of Nth occurrence of pattern
+(SELECT (m.match).start FROM (SELECT regexp_matches(s, '(_)', 'g') AS match, ROW_NUMBER() OVER() AS rn FROM regexp_matches(s, '_', 'g')) m WHERE m.rn = 2)
+```
+When INSTR is used with occurrence parameter, **flag as complex conversion** and add a note. Simple nested POSITION expressions often produce wrong results.
 
 **NVL → COALESCE type mismatch:**
 Oracle NVL implicitly casts the second argument to match the first. PostgreSQL COALESCE requires matching types.
@@ -254,7 +287,9 @@ CASE status WHEN 'A' THEN '활성' WHEN 'I' THEN '비활성'
 | FETCH FIRST N ROWS ONLY | LIMIT N |
 | ROWNUM | ROW_NUMBER() OVER() or LIMIT (context-dependent) |
 
-**KEEP (DENSE_RANK FIRST/LAST):**
+**KEEP (DENSE_RANK FIRST/LAST) — CRITICAL: must preserve "one row per group" semantics:**
+
+Simple case (single value):
 ```sql
 -- Oracle
 MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
@@ -264,6 +299,47 @@ MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
 -- Or DISTINCT ON when selecting full rows:
 SELECT DISTINCT ON (group_col) * FROM table ORDER BY group_col, date_col
 ```
+
+With GROUP BY (aggregate context — most common in real code):
+```sql
+-- Oracle: returns exactly ONE row per group_key
+SELECT group_key,
+       MAX(err_code) KEEP (DENSE_RANK LAST ORDER BY detail_key) as last_err
+FROM details
+GROUP BY group_key
+
+-- ❌ WRONG: GROUP BY with extra columns → multiple rows per group
+SELECT group_key, err_code FROM details
+GROUP BY group_key, err_code  -- produces MULTIPLE rows!
+
+-- ✅ RIGHT: use DISTINCT ON to get one row per group
+SELECT DISTINCT ON (group_key)
+       group_key, err_code as last_err
+FROM details
+ORDER BY group_key, detail_key DESC
+
+-- ✅ RIGHT (alternative): use ROW_NUMBER window function
+SELECT group_key, err_code as last_err FROM (
+    SELECT group_key, err_code,
+           ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY detail_key DESC) as rn
+    FROM details
+) sub WHERE rn = 1
+```
+**KEEP DENSE_RANK LAST ORDER BY x** = "row with MAX x in each group"
+**KEEP DENSE_RANK FIRST ORDER BY x** = "row with MIN x in each group"
+Use `DISTINCT ON` or `ROW_NUMBER()` — NEVER just add columns to GROUP BY.
+
+#### 2-1a. Numeric TRUNC (NOT the same as ROUND)
+```sql
+-- Oracle: TRUNC truncates (floors) toward zero
+TRUNC(1.2345, 3) = 1.234
+
+-- PostgreSQL: trunc() works the same — DO NOT convert to ROUND
+trunc(1.2345, 3) = 1.234    -- ✅ CORRECT: same behavior
+ROUND(1.2345, 3) = 1.235    -- ❌ WRONG: different result!
+```
+- `TRUNC(number, precision)` → `trunc(number::numeric, precision)` — keep as trunc, just lowercase + cast
+- **NEVER convert TRUNC to ROUND** — they produce different results
 
 #### 2-2. No Conversion Needed (PostgreSQL supports directly)
 | Feature | Note |
@@ -413,16 +489,43 @@ ORDER BY path
 ```
 
 #### 2. MERGE Statement
+
+**Simple MERGE** (direct key match):
 ```sql
 -- Oracle
-MERGE INTO target USING source ON (condition)
-WHEN MATCHED THEN UPDATE SET ...
-WHEN NOT MATCHED THEN INSERT ...
+MERGE INTO target USING source ON (target.key = source.key)
+WHEN MATCHED THEN UPDATE SET col1 = source.val1
+WHEN NOT MATCHED THEN INSERT (key, col1) VALUES (source.key, source.val1)
 
 -- PostgreSQL
-INSERT INTO target (...) SELECT ... FROM source
-ON CONFLICT (key) DO UPDATE SET ...
+INSERT INTO target (key, col1) SELECT key, val1 FROM source
+ON CONFLICT (key) DO UPDATE SET col1 = EXCLUDED.val1
 ```
+
+**Complex MERGE** (subquery in ON clause, MAX, conditional logic):
+```sql
+-- Oracle: MERGE with MAX subquery — finds specific row to update
+MERGE INTO detail DT USING DUAL ON (
+    DT.DTKEY = (SELECT MAX(DTKEY) FROM detail WHERE CTKEY=#{ctkey} AND QTY>0)
+)
+WHEN MATCHED THEN UPDATE SET QTY = QTY + #{qty}
+WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
+```
+Complex MERGE with subqueries in ON clause **cannot be simply converted to ON CONFLICT**. Use explicit IF-EXISTS logic:
+```sql
+-- PostgreSQL: use DO block or separate statements
+WITH target_row AS (
+    SELECT dtkey FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0
+    ORDER BY dtkey DESC LIMIT 1
+)
+UPDATE detail SET qty = qty + #{qty}::integer
+WHERE dtkey = (SELECT dtkey FROM target_row);
+
+-- If no row updated, insert
+INSERT INTO detail (...) SELECT ...
+WHERE NOT EXISTS (SELECT 1 FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0);
+```
+**Flag complex MERGE as MANUAL_REVIEW** when the ON clause contains subqueries or MAX/MIN.
 
 #### 3. Pagination: ROWNUM → LIMIT/OFFSET
 ```sql
@@ -723,6 +826,25 @@ PKG_CRYPTO.ENCRYPT(col, key)  →  pkg_crypto_encrypt(col, key)
 PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
 ```
 **Only `DBMS_*` and `UTL_*` are Oracle standard.** All other `PACKAGE.FUNCTION()` calls must be flattened to `package_function()`. Never map to target DB built-in functions based on name similarity.
+
+### 10. TRUNC(number) Converted to ROUND
+```sql
+-- ❌ WRONG: ROUND rounds, TRUNC truncates — different results
+TRUNC(weight, 3)  →  ROUND(weight::numeric, 3)
+
+-- ✅ RIGHT: keep as trunc
+TRUNC(weight, 3)  →  trunc(weight::numeric, 3)
+```
+
+### 11. JOIN Condition Changed (Column Name "Correction")
+```sql
+-- ❌ WRONG: agent "fixed" what looked like a bug in original
+A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldseq
+
+-- ✅ RIGHT: preserve original join condition exactly (lowercase only)
+A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldkey
+```
+**NEVER change column names in JOIN conditions.** Only lowercase them. Even if it looks like a bug in the original, preserve the original logic.
 
 ---
 
