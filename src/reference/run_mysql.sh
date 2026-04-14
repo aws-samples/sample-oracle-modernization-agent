@@ -53,17 +53,28 @@ else
     echo "Oracle integration environment variables not set. (optional)"
 fi
 
-# Compile
+# Compile (skip if .class files are up to date)
 echo ""
 echo "=== Java Compilation ==="
-javac -cp ".:lib/*" com/test/mybatis/*.java
+NEEDS_COMPILE=false
+for java_file in com/test/mybatis/*.java; do
+    class_file="${java_file%.java}.class"
+    if [ ! -f "$class_file" ] || [ "$java_file" -nt "$class_file" ]; then
+        NEEDS_COMPILE=true
+        break
+    fi
+done
 
-if [ $? -ne 0 ]; then
-    echo "Compilation failed"
-    exit 1
+if [ "$NEEDS_COMPILE" = true ]; then
+    javac -cp ".:lib/*" com/test/mybatis/*.java
+    if [ $? -ne 0 ]; then
+        echo "Compilation failed"
+        exit 1
+    fi
+    echo "Compilation completed"
+else
+    echo "Compilation skipped (.class files up to date)"
 fi
-
-echo "Compilation completed"
 
 # Execute
 echo ""
