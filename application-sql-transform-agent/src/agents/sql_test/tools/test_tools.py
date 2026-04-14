@@ -266,41 +266,76 @@ def run_bulk_test(test_folder: str = "") -> dict:
         # Convert to absolute path to prevent Java from creating relative directories
         test_folder_abs = str(Path(test_folder).resolve())
         
+        # Timeout: 5 seconds per SQL, minimum 120s, maximum 3600s
+        sql_count = len(select_files) if 'select_files' in dir() else 100
+        bulk_timeout = max(120, min(sql_count * 5, 3600))
+
         print(f"  🔧 Executing: bash {test_script} {test_folder_abs}", flush=True)
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
-        print(f"  ⏱️  Timeout: 600s\n", flush=True)
-        
-        result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
-            ['bash', test_script, test_folder_abs],
-            capture_output=True, text=True, timeout=600,
+        print(f"  ⏱️  Timeout: {bulk_timeout}s ({sql_count} SQLs × 5s)\n", flush=True)
+
+        json_result_path = REFERENCE_DIR / "out" / "test_results.json"
+
+        # Use Popen for real-time progress display
+        import sys as _sys
+        proc = subprocess.Popen(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
+            ['bash', test_script, test_folder_abs, '--json-file', 'test_results.json'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True,
             cwd=str(REFERENCE_DIR),
             env={**os.environ, 'TEST_FOLDER': test_folder_abs}
         )
-        
-        # Print Java output for debugging
-        if result.stdout:
-            print("  📋 Java execution log (last 50 lines):", flush=True)
-            lines = result.stdout.split('\n')
-            for line in lines[-50:]:
-                if line.strip():
-                    print(f"    {line}", flush=True)
-        
-        if result.stderr:
+
+        stdout_lines = []
+        last_progress = ""
+        try:
+            import select as _select
+            while proc.poll() is None:
+                # Read stdout line by line for progress
+                if proc.stdout:
+                    line = proc.stdout.readline()
+                    if line:
+                        stdout_lines.append(line)
+                        stripped = line.strip()
+                        # Show progress lines (Progress: XX% [...])
+                        if stripped.startswith('Progress:') or '✅' in stripped or '❌' in stripped:
+                            # Overwrite same line for progress
+                            _sys.stderr.write(f"\r  {stripped[:120]}")
+                            _sys.stderr.flush()
+                            last_progress = stripped
+
+            # Read remaining output
+            remaining_out, stderr_out = proc.communicate(timeout=30)
+            if remaining_out:
+                stdout_lines.extend(remaining_out.split('\n'))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            if last_progress:
+                _sys.stderr.write("\n")
+            return {'status': 'timeout', 'error': f'Test execution timed out ({bulk_timeout}s for {sql_count} SQLs)'}
+
+        if last_progress:
+            _sys.stderr.write("\n")  # newline after progress
+
+        result_stdout = ''.join(stdout_lines)
+
+        if proc.returncode != 0 and stderr_out:
             print("  ⚠️  Java stderr:", flush=True)
-            for line in result.stderr.split('\n')[:20]:
+            for line in stderr_out.split('\n')[:20]:
                 if line.strip():
                     print(f"    {line}", flush=True)
 
-        # Parse JSON results if available
-        json_result_file = Path(test_folder) / "test_results.json"
-        if json_result_file.exists():
-            print(f"  📄 Found JSON result file: {json_result_file}", flush=True)
-            with open(json_result_file, 'r') as f:
+        # Parse JSON results — Java saves to out/test_results.json (via --json-file arg)
+        if json_result_path.exists():
+            print(f"  📄 JSON result: {json_result_path}", flush=True)
+            with open(json_result_path, 'r') as f:
                 test_results = json.load(f)
+            # Clean up for next run
+            json_result_path.unlink()
         else:
-            print(f"  📄 No JSON file, parsing stdout...", flush=True)
-            # Parse stdout for results
-            test_results = _parse_stdout_results(result.stdout)
+            print(f"  ⚠️  JSON file not found at {json_result_path}, parsing stdout...", flush=True)
+            test_results = _parse_stdout_results(result_stdout)
 
         # Update DB flags
         success_count = 0
@@ -385,7 +420,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
         }
 
     except subprocess.TimeoutExpired:
-        return {'status': 'timeout', 'error': 'Test execution timed out (600s)'}
+        return {'status': 'timeout', 'error': f'Test execution timed out ({bulk_timeout}s for {sql_count} SQLs)'}
     except FileNotFoundError:
         return {'status': 'error', 'error': f'Java or {test_script} not found'}
     except Exception as e:
