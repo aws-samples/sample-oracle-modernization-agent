@@ -6,7 +6,7 @@ No raw SQL string concatenation is used.
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
-from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_
+from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.models import (
@@ -48,6 +48,20 @@ class StateManager:
             echo=False
         )
         self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._auto_migrate()
+
+    def _auto_migrate(self):
+        """Add missing columns to existing tables (safe for repeated calls)."""
+        migrations = [
+            ("transform_target_list", "test_notes", "TEXT"),
+        ]
+        with self.engine.connect() as conn:
+            for table, column, col_type in migrations:
+                try:
+                    conn.execute(text(f"SELECT {column} FROM {table} LIMIT 1"))
+                except Exception:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                    conn.commit()
 
     @contextmanager
     def _get_session(self) -> Session:

@@ -64,8 +64,21 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             log(f"⚠️  {len(infra_errors)} 인프라/환경 오류 (Agent 수정 불가, 스킵)")
             for f in infra_errors:
                 log(f"    SKIP {f['sql_id']}: {f.get('error', '')[:80]}")
-                # Mark as tested with SKIP result so it doesn't show as FAIL
-                _update_tested(mapper_file, f['sql_id'], result="SKIP", error=f.get('error', '')[:200])
+                # Mark as tested with SKIP + detailed reason in test_notes
+                error_text = f.get('error', '')
+                if 'ClassNotFoundException' in error_text or 'Cannot find class' in error_text:
+                    skip_notes = f"Java 유틸 클래스 미존재: {error_text.split(':')[-1].strip()[:100]}"
+                elif 'IncompleteElement' in error_text or 'include refid' in error_text:
+                    skip_notes = "include refid 참조 — 다른 mapper fragment 참조, 단일 파일 테스트 불가"
+                elif 'does not exist' in error_text and 'function' in error_text:
+                    skip_notes = f"사용자 정의 함수 미존재 — 타겟 DB에 함수 생성 필요: {error_text[:100]}"
+                elif 'does not exist' in error_text and ('relation' in error_text or 'table' in error_text):
+                    skip_notes = f"테이블 미존재 — 스키마 마이그레이션 필요: {error_text[:100]}"
+                elif 'Network Adapter' in error_text:
+                    skip_notes = "DB 연결 오류 — 인프라 문제"
+                else:
+                    skip_notes = f"인프라 오류: {error_text[:150]}"
+                _update_tested(mapper_file, f['sql_id'], result="SKIP", error=skip_notes)
             advance_progress(len(infra_errors))
 
         if not sql_errors:
@@ -422,15 +435,20 @@ def _pre_mark_skips(log_fn=print) -> int:
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
 
-        # 1. Non-testable types
+        # 1. Non-testable types (sql fragment, resultMap)
         cursor.execute("""
-            UPDATE transform_target_list
-            SET tested = 'Y', test_result = 'SKIP'
+            SELECT id, sql_type FROM transform_target_list
             WHERE tested = 'N'
               AND LOWER(sql_type) NOT IN ('select', 'insert', 'update', 'delete')
         """)
-        type_skip = cursor.rowcount
-        total_marked += type_skip
+        for record_id, sql_type in cursor.fetchall():
+            reason = 'SQL fragment — 단독 실행 불가, include하는 SQL에서 간접 테스트' if sql_type == 'sql' else f'{sql_type} — 매핑 정의, SQL 아님'
+            cursor.execute(
+                "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE id=?",
+                (reason, record_id)
+            )
+            total_marked += 1
+        type_skip = total_marked
 
         # 2. SQL files with <include refid="..."/> — scan transform files
         cursor.execute("""
@@ -442,9 +460,12 @@ def _pre_mark_skips(log_fn=print) -> int:
             try:
                 content = Path(target_file).read_text(encoding='utf-8')
                 if '<include refid=' in content:
+                    import re as _re
+                    refid_match = _re.search(r'<include\s+refid=["\']([^"\']+)', content)
+                    refid = refid_match.group(1) if refid_match else 'unknown'
                     cursor.execute(
-                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP' WHERE id=?",
-                        (record_id,)
+                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE id=?",
+                        (f'include refid="{refid}" — 다른 mapper fragment 참조, 단일 파일 테스트 불가', record_id)
                     )
                     total_marked += 1
             except (FileNotFoundError, OSError):

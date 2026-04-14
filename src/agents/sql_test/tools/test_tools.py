@@ -577,11 +577,17 @@ def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: s
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                # Store result and notes separately
+                test_result_val = result  # PASS, FAIL, SKIP, FIXED
+                test_notes_val = error if result != "PASS" else ""
+                if result == "FAIL":
+                    test_result_val = "FAIL"
+                    test_notes_val = error[:500] if error else "Unknown error"
                 conn.execute("""
                     UPDATE transform_target_list
-                    SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
+                    SET tested = 'Y', test_result = ?, test_notes = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE mapper_file = ? AND sql_id = ?
-                """, (result if result == "PASS" else error or result, mapper_file, sql_id))
+                """, (test_result_val, test_notes_val, mapper_file, sql_id))
                 conn.commit()
             # Emit progress event via thread-safe queue
             from core.progress import emit_progress
