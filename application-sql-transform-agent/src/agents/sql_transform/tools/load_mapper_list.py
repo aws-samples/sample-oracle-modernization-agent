@@ -40,6 +40,7 @@ def get_pending_transforms(sample: int = 0) -> dict:
             SELECT mapper_file, sql_id, sql_type, seq_no, source_file, target_file
             FROM transform_target_list
             WHERE transformed = 'N'
+              AND tested = 'N' AND validated = 'N'
             ORDER BY mapper_file, seq_no
         """)
         rows = cursor.fetchall()

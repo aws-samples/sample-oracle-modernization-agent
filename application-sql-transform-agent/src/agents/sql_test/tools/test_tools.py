@@ -338,75 +338,94 @@ def run_bulk_test(test_folder: str = "") -> dict:
             test_results = _parse_stdout_results(result_stdout)
 
         # Update DB flags
+        # Java JSON uses successfulTests/failedTests arrays with xmlFile/sqlId keys
+        # Stdout parser uses results[{filename, sqlId, status, error}]
         success_count = 0
         fail_count = 0
+        no_match_count = 0
         failures = []
 
-        print(f"\n  📊 Parsing {len(test_results.get('results', []))} test results...", flush=True)
+        all_items = []
+        for item in test_results.get('successfulTests', []):
+            all_items.append({
+                'xmlFile': item.get('xmlFile', ''),
+                'sqlId': item.get('sqlId', ''),
+                'success': True, 'error': ''
+            })
+        for item in test_results.get('failedTests', []):
+            all_items.append({
+                'xmlFile': item.get('xmlFile', ''),
+                'sqlId': item.get('sqlId', ''),
+                'success': False, 'error': item.get('errorMessage', '')
+            })
+        # Fallback: stdout parser format
+        for item in test_results.get('results', []):
+            all_items.append({
+                'xmlFile': item.get('filename', item.get('xmlFile', '')),
+                'sqlId': item.get('sqlId', ''),
+                'success': item.get('status') == 'SUCCESS',
+                'error': item.get('error', item.get('errorMessage', ''))
+            })
+
+        print(f"\n  📊 Parsing {len(all_items)} test results...", flush=True)
+
+        def _update_db_by_sql_id(cursor, sql_id, xml_file, test_result_val):
+            """Try to match and update DB record. Returns rowcount."""
+            # Strategy 1: sql_id + xmlFile in target_file path
+            cursor.execute("""
+                UPDATE transform_target_list
+                SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE sql_id = ? AND target_file LIKE ?
+            """, (test_result_val, sql_id, f'%{xml_file}'))
+            if cursor.rowcount > 0:
+                return cursor.rowcount
+            # Strategy 2: sql_id only (works when sql_id is unique across mappers)
+            cursor.execute("""
+                UPDATE transform_target_list
+                SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE sql_id = ? AND tested = 'N'
+            """, (test_result_val, sql_id))
+            return cursor.rowcount
 
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             cursor = conn.cursor()
 
-            for item in test_results.get('results', []):
-                sql_id = item.get('sqlId', '')
-                filename = item.get('filename', '')  # Just the XML filename
-                status = item.get('status', 'UNKNOWN')
-                error = item.get('error', '')
+            for item in all_items:
+                sql_id = item['sqlId']
+                xml_file = item['xmlFile']
 
-                if status == 'SUCCESS':
-                    # Match by filename in target_file path (ends with filename)
-                    cursor.execute("""
-                        UPDATE transform_target_list
-                        SET tested = 'Y', test_result = 'PASS', updated_at = CURRENT_TIMESTAMP
-                        WHERE target_file LIKE ? AND sql_id = ?
-                    """, (f'%/{filename}', sql_id))
-
-                    if cursor.rowcount > 0:
+                if item['success']:
+                    matched = _update_db_by_sql_id(cursor, sql_id, xml_file, 'PASS')
+                    if matched > 0:
                         success_count += 1
-                        if success_count <= 5:  # Show first 5
-                            print(f"    ✅ {filename}:{sql_id}", flush=True)
+                        if success_count <= 5:
+                            print(f"    ✅ {xml_file}:{sql_id}", flush=True)
                     else:
-                        # Try without leading slash for Windows paths
-                        cursor.execute("""
-                            UPDATE transform_target_list
-                            SET tested = 'Y', test_result = 'PASS', updated_at = CURRENT_TIMESTAMP
-                            WHERE target_file LIKE ? AND sql_id = ?
-                        """, (f'%{filename}', sql_id))
-                        if cursor.rowcount > 0:
-                            success_count += 1
-                            if success_count <= 5:
-                                print(f"    ✅ {filename}:{sql_id}", flush=True)
-                        else:
-                            print(f"    ⚠️  No DB match: {filename} / {sql_id}", flush=True)
+                        no_match_count += 1
                 else:
-                    # Find mapper_file from target_file for failure reporting
-                    cursor.execute("""
-                        SELECT mapper_file FROM transform_target_list
-                        WHERE (target_file LIKE ? OR target_file LIKE ?) AND sql_id = ?
-                    """, (f'%/{filename}', f'%{filename}', sql_id))
-                    row = cursor.fetchone()
-                    mapper_file = row[0] if row else filename
+                    error = item['error']
+                    _update_db_by_sql_id(cursor, sql_id, xml_file, error[:500] if error else 'FAIL')
 
-                    # Record failure in DB
-                    cursor.execute("""
-                        UPDATE transform_target_list
-                        SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE (target_file LIKE ? OR target_file LIKE ?) AND sql_id = ?
-                    """, (error[:500] if error else 'FAIL', f'%/{filename}', f'%{filename}', sql_id))
+                    # Get mapper_file for failure reporting
+                    cursor.execute("SELECT mapper_file FROM transform_target_list WHERE sql_id = ? LIMIT 1", (sql_id,))
+                    row = cursor.fetchone()
+                    mapper_file_name = row[0] if row else xml_file
 
                     fail_count += 1
                     failures.append({
-                        'mapper_file': mapper_file,
+                        'mapper_file': mapper_file_name,
                         'sql_id': sql_id,
                         'error': error
                     })
-                    if fail_count <= 5:  # Show first 5 failures
-                        print(f"    ❌ {mapper_file}:{sql_id} - {error[:100]}", flush=True)
+                    if fail_count <= 5:
+                        print(f"    ❌ {mapper_file_name}:{sql_id} - {error[:100]}", flush=True)
 
             if success_count > 5:
                 print(f"    ... and {success_count - 5} more passed", flush=True)
             if fail_count > 5:
                 print(f"    ... and {fail_count - 5} more failed", flush=True)
+            if no_match_count > 0:
+                print(f"    ⚠️  {no_match_count} results could not match DB records", flush=True)
 
             conn.commit()
 
