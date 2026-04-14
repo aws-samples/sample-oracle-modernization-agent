@@ -256,14 +256,26 @@ class StateManager:
             validated = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.validated == 'Y').scalar()
 
+            # Test counts — exclude non-testable types (sql fragments, resultMap)
+            _testable_filter = TransformTargetList.sql_type.in_(['select', 'insert', 'update', 'delete'])
+
             tested = session.query(func.count(TransformTargetList.id))\
-                .filter(TransformTargetList.tested == 'Y').scalar()
+                .filter(TransformTargetList.tested == 'Y', _testable_filter).scalar()
 
             test_failed = session.query(func.count(TransformTargetList.id))\
                 .filter(
                     TransformTargetList.tested == 'Y',
+                    _testable_filter,
                     TransformTargetList.test_result.isnot(None),
-                    TransformTargetList.test_result.notin_(['PASS', 'FIXED'])
+                    TransformTargetList.test_result.notin_(['PASS', 'FIXED', 'SKIP'])
+                ).scalar()
+
+            test_skipped = session.query(func.count(TransformTargetList.id))\
+                .filter(
+                    or_(
+                        ~_testable_filter,  # sql, resultMap
+                        TransformTargetList.test_result == 'SKIP',
+                    )
                 ).scalar()
 
             validate_failed = session.query(func.count(TransformTargetList.id))\
@@ -278,7 +290,10 @@ class StateManager:
             transform_complete = (extracted > 0 and transformed == extracted)
             review_complete = (transformed > 0 and (reviewed + review_failed) == transformed)
             validate_complete = (reviewed > 0 and validated == reviewed)
-            test_complete = (validated > 0 and tested == validated)
+            # test_complete: all testable items are tested (exclude sql/resultMap)
+            testable_total = session.query(func.count(TransformTargetList.id))\
+                .filter(TransformTargetList.validated == 'Y', _testable_filter).scalar()
+            test_complete = (testable_total > 0 and tested == testable_total)
 
             return {
                 'source_analyzed': source_analyzed,
@@ -291,6 +306,7 @@ class StateManager:
                 'validate_failed': validate_failed,
                 'tested': tested,
                 'test_failed': test_failed,
+                'test_skipped': test_skipped,
                 'merged': self._count_merge_files(),
                 'transform_complete': transform_complete,
                 'review_complete': review_complete,

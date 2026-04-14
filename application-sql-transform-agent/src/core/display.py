@@ -66,10 +66,16 @@ def print_pipeline_status(status: dict) -> None:
         _status_style(validated, total, status.get('validate_complete', False)),
     )
 
-    # Test
+    # Test — denominator excludes non-testable types (sql, resultMap)
     tested = status.get('tested', 0)
     test_failed = status.get('test_failed', 0)
-    test_extra = f" [red]({test_failed} FAIL)[/red]" if test_failed > 0 else ""
+    test_skipped = status.get('test_skipped', 0)
+    test_extras = []
+    if test_failed > 0:
+        test_extras.append(f"[red]{test_failed} FAIL[/red]")
+    if test_skipped > 0:
+        test_extras.append(f"[dim]{test_skipped} SKIP[/dim]")
+    test_extra = f" ({', '.join(test_extras)})" if test_extras else ""
     table.add_row(
         "Test",
         f"{tested}/{total}{test_extra}",

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, get_target_dbms, get_target_db_display_name
 from core.progress import drain_progress
 
-from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch
+from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested
 from agents.sql_test.agent import create_sql_test_agent
 
 _log_dir = LOGS_DIR / "test"
@@ -64,6 +64,8 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             log(f"⚠️  {len(infra_errors)} 인프라/환경 오류 (Agent 수정 불가, 스킵)")
             for f in infra_errors:
                 log(f"    SKIP {f['sql_id']}: {f.get('error', '')[:80]}")
+                # Mark as tested with SKIP result so it doesn't show as FAIL
+                _update_tested(mapper_file, f['sql_id'], result="SKIP", error=f.get('error', '')[:200])
             advance_progress(len(infra_errors))
 
         if not sql_errors:
