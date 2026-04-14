@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, get_target_dbms, get_target_db_display_name
+from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, OUTPUT_DIR, get_target_dbms, get_target_db_display_name
 from core.progress import drain_progress
 
 from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested
