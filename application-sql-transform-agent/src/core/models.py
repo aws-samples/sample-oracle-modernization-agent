@@ -44,7 +44,8 @@ class TransformTargetList(Base):
     transform_count = Column(Integer)  # Retry count
     review_result = Column(Text)       # Multi-perspective review feedback JSON
     validation_result = Column(Text)   # Validation result details
-    test_result = Column(Text)         # Test result details
+    test_result = Column(Text)         # Test result: PASS, FAIL, SKIP, FIXED
+    test_notes = Column(Text)          # Skip reason or error details
 
     def __repr__(self):
         return f"<TransformTargetList(mapper_file={self.mapper_file}, sql_id={self.sql_id}, status=T:{self.transformed}/R:{self.reviewed}/V:{self.validated}/T:{self.tested})>"

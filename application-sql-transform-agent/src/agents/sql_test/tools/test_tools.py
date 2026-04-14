@@ -165,7 +165,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 _update_tested(mapper_file, sql_id)
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
-                _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
+                # Don't mark as tested — leave for Phase 1 Java bulk test to retry
                 failed += 1
                 failures.append({
                     'mapper_file': mapper_file,
@@ -173,7 +173,6 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                     'error': error_msg,
                 })
         except subprocess.TimeoutExpired:
-            _update_tested(mapper_file, sql_id, result="FAIL", error="EXPLAIN timeout (15s)")
             failed += 1
             failures.append({
                 'mapper_file': mapper_file,
@@ -578,11 +577,17 @@ def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: s
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                # Store result and notes separately
+                test_result_val = result  # PASS, FAIL, SKIP, FIXED
+                test_notes_val = error if result != "PASS" else ""
+                if result == "FAIL":
+                    test_result_val = "FAIL"
+                    test_notes_val = error[:500] if error else "Unknown error"
                 conn.execute("""
                     UPDATE transform_target_list
-                    SET tested = 'Y', test_result = ?, updated_at = CURRENT_TIMESTAMP
+                    SET tested = 'Y', test_result = ?, test_notes = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE mapper_file = ? AND sql_id = ?
-                """, (result if result == "PASS" else error or result, mapper_file, sql_id))
+                """, (test_result_val, test_notes_val, mapper_file, sql_id))
                 conn.commit()
             # Emit progress event via thread-safe queue
             from core.progress import emit_progress

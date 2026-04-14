@@ -64,8 +64,21 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             log(f"⚠️  {len(infra_errors)} 인프라/환경 오류 (Agent 수정 불가, 스킵)")
             for f in infra_errors:
                 log(f"    SKIP {f['sql_id']}: {f.get('error', '')[:80]}")
-                # Mark as tested with SKIP result so it doesn't show as FAIL
-                _update_tested(mapper_file, f['sql_id'], result="SKIP", error=f.get('error', '')[:200])
+                # Mark as tested with SKIP + detailed reason in test_notes
+                error_text = f.get('error', '')
+                if 'ClassNotFoundException' in error_text or 'Cannot find class' in error_text:
+                    skip_notes = f"Java 유틸 클래스 미존재: {error_text.split(':')[-1].strip()[:100]}"
+                elif 'IncompleteElement' in error_text or 'include refid' in error_text:
+                    skip_notes = "include refid 참조 — 다른 mapper fragment 참조, 단일 파일 테스트 불가"
+                elif 'does not exist' in error_text and 'function' in error_text:
+                    skip_notes = f"사용자 정의 함수 미존재 — 타겟 DB에 함수 생성 필요: {error_text[:100]}"
+                elif 'does not exist' in error_text and ('relation' in error_text or 'table' in error_text):
+                    skip_notes = f"테이블 미존재 — 스키마 마이그레이션 필요: {error_text[:100]}"
+                elif 'Network Adapter' in error_text:
+                    skip_notes = "DB 연결 오류 — 인프라 문제"
+                else:
+                    skip_notes = f"인프라 오류: {error_text[:150]}"
+                _update_tested(mapper_file, f['sql_id'], result="SKIP", error=skip_notes)
             advance_progress(len(infra_errors))
 
         if not sql_errors:
@@ -422,15 +435,20 @@ def _pre_mark_skips(log_fn=print) -> int:
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
 
-        # 1. Non-testable types
+        # 1. Non-testable types (sql fragment, resultMap)
         cursor.execute("""
-            UPDATE transform_target_list
-            SET tested = 'Y', test_result = 'SKIP'
+            SELECT id, sql_type FROM transform_target_list
             WHERE tested = 'N'
               AND LOWER(sql_type) NOT IN ('select', 'insert', 'update', 'delete')
         """)
-        type_skip = cursor.rowcount
-        total_marked += type_skip
+        for record_id, sql_type in cursor.fetchall():
+            reason = 'SQL fragment — 단독 실행 불가, include하는 SQL에서 간접 테스트' if sql_type == 'sql' else f'{sql_type} — 매핑 정의, SQL 아님'
+            cursor.execute(
+                "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE id=?",
+                (reason, record_id)
+            )
+            total_marked += 1
+        type_skip = total_marked
 
         # 2. SQL files with <include refid="..."/> — scan transform files
         cursor.execute("""
@@ -442,9 +460,12 @@ def _pre_mark_skips(log_fn=print) -> int:
             try:
                 content = Path(target_file).read_text(encoding='utf-8')
                 if '<include refid=' in content:
+                    import re as _re
+                    refid_match = _re.search(r'<include\s+refid=["\']([^"\']+)', content)
+                    refid = refid_match.group(1) if refid_match else 'unknown'
                     cursor.execute(
-                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP' WHERE id=?",
-                        (record_id,)
+                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE id=?",
+                        (f'include refid="{refid}" — 다른 mapper fragment 참조, 단일 파일 테스트 불가', record_id)
                     )
                     total_marked += 1
             except (FileNotFoundError, OSError):
@@ -465,110 +486,73 @@ def _pre_mark_skips(log_fn=print) -> int:
 
 
 def _generate_test_skip_report():
-    """Generate/update test skip report (reports/test_skip_report.md).
-
-    Maintains a deduplicated list of skipped SQL IDs with reasons.
-    Safe to call multiple times — merges new entries without duplicates.
-    """
+    """Generate test skip report from test_notes column."""
     from datetime import datetime
 
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
 
-        # 1. Non-testable types (sql fragments, resultMap)
+        # All SKIP items with notes
         cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            WHERE sql_type NOT IN ('select', 'insert', 'update', 'delete')
-            ORDER BY mapper_file, seq_no
-        """)
-        non_testable = cursor.fetchall()
-
-        # 2. Infra errors (test_result = 'SKIP')
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, test_result
+            SELECT mapper_file, sql_id, sql_type, test_notes
             FROM transform_target_list
             WHERE test_result = 'SKIP'
             ORDER BY mapper_file, seq_no
         """)
-        infra_skipped = cursor.fetchall()
+        skipped = cursor.fetchall()
 
-        # 3. Untested (validated but not tested, testable types)
+        # Untested (validated but not tested, testable types)
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type
             FROM transform_target_list
             WHERE validated = 'Y' AND tested = 'N'
-              AND sql_type IN ('select', 'insert', 'update', 'delete')
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
             ORDER BY mapper_file, seq_no
         """)
         untested = cursor.fetchall()
 
-    total_skip = len(non_testable) + len(infra_skipped) + len(untested)
-    if total_skip == 0:
+    total = len(skipped) + len(untested)
+    if total == 0:
         return
 
-    # Build report — deduplicated by (mapper_file, sql_id)
-    seen = set()
+    # Group by reason
+    by_reason = {}
+    for mapper, sql_id, sql_type, notes in skipped:
+        reason = notes or 'Unknown'
+        # Simplify reason for grouping (first sentence)
+        group_key = reason.split(' — ')[0] if ' — ' in reason else reason.split(':')[0] if ':' in reason else reason
+        if group_key not in by_reason:
+            by_reason[group_key] = []
+        by_reason[group_key].append((mapper, sql_id, sql_type, reason))
+
     lines = [
         "# Test Skip Report",
         f"\n**Updated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"**Total Skipped**: {total_skip}",
+        f"**Total Skipped**: {total}",
     ]
 
-    # Non-testable
-    if non_testable:
-        lines.append(f"\n## Non-Testable Types ({len(non_testable)})\n")
-        lines.append("SQL fragment (`<sql>`) 및 `<resultMap>` 은 MyBatis에서 단독 실행 불가. `<include refid=\"...\"/>`로 참조하는 SQL에서 간접 테스트됨.\n")
-        lines.append("| XML | SQL ID | Type | Skip 이유 |")
+    # Skip items grouped by reason
+    for group_key, items in sorted(by_reason.items(), key=lambda x: -len(x[1])):
+        lines.append(f"\n## {group_key} ({len(items)}건)\n")
+        lines.append("| XML | SQL ID | Type | 상세 사유 |")
         lines.append("|-----|--------|------|-----------|")
-        for mapper, sql_id, sql_type in non_testable:
-            key = (mapper, sql_id)
-            if key not in seen:
-                seen.add(key)
-                reason = "SQL fragment (단독 실행 불가)" if sql_type == 'sql' else "resultMap (매핑 정의, SQL 아님)"
-                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason} |")
-
-    # Infra errors
-    if infra_skipped:
-        lines.append(f"\n## Infrastructure Errors ({len(infra_skipped)})\n")
-        lines.append("테스트 환경 한계로 실행 불가. SQL 변환 자체는 정상.\n")
-        lines.append("| XML | SQL ID | Type | Skip 이유 |")
-        lines.append("|-----|--------|------|-----------|")
-        for mapper, sql_id, sql_type, result in infra_skipped:
-            key = (mapper, sql_id)
-            if key not in seen:
-                seen.add(key)
-                # Categorize infra error
-                result_lower = (result or '').lower()
-                if 'classnotfound' in result_lower or 'cannot find class' in result_lower:
-                    reason = "Java 유틸 클래스 미존재 (테스트 환경에 stub 필요)"
-                elif 'incompleteelement' in result_lower or 'include refid' in result_lower:
-                    reason = "`<include refid>` 참조 — 단일 파일 테스트에서 다른 mapper fragment 미해석"
-                elif 'does not exist' in result_lower and 'function' in result_lower:
-                    reason = "사용자 정의 함수 미존재 (타겟 DB에 함수 생성 필요)"
-                elif 'does not exist' in result_lower and ('relation' in result_lower or 'table' in result_lower):
-                    reason = "테이블 미존재 (스키마 마이그레이션 필요)"
-                else:
-                    reason = result[:100] if result else "Unknown"
-                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason} |")
+        for mapper, sql_id, sql_type, reason in items:
+            lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason} |")
 
     # Untested
     if untested:
-        lines.append(f"\n## Not Tested ({len(untested)})\n")
-        lines.append("Validate 통과했지만 테스트 미수행. 재테스트 필요.\n")
+        lines.append(f"\n## Not Tested ({len(untested)}건)\n")
+        lines.append("Validate 통과했지만 테스트 미수행.\n")
         lines.append("| XML | SQL ID | Type |")
         lines.append("|-----|--------|------|")
         for mapper, sql_id, sql_type in untested:
-            key = (mapper, sql_id)
-            if key not in seen:
-                seen.add(key)
-                lines.append(f"| {mapper} | {sql_id} | {sql_type} |")
+            lines.append(f"| {mapper} | {sql_id} | {sql_type} |")
 
     REPORTS_DIR = OUTPUT_DIR / "reports"
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORTS_DIR / "test_skip_report.md"
     report_path.write_text('\n'.join(lines), encoding='utf-8')
-    print(f"📋 Skip Report: {report_path} ({total_skip} skipped)", flush=True)
+    print(f"📋 Skip Report: {report_path} ({total} skipped)", flush=True)
 
 
 def _generate_test_failure_report():
