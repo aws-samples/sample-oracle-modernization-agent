@@ -150,7 +150,33 @@ Does this <if> condition need OR col IS NULL?
 -- (u is INNER JOIN, so u.EMAIL is never NULL from the join)
 ```
 
-#### 3. Subquery Alias (Mandatory in PostgreSQL)
+#### 3. Multi-Column SET with Subquery (Oracle-specific)
+PostgreSQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to UPDATE ... FROM pattern:
+```sql
+-- Oracle
+UPDATE orders o
+SET (status, updated_at, updated_by) = (
+    SELECT s.new_status, SYSDATE, s.user_id
+    FROM status_changes s WHERE s.order_id = o.order_id
+)
+WHERE EXISTS (SELECT 1 FROM status_changes s WHERE s.order_id = o.order_id)
+
+-- PostgreSQL
+UPDATE orders o
+SET status = sub.new_status,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by = sub.user_id
+FROM (
+    SELECT order_id, new_status, user_id
+    FROM status_changes
+) sub
+WHERE o.order_id = sub.order_id
+```
+- Move subquery to `FROM` clause with alias
+- Assign each column individually: `SET col1 = sub.x, col2 = sub.y`
+- Convert the `WHERE EXISTS` or implicit join condition to `WHERE t.key = sub.key`
+
+#### 4. Subquery Alias (Mandatory in PostgreSQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
 - Preserve existing aliases
 
