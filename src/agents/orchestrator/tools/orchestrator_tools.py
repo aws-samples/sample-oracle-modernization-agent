@@ -222,6 +222,7 @@ def check_step_status() -> StepStatusResult:
         'validate_failed': counts.get('validate_failed', 0),
         'tested': counts['tested'],
         'test_failed': counts.get('test_failed', 0),
+        'test_skipped': counts.get('test_skipped', 0),
         'merged': counts['merged'],
         'transform_complete': bool(counts['transform_complete']),
         'review_complete': bool(counts['review_complete']),

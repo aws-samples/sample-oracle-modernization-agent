@@ -21,6 +21,7 @@ class StepStatusResult(TypedDict):
     validate_failed: int
     tested: int
     test_failed: int
+    test_skipped: int
     merged: int
     transform_complete: bool
     review_complete: bool
