@@ -218,7 +218,9 @@ def generate_test_failure_report() -> dict:
                    source_file, target_file, test_result,
                    review_notes, validation_result
             FROM transform_target_list
-            WHERE tested = 'Y' AND (test_result IS NULL OR test_result != 'PASS')
+            WHERE tested = 'Y'
+              AND test_result IS NOT NULL
+              AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
             ORDER BY mapper_file, seq_no
         """)
         failures = cursor.fetchall()

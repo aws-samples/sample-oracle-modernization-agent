@@ -222,7 +222,7 @@ def run(max_workers=8):
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
             pass_count = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED')")
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED','SKIP')")
             fail_count = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE sql_type IN ('sql', 'resultMap')")
             skip_type = cursor.fetchone()[0]
@@ -297,7 +297,7 @@ def run(max_workers=8):
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
         passed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED')")
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED','SKIP')")
         failed = cursor.fetchone()[0]
         # Skip: non-testable types (sql fragments, resultMap) + untestable (not validated)
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE sql_type IN ('sql', 'resultMap')")
@@ -357,7 +357,7 @@ def _print_sql_type_distribution():
             SELECT sql_type,
                    COUNT(*) as cnt,
                    SUM(CASE WHEN tested='Y' AND test_result='PASS' THEN 1 ELSE 0 END) as pass_cnt,
-                   SUM(CASE WHEN tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS' THEN 1 ELSE 0 END) as fail_cnt,
+                   SUM(CASE WHEN tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED','SKIP') THEN 1 ELSE 0 END) as fail_cnt,
                    SUM(CASE WHEN tested='N' THEN 1 ELSE 0 END) as untested
             FROM transform_target_list
             GROUP BY sql_type
@@ -384,17 +384,22 @@ def _print_sql_type_distribution():
 
     for sql_type, cnt, pass_cnt, fail_cnt, untested in type_rows:
         method = test_methods.get(sql_type, '기타')
-        if pass_cnt == cnt:
+        # Non-testable types always show as Skip
+        if sql_type in ('sql', 'resultMap'):
+            status = "⏭️ Skip"
+            table.add_row(sql_type, str(cnt), "-", "-", method, status)
+        elif pass_cnt == cnt:
             status = "✅ All Pass"
+            table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
         elif fail_cnt > 0:
             status = f"❌ {fail_cnt} Fail"
-        elif untested == cnt:
-            status = "⏭️ Skip"
+            table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
         elif untested > 0:
             status = f"⚠️ {untested} Not Tested"
+            table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
         else:
             status = f"✅ {pass_cnt} Pass"
-        table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
+            table.add_row(sql_type, str(cnt), str(pass_cnt), str(fail_cnt), method, status)
 
     console_err.print(table)
 
