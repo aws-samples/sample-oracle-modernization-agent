@@ -374,11 +374,13 @@ def _extract_review_reason(review_result: str) -> str:
 
 
 @tool
-def reset_step(step_name: str) -> ResetStepResult:
+def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
 
     Args:
         step_name: 'transform', 'review', 'validate', or 'test'
+        failed_only: If True, only reset failed items (not passed ones).
+                     Use when user says "실패만 재테스트", "retry failed", "failed만 다시"
 
     Returns:
         ResetStepResult with status and reset count
@@ -388,7 +390,37 @@ def reset_step(step_name: str) -> ResetStepResult:
     state = StateManager(DB_PATH)
 
     try:
-        # Reset status in DB
+        if failed_only:
+            # Reset only failed items for re-test/re-review
+            import sqlite3
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                cursor = conn.cursor()
+                if step_name == 'test':
+                    cursor.execute("""
+                        UPDATE transform_target_list
+                        SET tested='N', test_result=NULL
+                        WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED')
+                    """)
+                elif step_name == 'validate':
+                    cursor.execute("""
+                        UPDATE transform_target_list
+                        SET validated='N', validation_result=NULL
+                        WHERE validated='Y' AND validation_result IS NOT NULL AND validation_result NOT IN ('PASS', 'FIXED')
+                    """)
+                elif step_name == 'review':
+                    cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE reviewed='F'")
+                else:
+                    cursor.execute("""
+                        UPDATE transform_target_list SET transformed='N'
+                        WHERE transformed='Y' AND reviewed='F'
+                    """)
+                count = cursor.rowcount
+                conn.commit()
+            print(f"  🔄 {count}개 실패 항목만 리셋 ({step_name})")
+            result: ResetStepResult = {'status': 'success', 'step': step_name, 'reset_count': count}
+            return result
+
+        # Full reset
         count = state.reset_step_status(step_name)
 
         # Delete output files

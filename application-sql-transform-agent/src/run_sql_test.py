@@ -550,15 +550,29 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--reset', action='store_true', help='Reset all tested flags before running')
+    parser.add_argument('--retry-failed', action='store_true', help='Reset only failed tests for re-test')
     args = parser.parse_args()
 
     if args.reset:
         print("🔄 Resetting test flags...", flush=True)
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE transform_target_list SET tested='N' WHERE tested='Y'")
+            cursor.execute("UPDATE transform_target_list SET tested='N', test_result=NULL WHERE tested='Y'")
             reset_count = cursor.rowcount
             conn.commit()
-        print(f"✅ Reset {reset_count} SQL IDs (SELECT + DML)\n", flush=True)
+        print(f"✅ Reset {reset_count} SQL IDs\n", flush=True)
+
+    if args.retry_failed:
+        print("🔄 Resetting failed test items only...", flush=True)
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE transform_target_list
+                SET tested='N', test_result=NULL
+                WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED')
+            """)
+            reset_count = cursor.rowcount
+            conn.commit()
+        print(f"✅ Reset {reset_count} failed SQL IDs for re-test\n", flush=True)
 
     run(max_workers=args.workers)
