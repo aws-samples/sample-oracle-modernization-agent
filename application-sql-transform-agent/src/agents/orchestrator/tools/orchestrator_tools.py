@@ -400,7 +400,7 @@ def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
                     cursor.execute("""
                         UPDATE transform_target_list
                         SET tested='N', test_result=NULL
-                        WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED')
+                        WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
                     """)
                 elif step_name == 'validate':
                     cursor.execute("""
