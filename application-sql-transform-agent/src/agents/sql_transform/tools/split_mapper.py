@@ -165,15 +165,18 @@ def split_mapper(file_path: str) -> dict:
         sub_dir = _get_sub_dir(cursor, str(path))
 
         _init_table(conn)
+        # Use sub_dir/filename as mapper_file key to handle duplicate filenames
+        mapper_key = f"{sub_dir}/{path.name}" if sub_dir else path.name
+
         # Get existing records to preserve their status flags
         cursor.execute(
             "SELECT sql_id, transformed, reviewed, validated, tested, completed, "
             "review_result, validation_result, test_result, review_notes, transform_count "
             "FROM transform_target_list WHERE mapper_file = ?",
-            (path.name,)
+            (mapper_key,)
         )
         existing = {row[0]: row for row in cursor.fetchall()}
-        cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (path.name,))
+        cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (mapper_key,))
 
         # 1. Copy original to output/origin/
         origin_dir = ORIGIN_DIR / sub_dir if sub_dir else ORIGIN_DIR
@@ -209,7 +212,7 @@ def split_mapper(file_path: str) -> dict:
                      transformed, reviewed, validated, tested, completed,
                      review_result, validation_result, test_result, review_notes, transform_count)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file,
+                """, (mapper_key, elem['id'], elem['type'], seq, namespace, extract_file, target_file,
                       prev[1], prev[2], prev[3], prev[4], prev[5],
                       prev[6], prev[7], prev[8], prev[9], prev[10]))
             else:
@@ -229,8 +232,8 @@ def split_mapper(file_path: str) -> dict:
     finally:
         conn.close()
 
-    print(f"✂️  Split {path.name}: {len(sql_ids)} SQL IDs → origin/ + extract/ + DB")
+    print(f"✂️  Split {mapper_key}: {len(sql_ids)} SQL IDs → origin/ + extract/ + DB")
     return {
-        'mapper': path.name, 'namespace': namespace,
+        'mapper': mapper_key, 'namespace': namespace,
         'total': len(sql_ids), 'sql_ids': sql_ids
     }
