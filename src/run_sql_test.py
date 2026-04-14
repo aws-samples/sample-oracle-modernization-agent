@@ -168,15 +168,15 @@ def run(max_workers=8):
     # Pre-skip: mark non-testable items before test phases
     skip_count = _pre_mark_skips(log_and_print)
 
-    # Phase 0: EXPLAIN-based DML validation (no execution, no PK/NULL issues)
-    log_and_print("\nPhase 0: DML 구문 검증 (EXPLAIN)...")
+    # Phase 0: EXPLAIN-based validation (SELECT + DML — no execution, no params needed)
+    log_and_print("\nPhase 0: SQL 구문 검증 (EXPLAIN)...")
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, target_file
             FROM transform_target_list
             WHERE validated = 'Y' AND tested = 'N'
-              AND sql_type IN ('insert', 'update', 'delete')
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
             ORDER BY mapper_file, seq_no
         """)
         dml_rows = cursor.fetchall()
@@ -186,7 +186,7 @@ def run(max_workers=8):
             {'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2], 'target_file': r[3]}
             for r in dml_rows
         ]
-        log_and_print(f"  📋 DML 대상: {len(dml_items)}개 (INSERT/UPDATE/DELETE)")
+        log_and_print(f"  📋 EXPLAIN 대상: {len(dml_items)}개 (SELECT/INSERT/UPDATE/DELETE)")
         explain_result = explain_dml_batch(dml_items)
 
         if explain_result.get('status') == 'completed':
