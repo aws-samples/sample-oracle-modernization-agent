@@ -266,14 +266,18 @@ def run_bulk_test(test_folder: str = "") -> dict:
         # Convert to absolute path to prevent Java from creating relative directories
         test_folder_abs = str(Path(test_folder).resolve())
         
+        # Timeout: 5 seconds per SQL, minimum 120s, maximum 3600s
+        sql_count = len(select_files) if 'select_files' in dir() else 100
+        bulk_timeout = max(120, min(sql_count * 5, 3600))
+
         print(f"  🔧 Executing: bash {test_script} {test_folder_abs}", flush=True)
         print(f"  📂 Working directory: {REFERENCE_DIR}", flush=True)
-        print(f"  ⏱️  Timeout: 600s\n", flush=True)
-        
+        print(f"  ⏱️  Timeout: {bulk_timeout}s ({sql_count} SQLs × 5s)\n", flush=True)
+
         json_result_path = REFERENCE_DIR / "out" / "test_results.json"
         result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
             ['bash', test_script, test_folder_abs, '--json-file', 'test_results.json'],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=bulk_timeout,
             cwd=str(REFERENCE_DIR),
             env={**os.environ, 'TEST_FOLDER': test_folder_abs}
         )
@@ -386,7 +390,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
         }
 
     except subprocess.TimeoutExpired:
-        return {'status': 'timeout', 'error': 'Test execution timed out (600s)'}
+        return {'status': 'timeout', 'error': f'Test execution timed out ({bulk_timeout}s for {sql_count} SQLs)'}
     except FileNotFoundError:
         return {'status': 'error', 'error': f'Java or {test_script} not found'}
     except Exception as e:
