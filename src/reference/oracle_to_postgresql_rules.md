@@ -287,7 +287,9 @@ CASE status WHEN 'A' THEN '활성' WHEN 'I' THEN '비활성'
 | FETCH FIRST N ROWS ONLY | LIMIT N |
 | ROWNUM | ROW_NUMBER() OVER() or LIMIT (context-dependent) |
 
-**KEEP (DENSE_RANK FIRST/LAST):**
+**KEEP (DENSE_RANK FIRST/LAST) — CRITICAL: must preserve "one row per group" semantics:**
+
+Simple case (single value):
 ```sql
 -- Oracle
 MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
@@ -297,6 +299,35 @@ MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
 -- Or DISTINCT ON when selecting full rows:
 SELECT DISTINCT ON (group_col) * FROM table ORDER BY group_col, date_col
 ```
+
+With GROUP BY (aggregate context — most common in real code):
+```sql
+-- Oracle: returns exactly ONE row per group_key
+SELECT group_key,
+       MAX(err_code) KEEP (DENSE_RANK LAST ORDER BY detail_key) as last_err
+FROM details
+GROUP BY group_key
+
+-- ❌ WRONG: GROUP BY with extra columns → multiple rows per group
+SELECT group_key, err_code FROM details
+GROUP BY group_key, err_code  -- produces MULTIPLE rows!
+
+-- ✅ RIGHT: use DISTINCT ON to get one row per group
+SELECT DISTINCT ON (group_key)
+       group_key, err_code as last_err
+FROM details
+ORDER BY group_key, detail_key DESC
+
+-- ✅ RIGHT (alternative): use ROW_NUMBER window function
+SELECT group_key, err_code as last_err FROM (
+    SELECT group_key, err_code,
+           ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY detail_key DESC) as rn
+    FROM details
+) sub WHERE rn = 1
+```
+**KEEP DENSE_RANK LAST ORDER BY x** = "row with MAX x in each group"
+**KEEP DENSE_RANK FIRST ORDER BY x** = "row with MIN x in each group"
+Use `DISTINCT ON` or `ROW_NUMBER()` — NEVER just add columns to GROUP BY.
 
 #### 2-1a. Numeric TRUNC (NOT the same as ROUND)
 ```sql
