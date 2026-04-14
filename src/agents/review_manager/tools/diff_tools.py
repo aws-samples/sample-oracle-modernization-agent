@@ -212,11 +212,11 @@ def generate_test_failure_report() -> dict:
         """)
         passed = cursor.fetchone()[0]
 
-        # Get failures with details
+        # Get failures with details (including test_notes)
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, seq_no,
                    source_file, target_file, test_result,
-                   review_notes, validation_result
+                   test_notes, validation_result
             FROM transform_target_list
             WHERE tested = 'Y'
               AND test_result IS NOT NULL
@@ -231,7 +231,7 @@ def generate_test_failure_report() -> dict:
     # Build briefings per SQL
     briefings = []
     categories = {}
-    for mapper, sql_id, sql_type, seq, source_file, target_file, test_result, notes, val_result in failures:
+    for mapper, sql_id, sql_type, seq, source_file, target_file, test_result, test_notes, val_result in failures:
         # Read source and target SQL
         source_sql = ""
         target_sql = ""
@@ -240,8 +240,9 @@ def generate_test_failure_report() -> dict:
         if target_file and Path(target_file).exists():
             target_sql = Path(target_file).read_text(encoding='utf-8').strip()
 
-        # Categorize
-        reason = _categorize_failure(test_result or "", notes or "")
+        # Categorize — use test_notes for detail, test_result for status
+        error_detail = test_notes or test_result or "Unknown"
+        reason = _categorize_failure(test_result or "", error_detail)
         if reason not in categories:
             categories[reason] = []
         categories[reason].append(f"{mapper}/{sql_id}")
@@ -251,7 +252,7 @@ def generate_test_failure_report() -> dict:
             'sql_id': sql_id,
             'sql_type': sql_type,
             'category': reason,
-            'error': test_result or "Unknown",
+            'error': error_detail,
             'source_sql': source_sql,
             'target_sql': target_sql,
         })
