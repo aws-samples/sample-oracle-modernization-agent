@@ -45,7 +45,7 @@ def _extract_sql_for_explain(target_file: str) -> tuple[str, str] | None:
 
     # Extract SQL body from XML tag
     body_match = re.search(
-        r'<(insert|update|delete)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
+        r'<(select|insert|update|delete)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
         content, re.DOTALL | re.IGNORECASE,
     )
     if not body_match:

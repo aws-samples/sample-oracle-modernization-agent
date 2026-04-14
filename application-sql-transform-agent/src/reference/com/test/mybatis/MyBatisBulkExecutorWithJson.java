@@ -1277,10 +1277,10 @@ public class MyBatisBulkExecutorWithJson {
             }
         } else {
             // Replace if existing DOCTYPE is incorrect
-            content = content.replaceAll("<!DOCTYPE\\s+mapper[^>]*>", 
+            content = content.replaceAll("<!DOCTYPE\\s+mapper[^>]*>",
                 "<!DOCTYPE mapper PUBLIC \"-//mybatis.org//DTD Mapper 3.0//EN\" \"http://mybatis.org/dtd/mybatis-3-mapper.dtd\">");
         }
-        
+
         return content;
     }
     
