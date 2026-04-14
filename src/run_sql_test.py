@@ -220,32 +220,41 @@ def run(max_workers=8):
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
             pass_count = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS'")
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED')")
             fail_count = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N'")
-            not_tested = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-            total_validated = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE sql_type IN ('sql', 'resultMap')")
+            skip_type = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N' AND sql_type NOT IN ('sql', 'resultMap')")
+            not_tested_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+            total_all = cursor.fetchone()[0]
 
         from core.display import print_step_result
+        tested_count = pass_count + fail_count
+        skipped = skip_type + not_tested_count
         rows = [("Passed", str(pass_count))]
         if fail_count > 0:
             rows.append(("Failed", f"[red]{fail_count}[/red]"))
         else:
             rows.append(("Failed", "0"))
-        if not_tested > 0:
-            rows.append(("Not Tested", f"[yellow]{not_tested}[/yellow]"))
-        rows.append(("Total", f"{pass_count + fail_count}/{total_validated} SQL IDs"))
+        if skipped > 0:
+            skip_details = []
+            if skip_type > 0:
+                skip_details.append(f"{skip_type} non-testable")
+            if not_tested_count > 0:
+                skip_details.append(f"{not_tested_count} not tested")
+            rows.append(("Skipped", f"[dim]{skipped} ({', '.join(skip_details)})[/dim]"))
+        rows.append(("Total", f"{tested_count + skipped}/{total_all} SQL IDs"))
 
-        if fail_count > 0 or not_tested > 0:
+        if fail_count > 0 or not_tested_count > 0:
             report_path = _generate_test_failure_report()
             if report_path:
                 rows.append(("Failure Report", str(report_path)))
             notes = []
             if fail_count > 0:
                 notes.append(f"{fail_count} failed")
-            if not_tested > 0:
-                notes.append(f"{not_tested} not tested (no bulk test coverage)")
+            if not_tested_count > 0:
+                notes.append(f"{not_tested_count} not tested")
             rows.append(("Note", f"[yellow]{'; '.join(notes)}[/yellow]"))
         else:
             rows.append(("Status", "[green]All tests passed[/green]"))
@@ -285,16 +294,20 @@ def run(max_workers=8):
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
         passed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result != 'PASS'")
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED')")
         failed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N'")
+        # Skip: non-testable types (sql fragments, resultMap) + untestable (not validated)
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE sql_type IN ('sql', 'resultMap')")
+        skip_type = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N' AND sql_type NOT IN ('sql', 'resultMap')")
         not_tested = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y'")
-        total_validated = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        total_all = cursor.fetchone()[0]
 
     from core.display import print_step_result
 
     tested = passed + failed
+    skipped = skip_type + not_tested
     rows = [
         ("Passed", str(passed)),
     ]
@@ -302,9 +315,14 @@ def run(max_workers=8):
         rows.append(("Failed", f"[red]{failed}[/red]"))
     else:
         rows.append(("Failed", "0"))
-    if not_tested > 0:
-        rows.append(("Not Tested", f"[yellow]{not_tested}[/yellow]"))
-    rows.append(("Total", f"{tested}/{total_validated} SQL IDs"))
+    if skipped > 0:
+        skip_details = []
+        if skip_type > 0:
+            skip_details.append(f"{skip_type} non-testable")
+        if not_tested > 0:
+            skip_details.append(f"{not_tested} not tested")
+        rows.append(("Skipped", f"[dim]{skipped} ({', '.join(skip_details)})[/dim]"))
+    rows.append(("Total", f"{tested + skipped}/{total_all} SQL IDs"))
 
     if failed > 0 or not_tested > 0:
         # Auto-generate test failure report via ReviewManager
