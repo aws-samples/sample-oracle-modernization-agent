@@ -418,6 +418,47 @@ def reset_step(step_name: str) -> ResetStepResult:
         return result
 
 
+def _backup_before_step(step_name: str) -> str:
+    """Create a backup of DB and key output files before executing a pipeline step.
+
+    Backup location: output/backup/{step}_{YYYYMMDD_HHMMSS}/
+    """
+    import shutil
+    from datetime import datetime
+
+    if not DB_PATH.exists():
+        return ""
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_dir = OUTPUT_DIR / "backup" / f"{step_name}_{timestamp}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Always backup DB
+    shutil.copy2(str(DB_PATH), str(backup_dir / DB_PATH.name))
+
+    # Backup step-specific directories
+    dirs_to_backup = {
+        'transform': ['xmls/transform'],
+        'review': ['xmls/transform'],  # review may trigger re-transform
+        'validate': ['xmls/transform'],  # validate may fix SQL
+        'test': ['xmls/transform'],  # test agent may fix SQL
+        'merge': ['xmls/merge'],
+    }
+
+    for rel_dir in dirs_to_backup.get(step_name, []):
+        src_dir = OUTPUT_DIR / rel_dir
+        if src_dir.exists():
+            dst_dir = backup_dir / rel_dir
+            shutil.copytree(str(src_dir), str(dst_dir), dirs_exist_ok=True)
+
+    # Backup reports
+    reports_dir = OUTPUT_DIR / "reports"
+    if reports_dir.exists():
+        shutil.copytree(str(reports_dir), str(backup_dir / "reports"), dirs_exist_ok=True)
+
+    return str(backup_dir)
+
+
 @tool
 def run_step(step_name: str, sample: int = 0) -> RunStepResult:
     """Execute a pipeline step via direct Agent invocation (importlib).
@@ -471,6 +512,11 @@ def run_step(step_name: str, sample: int = 0) -> RunStepResult:
         def write(self, s):
             output_lines.append(s)
             return len(s)
+
+    # Backup before execution
+    backup_path = _backup_before_step(step_name)
+    if backup_path:
+        console_err.print(f"[dim]💾 Backup: {backup_path}[/dim]")
 
     try:
         # Direct Agent invocation via importlib
