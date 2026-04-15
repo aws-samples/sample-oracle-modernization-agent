@@ -6,7 +6,7 @@ No raw SQL string concatenation is used.
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
-from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_, text
+from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.models import (
@@ -55,13 +55,18 @@ class StateManager:
         migrations = [
             ("transform_target_list", "test_notes", "TEXT"),
         ]
-        with self.engine.connect() as conn:
-            for table, column, col_type in migrations:
-                try:
-                    conn.execute(text(f"SELECT {column} FROM {table} LIMIT 1"))
-                except Exception:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
-                    conn.commit()
+        insp = inspect(self.engine)
+        for table, column, col_type in migrations:
+            if table in insp.get_table_names():
+                existing_cols = {c['name'] for c in insp.get_columns(table)}
+                if column not in existing_cols:
+                    # Static DDL — no user input, table/column names are hardcoded above
+                    import sqlite3
+                    with sqlite3.connect(str(self.db_path), timeout=10) as conn:
+                        conn.execute(  # nosemgrep: no-user-input-in-sql
+                            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                        )
+                        conn.commit()
 
     @contextmanager
     def _get_session(self) -> Session:
