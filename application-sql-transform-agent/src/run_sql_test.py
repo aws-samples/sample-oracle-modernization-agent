@@ -178,6 +178,19 @@ def run(max_workers=8):
         log_and_print(f"run_setup.py를 다시 실행하여 {display_name} 접속 정보를 설정하세요.")
         return
 
+    # Auto-generate parameters.properties if not exists
+    params_file = TRANSFORM_DIR / "parameters.properties"
+    if not params_file.exists():
+        log_and_print("\n📝 parameters.properties 자동 생성 중...")
+        from agents.sql_test.tools.generate_parameters import generate_parameters_file
+        gen_result = generate_parameters_file(str(params_file))
+        if gen_result.get('status') == 'success':
+            log_and_print(f"  ✅ {gen_result['param_count']}개 파라미터 생성 (metadata: {gen_result['matched_count']})")
+        else:
+            log_and_print("  ⚠️  파라미터 생성 실패 — Java 기본값 사용")
+    else:
+        log_and_print(f"\n📝 parameters.properties 존재 ({params_file})")
+
     # Pre-skip: mark non-testable items before test phases
     skip_count = _pre_mark_skips(log_and_print)
 
