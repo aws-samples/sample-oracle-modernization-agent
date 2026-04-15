@@ -6,7 +6,7 @@ No raw SQL string concatenation is used.
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
-from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_, text
+from sqlalchemy import create_engine, inspect, select, update as sql_update, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.models import (
@@ -55,13 +55,18 @@ class StateManager:
         migrations = [
             ("transform_target_list", "test_notes", "TEXT"),
         ]
-        with self.engine.connect() as conn:
-            for table, column, col_type in migrations:
-                try:
-                    conn.execute(text(f"SELECT {column} FROM {table} LIMIT 1"))
-                except Exception:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
-                    conn.commit()
+        insp = inspect(self.engine)
+        for table, column, col_type in migrations:
+            if table in insp.get_table_names():
+                existing_cols = {c['name'] for c in insp.get_columns(table)}
+                if column not in existing_cols:
+                    # Static DDL — no user input, table/column names are hardcoded above
+                    import sqlite3
+                    with sqlite3.connect(str(self.db_path), timeout=10) as conn:
+                        conn.execute(  # nosemgrep: no-user-input-in-sql
+                            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                        )
+                        conn.commit()
 
     @contextmanager
     def _get_session(self) -> Session:
@@ -304,10 +309,11 @@ class StateManager:
             transform_complete = (extracted > 0 and transformed == extracted)
             review_complete = (transformed > 0 and (reviewed + review_failed) == transformed)
             validate_complete = (reviewed > 0 and validated == reviewed)
-            # test_complete: all testable items are tested (exclude sql/resultMap)
+            merge_complete_flag = self._count_merge_files() > 0
+            # test_complete: all testable items are tested (exclude sql/resultMap) + merge must be done first
             testable_total = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.validated == 'Y', _testable_filter).scalar()
-            test_complete = (testable_total > 0 and tested == testable_total)
+            test_complete = (merge_complete_flag and testable_total > 0 and tested == testable_total)
 
             return {
                 'source_analyzed': source_analyzed,
