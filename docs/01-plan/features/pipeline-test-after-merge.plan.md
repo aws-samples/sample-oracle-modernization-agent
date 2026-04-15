@@ -35,6 +35,28 @@
 - **Merge 역할**: 배포용 XML 조립 (Test와 독립적)
 - **Test 실패 → Re-merge**: Agent가 SQL 수정 후 해당 mapper만 `assemble_mapper()` 자동 호출
 
+### 현재 Test 흐름 (최신)
+
+```
+1. parameters.properties 자동 생성 (메타데이터 기반, 없을 때만)
+2. Pre-skip: sql/resultMap + include refid → SKIP (test_notes에 사유 기록)
+3. Phase 0: EXPLAIN (SELECT + DML 전부) → PASS→done, FAIL→Phase 1로
+4. Phase 1: Java bulk test (EXPLAIN 실패 건만) → JSON 결과 파싱
+5. Phase 2: Agent fix (인프라 에러 제외) → 수정 + 재테스트
+6. 결과: failure report + skip report + SQL 타입별 분포 테이블
+```
+
+### Merge 이후 Test로 변경 시 추가 고려사항
+
+- **`<include refid>` SKIP 대폭 감소**: Merge된 XML에는 fragment가 인라인됨 → 이전에 SKIP이었던 SQL이 테스트 가능해짐 (핵심 이점!)
+- **Test 대상 변경**: 개별 SQL(TRANSFORM_DIR) → **Merge된 전체 mapper(MERGE_DIR)** 기준으로 Java executor 실행
+  - Phase 0 EXPLAIN: 개별 SQL 파일 유지 가능 (구문 검증)
+  - Phase 1 Java bulk test: **MERGE_DIR에서 실행** (MyBatis가 전체 mapper를 로드하므로 include refid 해석됨)
+- `parameters.properties` 생성: TRANSFORM_DIR 기반 → 변경 불필요
+- Pre-skip: sql/resultMap만 SKIP. **include refid SKIP 제거** (Merge 후 해석됨)
+- Phase 2 Agent fix: **수정 후 해당 mapper re-merge 추가** (핵심 변경)
+- test_notes: 변경 불필요
+
 ---
 
 ## 2. 수정 대상 파일 (5개)
@@ -58,10 +80,11 @@
 - `test_complete` 전제조건 검토 (merge_complete 고려)
 - 난이도: 낮음
 
-### FR-05: run_sql_test.py — Phase 2 후 자동 re-merge
-- `fix_mapper_failures()` 성공 시 `assemble_mapper(mapper_file)` 호출
-- 수정된 mapper 목록으로 일괄 re-merge
-- 난이도: 중간
+### FR-05: run_sql_test.py — Merge 기반 테스트 + Phase 2 auto re-merge
+- Phase 1 Java bulk test: TRANSFORM_DIR → **MERGE_DIR** 기준으로 변경 (include refid 해석)
+- Pre-skip에서 include refid 제거 (Merge 후 해석됨)
+- `fix_mapper_failures()` 성공 시 `assemble_mapper(mapper_file)` 호출로 re-merge
+- 난이도: 중~높
 
 ---
 
@@ -106,10 +129,14 @@ Step 7: git merge feature/test-after-merge → main
 
 ## 6. 테스트 시나리오
 
-1. 정상: Validate → Merge → Test (전체 PASS)
-2. Test 실패: FAIL → Agent fix → re-merge → re-test PASS
-3. retry failed test: 실패만 재테스트 + 해당 mapper re-merge
-4. 기존 데이터: 이미 완료된 프로젝트에서 재실행
+1. **정상 플로우**: Validate → Merge → Test (전체 PASS)
+2. **parameters.properties 자동 생성**: 없을 때 메타데이터 기반 자동 생성 확인
+3. **Pre-skip**: sql/resultMap + include refid 정상 SKIP + test_notes 사유 기록
+4. **EXPLAIN → Java fallthrough**: Phase 0 실패 → Phase 1 Java로 재시도
+5. **Test 실패 + 자동 수정**: FAIL → Agent fix (convert_sql) → re-merge (assemble_mapper) → re-test
+6. **retry failed test**: 실패만 재테스트 + 해당 mapper re-merge
+7. **기존 데이터 호환**: 이미 완료된 프로젝트에서 순서 변경 후 재실행
+8. **failure/skip report**: 정확한 카운트 + 사유 표시
 
 ---
 
@@ -118,3 +145,4 @@ Step 7: git merge feature/test-after-merge → main
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 0.1 | 2026-04-15 | Initial draft | Plan Agent |
+| 0.2 | 2026-04-15 | 현재 Test 흐름 반영 (parameter 자동생성, EXPLAIN, pre-skip, test_notes), 테스트 시나리오 확장 | - |
