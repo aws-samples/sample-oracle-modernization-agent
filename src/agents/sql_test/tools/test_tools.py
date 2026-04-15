@@ -162,7 +162,10 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
             )
             if result.returncode == 0:
                 passed += 1
-                _update_tested(mapper_file, sql_id)
+                # DML: EXPLAIN pass = done. SELECT: EXPLAIN pass = syntax OK, Phase 1 will verify with actual execution
+                if sql_type in ('insert', 'update', 'delete'):
+                    _update_tested(mapper_file, sql_id)
+                # SELECT stays tested='N' → Phase 1 picks it up
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
                 # Don't mark as tested — leave for Phase 1 Java bulk test to retry
