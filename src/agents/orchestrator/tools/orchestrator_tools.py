@@ -498,8 +498,8 @@ def _backup_before_step(step_name: str) -> str:
         'transform': ['xmls/transform', 'strategy'],
         'review': ['xmls/transform'],  # review may trigger re-transform
         'validate': ['xmls/transform'],  # validate may fix SQL
-        'test': ['xmls/transform'],  # test agent may fix SQL
         'merge': ['xmls/merge'],
+        'test': ['xmls/transform', 'xmls/merge'],  # test may fix SQL + auto re-merge
     }
 
     for rel_dir in dirs_to_backup.get(step_name, []):

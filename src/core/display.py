@@ -66,6 +66,15 @@ def print_pipeline_status(status: dict) -> None:
         _status_style(validated, total, status.get('validate_complete', False)),
     )
 
+    # Merge — count is mapper files, not individual SQLs
+    merged = status.get('merged', 0)
+    merge_progress = f"{merged}/{source_count} files" if source_count else f"{merged} files"
+    table.add_row(
+        "Merge",
+        merge_progress,
+        "[green]Done[/green]" if status.get('merge_complete', False) else "[dim]Pending[/dim]",
+    )
+
     # Test — denominator excludes non-testable types (sql, resultMap)
     tested = status.get('tested', 0)
     test_failed = status.get('test_failed', 0)
@@ -80,15 +89,6 @@ def print_pipeline_status(status: dict) -> None:
         "Test",
         f"{tested}/{total}{test_extra}",
         _status_style(tested, total, status.get('test_complete', False)),
-    )
-
-    # Merge — count is mapper files, not individual SQLs
-    merged = status.get('merged', 0)
-    merge_progress = f"{merged}/{source_count} files" if source_count else f"{merged} files"
-    table.add_row(
-        "Merge",
-        merge_progress,
-        "[green]Done[/green]" if status.get('merge_complete', False) else "[dim]Pending[/dim]",
     )
 
     console_err.print(table)
