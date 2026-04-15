@@ -304,10 +304,11 @@ class StateManager:
             transform_complete = (extracted > 0 and transformed == extracted)
             review_complete = (transformed > 0 and (reviewed + review_failed) == transformed)
             validate_complete = (reviewed > 0 and validated == reviewed)
-            # test_complete: all testable items are tested (exclude sql/resultMap)
+            merge_complete_flag = self._count_merge_files() > 0
+            # test_complete: all testable items are tested (exclude sql/resultMap) + merge must be done first
             testable_total = session.query(func.count(TransformTargetList.id))\
                 .filter(TransformTargetList.validated == 'Y', _testable_filter).scalar()
-            test_complete = (testable_total > 0 and tested == testable_total)
+            test_complete = (merge_complete_flag and testable_total > 0 and tested == testable_total)
 
             return {
                 'source_analyzed': source_analyzed,

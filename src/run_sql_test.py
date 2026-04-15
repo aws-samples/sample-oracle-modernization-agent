@@ -110,7 +110,18 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
         drain_progress()
         advance_progress(len(sql_errors), sql_errors[-1]['sql_id'])
 
-        log(f"✅ {mapper_file} 수정 완료")
+        # Auto re-merge: SQL이 수정되었으면 해당 mapper를 다시 merge
+        try:
+            from agents.sql_transform.tools.assemble_mapper import assemble_mapper
+            merge_result = assemble_mapper(mapper_file)
+            if merge_result.get('success', 0) > 0:
+                log(f"📦 Re-merge: {mapper_file} ({merge_result['success']} SQLs)")
+            else:
+                log(f"⚠️  Re-merge skipped: {mapper_file} ({merge_result.get('error', 'no converted SQLs')})")
+        except Exception as me:
+            log(f"⚠️  Re-merge failed: {mapper_file}: {me}")
+
+        log(f"✅ {mapper_file} 수정 + re-merge 완료")
         return {'mapper': mapper_file, 'status': 'success'}
     except Exception as e:
         log(f"❌ {mapper_file}: {e}")
@@ -438,7 +449,9 @@ def _pre_mark_skips(log_fn=print) -> int:
 
     Marks:
     1. Non-testable types (sql, resultMap) — not executable
-    2. SQL files containing <include refid="..."/> — will fail with IncompleteElementException
+
+    Note: include refid is NOT skipped — after Merge, fragments are inlined
+    and the SQL becomes testable via Java executor with full mapper context.
 
     Returns:
         Number of newly marked SKIP items
@@ -448,7 +461,7 @@ def _pre_mark_skips(log_fn=print) -> int:
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
 
-        # 1. Non-testable types (sql fragment, resultMap)
+        # Non-testable types only (sql fragment, resultMap)
         cursor.execute("""
             SELECT id, sql_type FROM transform_target_list
             WHERE tested = 'N'
@@ -461,28 +474,6 @@ def _pre_mark_skips(log_fn=print) -> int:
                 (reason, record_id)
             )
             total_marked += 1
-        type_skip = total_marked
-
-        # 2. SQL files with <include refid="..."/> — scan transform files
-        cursor.execute("""
-            SELECT id, target_file FROM transform_target_list
-            WHERE tested = 'N' AND target_file IS NOT NULL
-              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
-        """)
-        for record_id, target_file in cursor.fetchall():
-            try:
-                content = Path(target_file).read_text(encoding='utf-8')
-                if '<include refid=' in content:
-                    import re as _re
-                    refid_match = _re.search(r'<include\s+refid=["\']([^"\']+)', content)
-                    refid = refid_match.group(1) if refid_match else 'unknown'
-                    cursor.execute(
-                        "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE id=?",
-                        (f'include refid="{refid}" — 다른 mapper fragment 참조, 단일 파일 테스트 불가', record_id)
-                    )
-                    total_marked += 1
-            except (FileNotFoundError, OSError):
-                pass
 
         conn.commit()
 
