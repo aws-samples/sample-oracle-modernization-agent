@@ -478,13 +478,7 @@ def _pre_mark_skips(log_fn=print) -> int:
         conn.commit()
 
     if total_marked > 0:
-        details = []
-        if type_skip > 0:
-            details.append(f"{type_skip} non-testable types")
-        include_skip = total_marked - type_skip
-        if include_skip > 0:
-            details.append(f"{include_skip} include-refid")
-        log_fn(f"\n⏭️  Pre-skip: {total_marked}개 ({', '.join(details)})")
+        log_fn(f"\n⏭️  Pre-skip: {total_marked}개 (non-testable types)")
 
     return total_marked
 
