@@ -523,11 +523,10 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
     # Find the transform file
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT target_file FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if not row:
         return {'status': 'error', 'error': f'Not found: {mapper_file}/{sql_id}'}
@@ -638,11 +637,10 @@ def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: s
                 if result == "FAIL":
                     test_result_val = "FAIL"
                     test_notes_val = error[:500] if error else "Unknown error"
-                conn.execute("""
-                    UPDATE transform_target_list
-                    SET tested = 'Y', test_result = ?, test_notes = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE mapper_file = ? AND sql_id = ?
-                """, (test_result_val, test_notes_val, mapper_file, sql_id))
+                from utils.db_utils import update_by_mapper
+                update_by_mapper(conn,
+                    "UPDATE transform_target_list SET tested='Y', test_result=?, test_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(test_result_val, test_notes_val))
                 conn.commit()
             # Emit progress event via thread-safe queue
             from core.progress import emit_progress

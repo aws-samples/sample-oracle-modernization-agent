@@ -53,11 +53,10 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                conn.execute("""
-                    UPDATE transform_target_list
-                    SET reviewed = ?, review_result = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE mapper_file = ? AND sql_id = ?
-                """, (reviewed_flag, feedback_to_store, mapper_file, sql_id))
+                from utils.db_utils import update_by_mapper
+                update_by_mapper(conn,
+                    "UPDATE transform_target_list SET reviewed=?, review_result=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(reviewed_flag, feedback_to_store))
                 conn.commit()
 
             if result == 'PASS':

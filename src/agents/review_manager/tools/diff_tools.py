@@ -104,11 +104,10 @@ def show_sql_diff(mapper_file: str, sql_id: str) -> dict:
     """
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT source_file, target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if not row:
         return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
@@ -406,18 +405,16 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
     """
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper, update_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT id FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-            (mapper_file, sql_id)
-        )
-        if not cursor.fetchone():
+            mapper_file, sql_id)
+        if not row:
             return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
 
-        # Schema now includes 'review_notes' column from initial CREATE TABLE
-        cursor.execute(
+        update_by_mapper(conn,
             "UPDATE transform_target_list SET reviewed='Y', review_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-            (notes, mapper_file, sql_id)
-        )
+            mapper_file, sql_id, extra_params=(notes,))
         conn.commit()
     return {'status': 'success', 'message': f'Approved: {mapper_file}/{sql_id}'}
 
