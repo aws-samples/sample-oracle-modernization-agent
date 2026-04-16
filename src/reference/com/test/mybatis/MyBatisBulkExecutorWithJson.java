@@ -1062,9 +1062,18 @@ public class MyBatisBulkExecutorWithJson {
                         // Remove quotes for MyBatis bind variables
                         paramMap.put(key, cleanParameterValue(value));
                     }
-                    
+                    // Auto-fill missing params from XML (prevent NPE for params not in properties)
+                    java.util.regex.Matcher pm2 = java.util.regex.Pattern.compile("[#$]\\{([^},]+)").matcher(
+                        testInfo.xmlFile.toFile().exists() ? java.nio.file.Files.readString(testInfo.xmlFile) : "");
+                    while (pm2.find()) {
+                        String paramName = pm2.group(1).trim().split("::")[0].split("\\.")[0];
+                        if (!paramMap.containsKey(paramName)) {
+                            paramMap.put(paramName, "1");
+                        }
+                    }
+
                     List<Map<String, Object>> results = new ArrayList<>();
-                    
+
                     try {
                         // Use different execution methods based on SQL type
                         switch (testInfo.sqlType.toUpperCase()) {
