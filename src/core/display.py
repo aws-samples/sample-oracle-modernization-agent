@@ -75,11 +75,11 @@ def print_pipeline_status(status: dict) -> None:
         "[green]Done[/green]" if status.get('merge_complete', False) else "[dim]Pending[/dim]",
     )
 
-    # Test — show Pass count (= tested - failed - skipped)
+    # Test — Pass = tested - failed (SKIP is separate, not subtracted from Pass)
     tested = status.get('tested', 0)
     test_failed = status.get('test_failed', 0)
     test_skipped = status.get('test_skipped', 0)
-    test_passed = tested - test_failed - test_skipped
+    test_passed = tested - test_failed
     if test_passed < 0:
         test_passed = 0
     test_extras = []
