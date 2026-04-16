@@ -840,7 +840,29 @@ def get_summary() -> SummaryResult:
     Returns:
         SummaryResult with complete pipeline information
     """
-    status = check_step_status()
+    # Get counts without printing (check_step_status prints a table)
+    state = StateManager(DB_PATH)
+    counts = state.get_step_counts()
+
+    status = {
+        'source_analyzed': counts['source_analyzed'],
+        'extracted': counts['extracted'],
+        'transformed': counts['transformed'],
+        'reviewed': counts['reviewed'],
+        'review_failed': counts['review_failed'],
+        'review_warnings': counts.get('review_warnings', 0),
+        'validated': counts['validated'],
+        'validate_failed': counts.get('validate_failed', 0),
+        'tested': counts['tested'],
+        'test_failed': counts.get('test_failed', 0),
+        'test_skipped': counts.get('test_skipped', 0),
+        'merged': counts['merged'],
+        'transform_complete': bool(counts['transform_complete']),
+        'review_complete': bool(counts['review_complete']),
+        'validate_complete': bool(counts['validate_complete']),
+        'test_complete': bool(counts['test_complete']),
+        'merge_complete': bool(counts['merge_complete']),
+    }
 
     # Output files count
     output_dir = OUTPUT_DIR
