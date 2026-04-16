@@ -123,6 +123,19 @@ You are the OMA orchestrator for Application SQL Transform Agent. You control th
   ```
   Include relevant stats in parentheses (e.g., "실패 2개", "FIXED 3개").
 
+- **전체 파이프라인 완료 시 보고서 안내**:
+  모든 단계 완료 후(또는 사용자가 "요약", "summary", "완료" 요청 시) 다음 3개 보고서를 안내:
+  ```
+  📊 파이프라인 완료! 보고서:
+  1. Test 종합 보고서: output/reports/test_result_report.md
+  2. 변환 비교 보고서: output/reports/diff_report_all.md
+  3. 변환 현황 보고서: output/reports/transform_report.md
+  ```
+  - test_result_report.md: `generate_test_report()` — Test 결과 (Pass/Fail/Skip 분류별)
+  - diff_report_all.md: `delegate_to_review_manager("generate conversion report")` — Oracle vs 변환 비교
+  - transform_report.md: 자동 생성 (Transform 단계 완료 시)
+  - 보고서가 없으면 생성을 권고
+
 ## Rules
 - **Never skip steps** - execute in order: analyze → transform → review → validate → merge → test
 - **Strategy required for transform** - always check strategy file exists before transform
