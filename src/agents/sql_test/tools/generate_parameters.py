@@ -36,16 +36,23 @@ def generate_parameters_file(output_path: str = "") -> dict:
     metadata = _load_metadata()
 
     # 3. Match params to column types and generate values
+    # Priority: metadata type > SQL ::cast type > default '1'
     matched = 0
+    cast_matched = 0
     param_values = {}
     for param_name in sorted(params):
-        # Try metadata match first for accurate type-based value
+        cast_type = params[param_name]  # ::type from SQL, or None
+
+        # Try metadata match first
         col_type = _match_metadata(param_name, metadata)
         if col_type:
             param_values[param_name] = _value_from_type(col_type, param_name)
             matched += 1
+        elif cast_type:
+            # Use SQL ::cast type as hint
+            param_values[param_name] = _value_from_cast(cast_type)
+            cast_matched += 1
         else:
-            # Default: '1' works for most types (string/number implicit conversion)
             param_values[param_name] = '1'
 
     # 4. Write parameters.properties
@@ -54,7 +61,8 @@ def generate_parameters_file(output_path: str = "") -> dict:
     with open(output, 'w', encoding='utf-8') as f:
         f.write(f"# Auto-generated test parameters\n")
         f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"# Total: {len(param_values)} params (metadata matched: {matched}, default: {len(param_values) - matched})\n\n")
+        default_count = len(param_values) - matched - cast_matched
+        f.write(f"# Total: {len(param_values)} params (metadata: {matched}, cast: {cast_matched}, default: {default_count})\n\n")
 
         for name, value in sorted(param_values.items()):
             f.write(f"{name}={value}\n")
@@ -68,25 +76,33 @@ def generate_parameters_file(output_path: str = "") -> dict:
     }
 
 
-def _extract_params_from_xmls() -> set:
-    """Extract all #{param} names from transform XML files."""
-    params = set()
+_PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
+
+
+def _extract_params_from_xmls() -> dict:
+    """Extract #{param} names with optional ::type cast from transform XML files.
+
+    Returns:
+        Dict of {param_name: cast_type or None}
+        If same param has multiple casts, last one wins.
+    """
+    params = {}
     if not TRANSFORM_DIR.exists():
         return params
 
     for xml_file in TRANSFORM_DIR.rglob("*.xml"):
         try:
             content = xml_file.read_text(encoding='utf-8')
-            for match in _PARAM_PATTERN.finditer(content):
+            for match in _PARAM_WITH_CAST.finditer(content):
                 param_name = match.group(1).strip()
-                # Remove ::type cast (#{param}::varchar → param)
-                if '::' in param_name:
-                    param_name = param_name.split('::')[0].strip()
+                cast_type = match.group(2)  # None if no ::type
                 # Handle nested property (item.name → item)
                 if '.' in param_name:
                     param_name = param_name.split('.')[0].strip()
                 if param_name and not param_name.startswith('_'):
-                    params.add(param_name)
+                    # Keep cast_type if found (don't overwrite with None)
+                    if param_name not in params or cast_type:
+                        params[param_name] = cast_type
         except Exception:
             pass
 
@@ -155,6 +171,24 @@ def _match_metadata(param_name: str, metadata: dict) -> str:
                 return col_type
 
     return ""
+
+
+def _value_from_cast(cast_type: str) -> str:
+    """Generate test value based on SQL ::cast type."""
+    ct = cast_type.lower()
+
+    if ct in ('date',):
+        return '2025-01-01'
+    if ct in ('timestamp', 'timestamptz'):
+        return '2025-01-01 00:00:00'
+    if ct in ('integer', 'int', 'int4', 'smallint', 'bigint', 'int8', 'serial'):
+        return '1'
+    if ct in ('numeric', 'decimal', 'double', 'float', 'real'):
+        return '1'
+    if ct in ('boolean', 'bool'):
+        return 'true'
+    # varchar, text, char — '1' works
+    return '1'
 
 
 def _value_from_type(data_type: str, param_name: str) -> str:
