@@ -142,11 +142,14 @@ def _extract_params_from_xmls() -> tuple:
                     if param_name not in params or cast_type:
                         params[param_name] = cast_type
 
-            # Extract ${dollar} params — direct string substitution, needs a value
+            # Extract ${dollar} params — direct string substitution
+            # These control SQL structure (table names, paging, etc.) — set empty to skip
             for match in _DOLLAR_PARAM.finditer(content):
                 param_name = match.group(1).strip()
-                if param_name and param_name not in params:
-                    params[param_name] = None  # No cast type for ${}
+                if param_name:
+                    nullable_params.add(param_name)  # Force empty — SQL structure params
+                    if param_name not in params:
+                        params[param_name] = None
 
             # Extract <if test="xxx != null"> patterns
             for match in _IF_NULL_CHECK.finditer(content):
