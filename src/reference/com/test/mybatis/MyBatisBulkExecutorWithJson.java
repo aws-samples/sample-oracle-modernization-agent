@@ -1145,7 +1145,8 @@ public class MyBatisBulkExecutorWithJson {
                             System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
                                 testInfo.xmlFile.getFileName(), testInfo.sqlId);
                             results = new ArrayList<>(); // Empty results = success with timeout
-                            throw e;
+                        } else {
+                            throw e; // Non-timeout errors must propagate (table not found, permission denied, etc.)
                         }
                     }
 
