@@ -296,6 +296,25 @@ def generate_test_failure_report() -> dict:
         else:
             lines.append(f"- {ids}: {cat} — 수동 확인이 필요합니다.")
 
+    # SKIP recommendation
+    skip_candidates = 0
+    skip_reasons = []
+    for cat, sqls in categories.items():
+        cat_lower = cat.lower()
+        if any(k in cat_lower for k in ['missing function', 'missing table', 'missing column']):
+            skip_candidates += len(sqls)
+            skip_reasons.append(f"{cat}: {len(sqls)}건")
+
+    if skip_candidates > 0:
+        lines.append(f"\n## SKIP 권고\n")
+        lines.append(f"**{skip_candidates}건**은 SQL 변환이 아닌 인프라/스키마 이슈로, SKIP 처리 권고:\n")
+        for reason in skip_reasons:
+            lines.append(f"- {reason}")
+        lines.append(f"\nSKIP 처리 후 재테스트:")
+        lines.append(f"```")
+        lines.append(f"⚛️  > retry failed test")
+        lines.append(f"```")
+
     # Per-SQL detail (collapsible)
     if briefings:
         lines.append(f"\n---\n\n## 상세 (변환된 SQL)\n")

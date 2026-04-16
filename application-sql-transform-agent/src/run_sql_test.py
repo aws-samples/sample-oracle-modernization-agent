@@ -637,6 +637,19 @@ def _print_failure_summary(summary: dict, briefings: list):
 
     console_err.print(Panel("\n".join(summary_lines), title="요약", border_style="yellow"))
 
+    # SKIP recommendation
+    skip_candidates = 0
+    for cat, items in categories.items():
+        cat_lower = cat.lower()
+        if any(k in cat_lower for k in ['missing function', 'missing table', 'missing column']):
+            skip_candidates += len(items)
+
+    if skip_candidates > 0:
+        console_err.print(
+            f"\n💡 [yellow]{skip_candidates}건[/yellow]은 인프라/스키마 이슈 (SKIP 처리 가능). "
+            f"SKIP 후 재테스트: [bold]retry failed test[/bold]"
+        )
+
 
 def _human_readable_reason(category: str, error: str) -> str:
     """Convert error message to human-readable Korean reason."""
