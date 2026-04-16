@@ -22,26 +22,18 @@ def resolve_mapper_file(cursor, mapper_file: str, sql_id: str) -> str:
     if row:
         return row[0]
 
-    # Filename-only match
+    # Filename-only match (only if unique — skip if duplicates exist)
     file_name = Path(mapper_file).name
     cursor.execute(
-        "SELECT mapper_file FROM transform_target_list WHERE mapper_file = ? AND sql_id = ? LIMIT 1",
-        (file_name, sql_id)
+        "SELECT DISTINCT mapper_file FROM transform_target_list WHERE (mapper_file = ? OR mapper_file LIKE ?) AND sql_id = ?",
+        (file_name, f'%/{file_name}', sql_id)
     )
-    row = cursor.fetchone()
-    if row:
-        return row[0]
+    rows = cursor.fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    # Multiple matches or no match — return original (caller will get 'not found')
 
-    # LIKE suffix match (sub_dir/filename)
-    cursor.execute(
-        "SELECT mapper_file FROM transform_target_list WHERE mapper_file LIKE ? AND sql_id = ? LIMIT 1",
-        (f'%/{file_name}', sql_id)
-    )
-    row = cursor.fetchone()
-    if row:
-        return row[0]
-
-    return mapper_file  # Return original if no match
+    return mapper_file
 
 
 def query_by_mapper(cursor, sql: str, mapper_file: str, sql_id: str, extra_params: tuple = ()):
