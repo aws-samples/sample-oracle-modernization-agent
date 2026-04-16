@@ -106,6 +106,9 @@ def generate_parameters_file(output_path: str = "") -> dict:
 _PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
 _DOLLAR_PARAM = re.compile(r'\$\{(\w+)\}')
 _IF_NULL_CHECK = re.compile(r'<if\s+test=["\'](\w+)\s*!=\s*null', re.IGNORECASE)
+# @StringUtil@isNotEmpty(param) or @ApiUtil@notEmpty(param) — also nullable
+# @StringUtil@isNotEmpty(param), @CmFunction@notEmpty(param), etc.
+_IF_UTIL_CHECK = re.compile(r'@[\w.]+@(?:isNotEmpty|notEmpty|isEmpty|empty)\((\w+)\)', re.IGNORECASE)
 # <if test="flag == 'Y'"> or <when test="type == 'A'"> — extract param + comparison value
 _IF_EQUALS_CHECK = re.compile(r'<(?:if|when)\s+test=["\'](\w+)\s*==\s*[\'"]([^\'"]+)[\'"]', re.IGNORECASE)
 # <foreach collection="list" — extract collection param name
@@ -175,6 +178,10 @@ def _extract_params_from_xmls() -> tuple:
 
             # Extract <if test="xxx != null"> patterns
             for match in _IF_NULL_CHECK.finditer(content):
+                nullable_params.add(match.group(1).strip())
+
+            # Extract @StringUtil@isNotEmpty(param) — same as null check
+            for match in _IF_UTIL_CHECK.finditer(content):
                 nullable_params.add(match.group(1).strip())
 
             # Extract date function patterns: to_date(#{param}, 'FORMAT')
