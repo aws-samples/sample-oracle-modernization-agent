@@ -60,6 +60,15 @@ def assemble_mapper(mapper_file: str) -> dict:
 
     content = origin_path.read_text(encoding='utf-8')
 
+    # Sanitize HTML comments FIRST: replace <> with [] inside <!-- -->
+    # Must run before SQL body replacement to prevent regex matching tags inside comments
+    # e.g., <!-- <sql id="test"> --> would be matched by sql_pattern regex
+    import re as _re
+    def _clean_html_comment(m):
+        inner = m.group(1).replace('<', '[').replace('>', ']')
+        return f'<!--{inner}-->'
+    content = _re.sub(r'<!--(.*?)-->', _clean_html_comment, content, flags=_re.DOTALL)
+
     # Read converted SQL bodies from transform/ files
     conv_map = {}
     for sql_id, target_file in rows:
@@ -97,14 +106,6 @@ def assemble_mapper(mapper_file: str) -> dict:
     else:
         merge_dir = MERGE_DIR
     merge_dir.mkdir(parents=True, exist_ok=True)
-
-    # Sanitize HTML comments: remove <> inside <!-- --> to prevent SAXParseException
-    # e.g., <!-- 기존 쿼리 <sql id="test"> --> breaks XML parser
-    import re as _re
-    def _clean_html_comment(m):
-        inner = m.group(1).replace('<', '[').replace('>', ']')
-        return f'<!-- {inner} -->'
-    converted_content = _re.sub(r'<!--(.*?)-->', _clean_html_comment, converted_content, flags=_re.DOTALL)
 
     output_path = merge_dir / file_name_only
     output_path.write_text(converted_content, encoding='utf-8')
