@@ -169,14 +169,15 @@ def split_mapper(file_path: str) -> dict:
         mapper_key = f"{sub_dir}/{path.name}" if sub_dir else path.name
 
         # Get existing records to preserve their status flags
+        # Check both mapper_key (with path) and path.name (without path) for backward compat
         cursor.execute(
             "SELECT sql_id, transformed, reviewed, validated, tested, completed, "
             "review_result, validation_result, test_result, review_notes, transform_count "
-            "FROM transform_target_list WHERE mapper_file = ?",
-            (mapper_key,)
+            "FROM transform_target_list WHERE mapper_file IN (?, ?)",
+            (mapper_key, path.name)
         )
         existing = {row[0]: row for row in cursor.fetchall()}
-        cursor.execute("DELETE FROM transform_target_list WHERE mapper_file = ?", (mapper_key,))
+        cursor.execute("DELETE FROM transform_target_list WHERE mapper_file IN (?, ?)", (mapper_key, path.name))
 
         # 1. Copy original to output/origin/
         origin_dir = ORIGIN_DIR / sub_dir if sub_dir else ORIGIN_DIR
@@ -221,7 +222,7 @@ def split_mapper(file_path: str) -> dict:
                     (mapper_file, sql_id, sql_type, seq_no, namespace, source_file, target_file,
                      transformed, reviewed, validated, tested, completed)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'N', 'N', 'N', 'N', 'N')
-                """, (path.name, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
+                """, (mapper_key, elem['id'], elem['type'], seq, namespace, extract_file, target_file))
 
             sql_ids.append({
                 'id': elem['id'], 'type': elem['type'], 'seq_no': seq,
