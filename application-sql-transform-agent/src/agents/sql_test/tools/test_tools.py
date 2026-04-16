@@ -232,10 +232,47 @@ def run_bulk_test(test_folder: str = "") -> dict:
 
     if not test_folder:
         # Use MERGE_DIR — merged mapper XMLs with full context (include refid resolved)
+        # Only copy mappers that have untested SQL IDs to avoid re-testing passed items
         if MERGE_DIR.exists() and any(MERGE_DIR.rglob("*.xml")):
-            test_folder = str(MERGE_DIR)
-            xml_count = len(list(MERGE_DIR.rglob("*.xml")))
-            print(f"  📋 Test 대상: MERGE_DIR ({xml_count} mapper XMLs, include refid 해석됨)", flush=True)
+            import shutil
+            import tempfile
+
+            # Find mappers with untested SELECT SQL IDs
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT mapper_file FROM transform_target_list
+                    WHERE validated = 'Y' AND tested = 'N'
+                      AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
+                """)
+                untested_mappers = {row[0] for row in cursor.fetchall()}
+
+            if not untested_mappers:
+                print("  ℹ️  No untested SQLs for Java bulk test", flush=True)
+                return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
+
+            # Copy only untested mappers to temp folder
+            tmpdir = tempfile.mkdtemp(prefix="oma_merge_test_")
+            copied = 0
+            for xml_file in MERGE_DIR.rglob("*.xml"):
+                # Match mapper filename (with or without sub_dir prefix)
+                file_name = xml_file.name
+                # Check if this mapper has untested items
+                matched = any(file_name in m for m in untested_mappers)
+                if matched:
+                    rel = xml_file.relative_to(MERGE_DIR)
+                    dst = Path(tmpdir) / rel
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(xml_file), str(dst))
+                    copied += 1
+
+            if copied == 0:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                print("  ℹ️  No matching mapper files found", flush=True)
+                return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
+
+            test_folder = tmpdir
+            print(f"  📋 Test 대상: {copied} mapper XMLs (untested only, include refid 해석됨)", flush=True)
         else:
             # Fallback: TRANSFORM_DIR (merge 안 된 경우)
             test_folder = str(TRANSFORM_DIR)
@@ -426,7 +463,10 @@ def run_bulk_test(test_folder: str = "") -> dict:
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
     finally:
-        pass  # MERGE_DIR is permanent, no temp cleanup needed
+        # Clean up temp folder if we created one
+        if 'tmpdir' in dir() and tmpdir and Path(tmpdir).exists():
+            import shutil as _shutil
+            _shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @tool
