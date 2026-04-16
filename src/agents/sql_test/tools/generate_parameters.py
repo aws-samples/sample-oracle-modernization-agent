@@ -28,7 +28,7 @@ def generate_parameters_file(output_path: str = "") -> dict:
         output_path = str(TRANSFORM_DIR / "parameters.properties")
 
     # 1. Extract all #{param} from transform XMLs
-    params, nullable_params = _extract_params_from_xmls()
+    params, nullable_params, date_formats = _extract_params_from_xmls()
     if not params:
         return {'status': 'empty', 'param_count': 0}
 
@@ -36,29 +36,33 @@ def generate_parameters_file(output_path: str = "") -> dict:
     metadata = _load_metadata()
 
     # 3. Match params to column types and generate values
-    # Priority: <if test="x != null"> → empty (skip dynamic block)
-    #           > metadata type > SQL ::cast type > default '1'
+    # Priority: nullable(empty) > date_format > metadata > ::cast > default('1')
     matched = 0
     cast_matched = 0
     nulled = 0
+    date_matched = 0
     param_values = {}
     for param_name in sorted(params):
         cast_type = params[param_name]  # ::type from SQL, or None
 
         # If param is only used inside <if test="xxx != null">, set empty
-        # → MyBatis skips the dynamic block → tests base SQL only
         if param_name in nullable_params:
             param_values[param_name] = ''
             nulled += 1
             continue
 
-        # Try metadata match first
+        # Date function format: to_date(#{param}, 'YYYYMMDD') → value matches format
+        if param_name in date_formats:
+            param_values[param_name] = date_formats[param_name]
+            date_matched += 1
+            continue
+
+        # Try metadata match
         col_type = _match_metadata(param_name, metadata)
         if col_type:
             param_values[param_name] = _value_from_type(col_type, param_name)
             matched += 1
         elif cast_type:
-            # Use SQL ::cast type as hint
             param_values[param_name] = _value_from_cast(cast_type)
             cast_matched += 1
         else:
@@ -70,13 +74,13 @@ def generate_parameters_file(output_path: str = "") -> dict:
     with open(output, 'w', encoding='utf-8') as f:
         f.write(f"# Auto-generated test parameters\n")
         f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        default_count = len(param_values) - matched - cast_matched - nulled
-        f.write(f"# Total: {len(param_values)} params (metadata: {matched}, cast: {cast_matched}, nullable: {nulled}, default: {default_count})\n\n")
+        default_count = len(param_values) - matched - cast_matched - nulled - date_matched
+        f.write(f"# Total: {len(param_values)} params (metadata: {matched}, date_func: {date_matched}, cast: {cast_matched}, nullable: {nulled}, default: {default_count})\n\n")
 
         for name, value in sorted(param_values.items()):
             f.write(f"{name}={value}\n")
 
-    print(f"  📝 parameters.properties: {len(param_values)}개 파라미터 (metadata: {matched}, cast: {cast_matched}, nullable: {nulled})", flush=True)
+    print(f"  📝 parameters.properties: {len(param_values)}개 파라미터 (metadata: {matched}, date: {date_matched}, cast: {cast_matched}, nullable: {nulled})", flush=True)
     return {
         'status': 'success',
         'param_count': len(param_values),
@@ -88,20 +92,41 @@ def generate_parameters_file(output_path: str = "") -> dict:
 _PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
 _IF_NULL_CHECK = re.compile(r'<if\s+test=["\'](\w+)\s*!=\s*null', re.IGNORECASE)
 
+# Date function patterns: to_date(#{param}, 'FORMAT') or to_timestamp(#{param}, 'FORMAT')
+_DATE_FUNC_PATTERN = re.compile(
+    r'(?:to_date|to_timestamp|str_to_date)\s*\(\s*#\{(\w+)\}[^,]*,\s*[\'"]([^\'"]+)[\'"]',
+    re.IGNORECASE
+)
+
+# Date format → sample value mapping
+_DATE_FORMAT_VALUES = {
+    'YYYYMMDD': '20250101',
+    'YYYY-MM-DD': '2025-01-01',
+    'YYYY/MM/DD': '2025/01/01',
+    'YYYYMMDDHH24MISS': '20250101000000',
+    'YYYY-MM-DD HH24:MI:SS': '2025-01-01 00:00:00',
+    'YYYY-MM-DD HH:MI:SS': '2025-01-01 00:00:00',
+    '%Y%m%d': '20250101',
+    '%Y-%m-%d': '2025-01-01',
+    '%Y-%m-%d %H:%i:%s': '2025-01-01 00:00:00',
+}
+
 
 def _extract_params_from_xmls() -> tuple:
-    """Extract #{param} names with cast types and <if> null-check context.
+    """Extract #{param} names with cast types, null-check context, and date format hints.
 
     Returns:
-        (params_dict, nullable_set)
+        (params_dict, nullable_set, date_formats)
         - params_dict: {param_name: cast_type or None}
         - nullable_set: set of param names used in <if test="xxx != null"> conditions
+        - date_formats: {param_name: sample_value} from date function patterns
     """
     params = {}
     nullable_params = set()
+    date_formats = {}
 
     if not TRANSFORM_DIR.exists():
-        return params, nullable_params
+        return params, nullable_params, date_formats
 
     for xml_file in TRANSFORM_DIR.rglob("*.xml"):
         try:
@@ -110,20 +135,32 @@ def _extract_params_from_xmls() -> tuple:
             for match in _PARAM_WITH_CAST.finditer(content):
                 param_name = match.group(1).strip()
                 cast_type = match.group(2)  # None if no ::type
-                # Handle nested property (item.name → item)
                 if '.' in param_name:
                     param_name = param_name.split('.')[0].strip()
                 if param_name and not param_name.startswith('_'):
                     if param_name not in params or cast_type:
                         params[param_name] = cast_type
 
-            # Extract <if test="xxx != null"> patterns → these params should be null/empty
+            # Extract <if test="xxx != null"> patterns
             for match in _IF_NULL_CHECK.finditer(content):
                 nullable_params.add(match.group(1).strip())
+
+            # Extract date function patterns: to_date(#{param}, 'FORMAT')
+            for match in _DATE_FUNC_PATTERN.finditer(content):
+                param_name = match.group(1).strip()
+                fmt = match.group(2).strip().upper()
+                # Find matching sample value
+                for fmt_key, sample in _DATE_FORMAT_VALUES.items():
+                    if fmt_key.upper() == fmt or fmt_key == match.group(2).strip():
+                        date_formats[param_name] = sample
+                        break
+                else:
+                    # Unknown format — default date
+                    date_formats[param_name] = '20250101'
         except Exception:
             pass
 
-    return params, nullable_params
+    return params, nullable_params, date_formats
 
 
 def _load_metadata() -> dict:
