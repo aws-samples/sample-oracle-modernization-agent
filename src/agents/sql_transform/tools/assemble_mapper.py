@@ -102,7 +102,7 @@ def assemble_mapper(mapper_file: str) -> dict:
     # e.g., <!-- 기존 쿼리 <sql id="test"> --> breaks XML parser
     import re as _re
     def _clean_html_comment(m):
-        inner = m.group(1).replace('<', '').replace('>', '')
+        inner = m.group(1).replace('<', '[').replace('>', ']')
         return f'<!-- {inner} -->'
     converted_content = _re.sub(r'<!--(.*?)-->', _clean_html_comment, converted_content, flags=_re.DOTALL)
 
