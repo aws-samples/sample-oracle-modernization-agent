@@ -98,14 +98,11 @@ def assemble_mapper(mapper_file: str) -> dict:
         merge_dir = MERGE_DIR
     merge_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize HTML comments: <!-- ... --> → /* ... */ (remove <> inside)
-    # Origin XML may have <!-- 주석 with <sql id="..."> --> which breaks MyBatis DTD validation
+    # Remove HTML comments that are outside SQL tags (at mapper level)
+    # These break MyBatis DTD validation when they contain <> or become text nodes
+    # Comments inside SQL tags are already handled by convert_sql.py
     import re as _re
-    converted_content = _re.sub(
-        r'<!--\s*(.*?)\s*-->',
-        lambda m: '/* ' + m.group(1).replace('<', '').replace('>', '') + ' */',
-        converted_content, flags=_re.DOTALL
-    )
+    converted_content = _re.sub(r'<!--.*?-->', '', converted_content, flags=_re.DOTALL)
 
     output_path = merge_dir / file_name_only
     output_path.write_text(converted_content, encoding='utf-8')
