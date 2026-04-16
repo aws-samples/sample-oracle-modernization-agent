@@ -578,6 +578,33 @@ def generate_test_report() -> dict:
 
 
 @tool
+def skip_sql(mapper_file: str, sql_id: str, reason: str = "") -> dict:
+    """Mark a single SQL ID as SKIP in test results.
+
+    Use when: "selectXxx skip해줘", "이거 skip", "skip sql selectXxx"
+
+    Args:
+        mapper_file: Mapper file name (with or without path)
+        sql_id: SQL statement ID
+        reason: Skip reason (optional)
+    """
+    import sqlite3
+    from utils.db_utils import update_by_mapper
+
+    skip_reason = reason or "사용자 요청에 의한 SKIP"
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        count = update_by_mapper(conn,
+            "UPDATE transform_target_list SET tested='Y', test_result='SKIP', test_notes=? WHERE mapper_file=? AND sql_id=?",
+            mapper_file, sql_id, extra_params=(skip_reason,))
+        conn.commit()
+
+    if count > 0:
+        print(f"  ⏭️  SKIP: {mapper_file}/{sql_id} — {skip_reason}")
+        return {'status': 'success', 'mapper_file': mapper_file, 'sql_id': sql_id, 'reason': skip_reason}
+    return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
+
+
+@tool
 def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
 

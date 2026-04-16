@@ -326,7 +326,7 @@ Review and approve conversion results with Diff Tools:
 ## Pipeline Architecture
 
 ```
-Setup → Analyze → Transform → Review (multi-perspective) → Validate → Test → Merge
+Setup → Analyze → Transform → Review (multi-perspective) → Validate → Merge → Test
                                 ↓ FAIL (specific feedback)
                           Re-convert (max 3 rounds)
 ```
