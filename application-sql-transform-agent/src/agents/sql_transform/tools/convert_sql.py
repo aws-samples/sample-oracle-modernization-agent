@@ -125,14 +125,14 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
             comment = m.group(0)
             # Replace < and > inside comment with empty string
             inner = comment[2:-2]  # strip /* and */
-            inner = inner.replace('<', '').replace('>', '')
+            inner = inner.replace('<', '[').replace('>', ']')
             return f"/*{inner}*/"
         return re.sub(r'/\*.*?\*/', _clean_comment, sql, flags=re.DOTALL)
 
     converted_sql = _sanitize_sql_comments(converted_sql)
 
     # Build individual XML file (same format as xmlExtractor output)
-    sanitized_notes = notes.replace('<', '').replace('>', '') if notes else ""
+    sanitized_notes = notes.replace('<', '[').replace('>', ']') if notes else ""
     note_comment = f"\n<!-- NOTES: {sanitized_notes} -->" if sanitized_notes else ""
     output_content = f"""{xml_header}
 {xml_doctype}

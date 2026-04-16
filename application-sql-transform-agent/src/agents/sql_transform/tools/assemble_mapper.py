@@ -98,14 +98,13 @@ def assemble_mapper(mapper_file: str) -> dict:
         merge_dir = MERGE_DIR
     merge_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize HTML comments: <!-- ... --> → /* ... */ (remove <> inside)
-    # Origin XML may have <!-- 주석 with <sql id="..."> --> which breaks MyBatis DTD validation
+    # Sanitize HTML comments: remove <> inside <!-- --> to prevent SAXParseException
+    # e.g., <!-- 기존 쿼리 <sql id="test"> --> breaks XML parser
     import re as _re
-    converted_content = _re.sub(
-        r'<!--\s*(.*?)\s*-->',
-        lambda m: '/* ' + m.group(1).replace('<', '').replace('>', '') + ' */',
-        converted_content, flags=_re.DOTALL
-    )
+    def _clean_html_comment(m):
+        inner = m.group(1).replace('<', '[').replace('>', ']')
+        return f'<!-- {inner} -->'
+    converted_content = _re.sub(r'<!--(.*?)-->', _clean_html_comment, converted_content, flags=_re.DOTALL)
 
     output_path = merge_dir / file_name_only
     output_path.write_text(converted_content, encoding='utf-8')
