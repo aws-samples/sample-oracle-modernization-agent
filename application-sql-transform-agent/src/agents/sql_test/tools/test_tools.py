@@ -251,25 +251,55 @@ def run_bulk_test(test_folder: str = "") -> dict:
                 print("  ℹ️  No untested SQLs for Java bulk test", flush=True)
                 return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
 
-            # Copy only untested mappers to temp folder
+            # Copy untested mappers + their include-refid dependencies to temp folder
             tmpdir = tempfile.mkdtemp(prefix="oma_merge_test_")
-            copied = 0
-            for xml_file in MERGE_DIR.rglob("*.xml"):
-                # Match mapper filename (with or without sub_dir prefix)
-                file_name = xml_file.name
-                # Check if this mapper has untested items
-                matched = any(file_name in m for m in untested_mappers)
-                if matched:
+            all_merge_xmls = {f.name: f for f in MERGE_DIR.rglob("*.xml")}
+
+            # Step 1: Copy untested mappers
+            copied_files = set()
+            for xml_file in all_merge_xmls.values():
+                if any(xml_file.name in m for m in untested_mappers):
                     rel = xml_file.relative_to(MERGE_DIR)
                     dst = Path(tmpdir) / rel
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(xml_file), str(dst))
-                    copied += 1
+                    copied_files.add(xml_file.name)
 
-            if copied == 0:
+            # Step 2: Find include refid dependencies and copy referenced mappers
+            import re as _re
+            refids_needed = set()
+            for xml_file in Path(tmpdir).rglob("*.xml"):
+                try:
+                    content = xml_file.read_text(encoding='utf-8')
+                    for m in _re.finditer(r'<include\s+refid=["\']([^"\']+)', content):
+                        refids_needed.add(m.group(1))
+                except Exception:
+                    pass
+
+            if refids_needed:
+                # Find mappers that define these sql fragments
+                for xml_name, xml_path in all_merge_xmls.items():
+                    if xml_name in copied_files:
+                        continue
+                    try:
+                        content = xml_path.read_text(encoding='utf-8')
+                        for refid in refids_needed:
+                            if f'id="{refid}"' in content or f"id='{refid}'" in content:
+                                rel = xml_path.relative_to(MERGE_DIR)
+                                dst = Path(tmpdir) / rel
+                                dst.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(str(xml_path), str(dst))
+                                copied_files.add(xml_name)
+                                break
+                    except Exception:
+                        pass
+
+            if not copied_files:
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 print("  ℹ️  No matching mapper files found", flush=True)
                 return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
+
+            dep_count = len(copied_files) - len([f for f in copied_files if any(f in m for m in untested_mappers)])
 
             # Copy parameters.properties if exists
             params_file = TRANSFORM_DIR / "parameters.properties"
@@ -277,7 +307,8 @@ def run_bulk_test(test_folder: str = "") -> dict:
                 shutil.copy2(str(params_file), str(Path(tmpdir) / "parameters.properties"))
 
             test_folder = tmpdir
-            print(f"  📋 Test 대상: {copied} mapper XMLs (untested only, include refid 해석됨)", flush=True)
+            untested_count = len(copied_files) - dep_count
+            print(f"  📋 Test 대상: {untested_count} mapper XMLs + {dep_count} dependency (include refid 해석)", flush=True)
         else:
             # Fallback: TRANSFORM_DIR (merge 안 된 경우)
             test_folder = str(TRANSFORM_DIR)
