@@ -28,7 +28,7 @@ def generate_parameters_file(output_path: str = "") -> dict:
         output_path = str(TRANSFORM_DIR / "parameters.properties")
 
     # 1. Extract all #{param} from transform XMLs
-    params, nullable_params, date_formats = _extract_params_from_xmls()
+    params, nullable_params, date_formats, conditional_values, collection_params = _extract_params_from_xmls()
     if not params:
         return {'status': 'empty', 'param_count': 0}
 
@@ -41,14 +41,28 @@ def generate_parameters_file(output_path: str = "") -> dict:
     cast_matched = 0
     nulled = 0
     date_matched = 0
+    cond_matched = 0
+    coll_count = 0
     param_values = {}
     for param_name in sorted(params):
         cast_type = params[param_name]  # ::type from SQL, or None
+
+        # Collection params (<foreach>) → need special handling in Java
+        if param_name in collection_params:
+            param_values[param_name] = '__LIST__'  # Marker for Java to create ArrayList
+            coll_count += 1
+            continue
 
         # If param is only used inside <if test="xxx != null">, set empty
         if param_name in nullable_params:
             param_values[param_name] = ''
             nulled += 1
+            continue
+
+        # Conditional value: <if test="flag == 'Y'"> → flag = Y
+        if param_name in conditional_values:
+            param_values[param_name] = conditional_values[param_name]
+            cond_matched += 1
             continue
 
         # Date function format: to_date(#{param}, 'YYYYMMDD') → value matches format
@@ -74,13 +88,13 @@ def generate_parameters_file(output_path: str = "") -> dict:
     with open(output, 'w', encoding='utf-8') as f:
         f.write(f"# Auto-generated test parameters\n")
         f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        default_count = len(param_values) - matched - cast_matched - nulled - date_matched
-        f.write(f"# Total: {len(param_values)} params (metadata: {matched}, date_func: {date_matched}, cast: {cast_matched}, nullable: {nulled}, default: {default_count})\n\n")
+        default_count = len(param_values) - matched - cast_matched - nulled - date_matched - cond_matched - coll_count
+        f.write(f"# Total: {len(param_values)} params (metadata: {matched}, date: {date_matched}, cond: {cond_matched}, cast: {cast_matched}, nullable: {nulled}, list: {coll_count}, default: {default_count})\n\n")
 
         for name, value in sorted(param_values.items()):
             f.write(f"{name}={value}\n")
 
-    print(f"  📝 parameters.properties: {len(param_values)}개 파라미터 (metadata: {matched}, date: {date_matched}, cast: {cast_matched}, nullable: {nulled})", flush=True)
+    print(f"  📝 parameters.properties: {len(param_values)}개 (meta:{matched} date:{date_matched} cond:{cond_matched} cast:{cast_matched} null:{nulled} list:{coll_count})", flush=True)
     return {
         'status': 'success',
         'param_count': len(param_values),
@@ -92,6 +106,13 @@ def generate_parameters_file(output_path: str = "") -> dict:
 _PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
 _DOLLAR_PARAM = re.compile(r'\$\{(\w+)\}')
 _IF_NULL_CHECK = re.compile(r'<if\s+test=["\'](\w+)\s*!=\s*null', re.IGNORECASE)
+# @StringUtil@isNotEmpty(param) or @ApiUtil@notEmpty(param) — also nullable
+# @StringUtil@isNotEmpty(param), @CmFunction@notEmpty(param), etc.
+_IF_UTIL_CHECK = re.compile(r'@[\w.]+@(?:isNotEmpty|notEmpty|isEmpty|empty)\((\w+)\)', re.IGNORECASE)
+# <if test="flag == 'Y'"> or <when test="type == 'A'"> — extract param + comparison value
+_IF_EQUALS_CHECK = re.compile(r'<(?:if|when)\s+test=["\'](\w+)\s*==\s*[\'"]([^\'"]+)[\'"]', re.IGNORECASE)
+# <foreach collection="list" — extract collection param name
+_FOREACH_COLLECTION = re.compile(r'<foreach\s+[^>]*collection=["\'](\w+)["\']', re.IGNORECASE)
 
 # Date function patterns: to_date(#{param}, 'FORMAT') or to_timestamp(#{param}, 'FORMAT')
 _DATE_FUNC_PATTERN = re.compile(
@@ -114,20 +135,24 @@ _DATE_FORMAT_VALUES = {
 
 
 def _extract_params_from_xmls() -> tuple:
-    """Extract #{param} names with cast types, null-check context, and date format hints.
+    """Extract #{param} names with cast types, null-check context, date formats, and conditional values.
 
     Returns:
-        (params_dict, nullable_set, date_formats)
+        (params_dict, nullable_set, date_formats, conditional_values, collection_params)
         - params_dict: {param_name: cast_type or None}
-        - nullable_set: set of param names used in <if test="xxx != null"> conditions
+        - nullable_set: set of param names used in <if test="xxx != null"> or ${} conditions
         - date_formats: {param_name: sample_value} from date function patterns
+        - conditional_values: {param_name: value} from <if test="flag == 'Y'"> patterns
+        - collection_params: set of param names used in <foreach collection="xxx">
     """
     params = {}
     nullable_params = set()
     date_formats = {}
+    conditional_values = {}
+    collection_params = set()
 
     if not TRANSFORM_DIR.exists():
-        return params, nullable_params, date_formats
+        return params, nullable_params, date_formats, conditional_values, collection_params
 
     for xml_file in TRANSFORM_DIR.rglob("*.xml"):
         try:
@@ -155,6 +180,10 @@ def _extract_params_from_xmls() -> tuple:
             for match in _IF_NULL_CHECK.finditer(content):
                 nullable_params.add(match.group(1).strip())
 
+            # Extract @StringUtil@isNotEmpty(param) — same as null check
+            for match in _IF_UTIL_CHECK.finditer(content):
+                nullable_params.add(match.group(1).strip())
+
             # Extract date function patterns: to_date(#{param}, 'FORMAT')
             for match in _DATE_FUNC_PATTERN.finditer(content):
                 param_name = match.group(1).strip()
@@ -167,10 +196,21 @@ def _extract_params_from_xmls() -> tuple:
                 else:
                     # Unknown format — default date
                     date_formats[param_name] = '20250101'
+
+            # Extract <if test="flag == 'Y'"> → flag = 'Y'
+            for match in _IF_EQUALS_CHECK.finditer(content):
+                param_name = match.group(1).strip()
+                value = match.group(2).strip()
+                if param_name and value:
+                    conditional_values[param_name] = value
+
+            # Extract <foreach collection="list"> → list is a collection param
+            for match in _FOREACH_COLLECTION.finditer(content):
+                collection_params.add(match.group(1).strip())
         except Exception:
             pass
 
-    return params, nullable_params, date_formats
+    return params, nullable_params, date_formats, conditional_values, collection_params
 
 
 def _load_metadata() -> dict:

@@ -75,50 +75,66 @@ Level 3: Equivalence Test (향후 — Oracle vs Target 비교)
   └── 컬럼별 diff 리포트
 ```
 
-### 2.2 Smart Parameter Generator
+### 2.2 Smart Parameter Generator (✅ Phase 1 대부분 구현 완료)
 
 ```
-파라미터 결정 우선순위:
+파라미터 결정 우선순위 (구현 완료):
 1. 사용자 제공 (parameters.properties) — 있으면 최우선
-2. DB 메타데이터 (oma_metadata.json) — 컬럼 타입 기반
-3. SQL ::cast 타입 — #{param}::date → date 값
-4. MyBatis XML 컨텍스트 분석:
-   - <if test="flag == 'Y'"> → flag = 'Y'
-   - <foreach collection="list"> → list = ['1']
-   - ${tableName} → 실제 테이블명 (메타데이터에서)
-5. 기본값 '1'
+2. <if test="x != null"> → 빈값 (동적 블록 skip) ✅
+3. ${dollar} params → 빈값 (SQL 구조 파라미터, 에러 시 SKIP) ✅
+4. 날짜 함수 포맷 → to_date(#{p}, 'YYYYMMDD') → '20250101' ✅
+5. DB 메타데이터 (oma_metadata.json) — 컬럼 타입 기반 ✅
+6. SQL ::cast 타입 — #{param}::date → date 값 ✅
+7. 기본값 '1' ✅
+
+미구현 (Phase 1 잔여):
+- <if test="flag == 'Y'"> → 비교값 'Y' 추론
+- <foreach collection="list"> → List 타입 파라미터 생성
 ```
 
 ### 2.3 동적 SQL 처리 전략
 
-| 동적 태그 | 현재 | 개선 |
-|----------|------|------|
-| `<if test="x != null">` | 파라미터 있으면 true | ✅ 동일 (파라미터 품질 향상) |
-| `<if test="x == 'Y'">` | '1' ≠ 'Y' → false | 컨텍스트에서 'Y' 추론 |
-| `<choose><when>` | 첫 분기만 | 각 분기별 파라미터 세트 생성 |
-| `<foreach>` | NPE → SKIP | List 타입 파라미터 생성 |
-| `${param}` | '1' → SQL 에러 | 메타데이터에서 테이블/컬럼명 추론 |
-| `<where>` | 조건 있으면 WHERE 생성 | ✅ 동일 |
+| 동적 태그 | 현재 구현 | 상태 |
+|----------|----------|:----:|
+| `<if test="x != null">` | nullable(빈값) → 분기 skip | ✅ |
+| `<if test="x == 'Y'">` | 컨텍스트에서 'Y' 추론 필요 | ❌ Phase 1 잔여 |
+| `<choose><when>` | 각 분기별 파라미터 세트 필요 | ❌ Phase 2 |
+| `<foreach>` | NPE → SKIP (Java List 지원 필요) | ❌ Phase 1 잔여 |
+| `${param}` | 빈값 → 에러 시 SKIP | ✅ |
+| `<where>` | 조건 없으면 WHERE 미생성 (정상) | ✅ |
 
 ---
 
 ## 3. 구현 범위 (3 Phase)
 
-### Phase 1: Smart Parameter Generator (단기)
-- **XML 컨텍스트 분석**: `<if test="flag == 'Y'">` → `flag=Y` 추론
-- **`<foreach>` 감지**: Collection 파라미터 → `['1']` 리스트 생성
-- **`${param}` 감지**: 사용 위치 분석 (FROM → 테이블명, ORDER BY → 숫자)
-- **parameters.properties 고도화**: 타입별 적절한 값 자동 생성
+### Phase 1: Smart Parameter Generator — ✅ 대부분 완료
+
+**구현 완료:**
+- `<if test="x != null">` 파라미터 → 빈값 (동적 블록 skip)
+- `${param}` → 빈값 (SQL 구조 파라미터, SKIP 대상)
+- 날짜 함수 포맷 추론: `to_date(#{p}, 'YYYYMMDD')` → `20250101`
+- SQL `::cast` 타입 추론: `#{p}::date` → `2025-01-01`
+- 메타데이터 기반 컬럼 타입 매칭
+- `cleanParameterValue` 빈값 유지 (빈문자열 → '1' 변환 제거)
+- `executeSingleSqlWithResults` auto-fill 추가
+- `parameter setup` Orchestrator 도구
+- Phase 2 Agent fix opt-in (`--fix` 플래그)
+
+**잔여 (Phase 1.5):**
+- `<if test="flag == 'Y'">` → XML에서 비교값 추출해서 `flag=Y`
+- `<foreach collection="list">` → Java에서 List 타입 파라미터 지원
+- `<bind>` 표현식 처리
 
 ### Phase 2: MyBatis-Native Test Engine (중기)
-- **전체 Mapper 로딩**: 개별 SQL이 아닌 전체 mapper context로 테스트
-- **SqlSession 기반**: 실제 MyBatis 동적 SQL 해석 엔진 활용
-- **트랜잭션 관리**: 자동 rollback (데이터 변경 방지)
-- **멀티 파라미터 세트**: 하나의 SQL에 여러 파라미터 조합 테스트
+- **전체 Mapper 로딩**: ✅ MERGE_DIR 기반 (dependency mapper 자동 복사 포함)
+- **SqlSession 기반**: ✅ 기존 Java executor 활용
+- **트랜잭션 관리**: ✅ 자동 rollback
+- **Query timeout**: ✅ 5s → PASS 처리
+- **멀티 파라미터 세트**: ❌ 하나의 SQL에 여러 파라미터 조합 테스트
 
 ### Phase 3: Production Test Suite (장기)
 - **CI/CD 통합**: Jenkins/GitHub Actions에서 자동 실행
-- **Oracle ↔ Target 결과 비교**: 동일 파라미터로 양쪽 실행 + diff
+- **Oracle ↔ Target 결과 비교**: 동일 파라미터로 양쪽 실행 + diff (Java --compare 기능 있음)
 - **Test Case 관리**: 프로젝트별 테스트 케이스 저장/재사용
 - **성능 벤치마크**: 실행 시간 비교 리포트
 
@@ -202,3 +218,4 @@ main (현재 안정 버전)
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 0.1 | 2026-04-17 | Initial draft | Plan |
+| 0.2 | 2026-04-17 | Phase 1 대부분 구현 완료 반영, 잔여 항목 정리 | - |
