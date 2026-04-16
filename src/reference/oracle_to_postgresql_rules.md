@@ -854,6 +854,16 @@ A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldkey
 ```
 **NEVER change column names in JOIN conditions.** Only lowercase them. Even if it looks like a bug in the original, preserve the original logic.
 
+### 12. include refid Value Changed (Hallucination)
+```sql
+-- ❌ WRONG: refid inferred from SQL ID name (hallucination)
+<include refid="sql_tOrderCtgDiv"/>   -- LLM guessed from selectTOrderCtgDiv
+
+-- ✅ RIGHT: original refid preserved exactly
+<include refid="sql_tOrderMstAdcdUnion"/>  -- this is what the original had
+```
+**NEVER change `<include refid="..."/>` values.** Copy the refid from the original SQL verbatim. Do NOT infer/guess refid names based on the SQL ID or naming patterns.
+
 ---
 
 ## Critical Rules
