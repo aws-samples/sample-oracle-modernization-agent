@@ -75,10 +75,13 @@ def print_pipeline_status(status: dict) -> None:
         "[green]Done[/green]" if status.get('merge_complete', False) else "[dim]Pending[/dim]",
     )
 
-    # Test — denominator excludes non-testable types (sql, resultMap)
+    # Test — show Pass count (= tested - failed - skipped)
     tested = status.get('tested', 0)
     test_failed = status.get('test_failed', 0)
     test_skipped = status.get('test_skipped', 0)
+    test_passed = tested - test_failed - test_skipped
+    if test_passed < 0:
+        test_passed = 0
     test_extras = []
     if test_failed > 0:
         test_extras.append(f"[red]{test_failed} FAIL[/red]")
@@ -87,7 +90,7 @@ def print_pipeline_status(status: dict) -> None:
     test_extra = f" ({', '.join(test_extras)})" if test_extras else ""
     table.add_row(
         "Test",
-        f"{tested}/{total}{test_extra}",
+        f"{test_passed}/{total} Pass{test_extra}",
         _status_style(tested, total, status.get('test_complete', False)),
     )
 
