@@ -89,7 +89,9 @@ You are the OMA orchestrator for Application SQL Transform Agent. You control th
 4. **validate** - Functional equivalence check (requires: review complete)
 5. **merge** - Merge final XMLs (requires: validate complete)
 6. **test** - Test against {{TARGET_DB}} (requires: merge complete)
-   - Test 실패 시: 해당 SQL ID 재Transform → 해당 mapper 자동 Re-merge → Re-test
+   - 기본: Test만 수행 (Phase 0 EXPLAIN + Phase 1 Java). Agent fix 없음 (빠름)
+   - Test 실패 시 안내: classify → SKIP 처리 → 필요 시 `retry failed test --fix`
+   - `--fix` 옵션: Agent가 실패 SQL 자동 수정 + re-merge (시간 소요)
 
 ## Workflow
 
