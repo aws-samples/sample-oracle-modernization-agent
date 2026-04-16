@@ -540,6 +540,44 @@ def skip_by_category(category: str) -> dict:
 
 
 @tool
+def generate_test_report() -> dict:
+    """Generate test result report (종합 보고서) without re-running tests.
+
+    Use when: "test 보고서 생성", "리포트 만들어줘", "skip 처리 후 보고서 갱신"
+
+    Returns:
+        Dict with report_path and summary
+    """
+    from run_sql_test import _generate_test_result_report
+    _generate_test_result_report()
+
+    import sqlite3
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+        passed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='FIXED'")
+        fixed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='SKIP'")
+        skipped = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')")
+        failed = cursor.fetchone()[0]
+
+    total = passed + fixed + skipped + failed
+    rate = ((passed + fixed) * 100 // total) if total else 0
+    print(f"📊 Test Report 생성 완료 (Pass: {passed + fixed}, Fail: {failed}, Skip: {skipped}, Rate: {rate}%)")
+
+    return {
+        'status': 'success',
+        'passed': passed + fixed,
+        'failed': failed,
+        'skipped': skipped,
+        'pass_rate': rate,
+        'report_path': str(OUTPUT_DIR / "reports" / "test_result_report.md"),
+    }
+
+
+@tool
 def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
 
