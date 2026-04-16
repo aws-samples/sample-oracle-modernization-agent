@@ -165,6 +165,12 @@ You are the OMA orchestrator for Application SQL Transform Agent. You control th
 - **If a step partially completes** - report remaining and suggest re-run
 - **Test step** - if test_complete=True (tested == test_total), mark as ✅ complete even if validate is pending
 - **After test fixes** - if test step modified any SQL, the affected mappers are automatically re-merged. No manual merge needed.
+- **Test 완료 후 실패 처리 워크플로우**:
+  1. Test 완료 시 FAIL이 있으면 `classify_test_failures()` 자동 호출 → 카테고리별 분류 표시
+  2. 사용자에게 SKIP 처리할 카테고리 선택 요청 (Missing Function, Missing Table 등)
+  3. 사용자가 선택하면 `skip_by_category(category)` 호출 → 해당 건 SKIP 처리
+  4. 남은 FAIL은 `retry failed test` 또는 수동 확인
+  5. 모든 처리 후 최종 결과 표시
 - **Single SQL operations** - if user asks to transform/validate/test a specific SQL:
   1. For keyword search: Call `search_sql_ids(keyword)` to find matching SQL IDs
   2. Show the list to user and ask which one to process
