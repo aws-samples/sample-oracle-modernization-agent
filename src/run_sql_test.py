@@ -485,7 +485,122 @@ def _pre_mark_skips(log_fn=print) -> int:
 
 
 def _generate_test_result_report():
-    """Generate combined test result report (Failed + Skip)."""
+    """Generate combined test result report (Pass/Fail/Skip summary + details)."""
+    from datetime import datetime
+
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+
+        # Counts
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+        passed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='FIXED'")
+        fixed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='SKIP'")
+        skipped = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')")
+        failed = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+        total = cursor.fetchone()[0]
+
+        # Failed details
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, test_result, test_notes
+            FROM transform_target_list
+            WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')
+            ORDER BY mapper_file, seq_no
+        """)
+        fail_rows = cursor.fetchall()
+
+        # Skip details
+        cursor.execute("""
+            SELECT mapper_file, sql_id, sql_type, test_notes
+            FROM transform_target_list
+            WHERE test_result = 'SKIP'
+            ORDER BY mapper_file, seq_no
+        """)
+        skip_rows = cursor.fetchall()
+
+    tested_total = passed + fixed + skipped + failed
+    pass_rate = ((passed + fixed) * 100 // tested_total) if tested_total else 0
+
+    lines = [
+        "# Test 종합 보고서",
+        f"\n**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"\n## Summary\n",
+        f"| 항목 | 건수 | 비율 |",
+        f"|------|:----:|:----:|",
+        f"| ✅ Pass | {passed} | |",
+    ]
+    if fixed > 0:
+        lines.append(f"| ✅ Fixed | {fixed} | |")
+    lines.extend([
+        f"| ❌ Fail | {failed} | |",
+        f"| ⏭️ Skip | {skipped} | |",
+        f"| **Tested** | **{tested_total}** / {total} | **Pass Rate: {pass_rate}%** |",
+    ])
+
+    # Failed 분류
+    if fail_rows:
+        fail_categories = {}
+        for mapper, sql_id, sql_type, result, notes in fail_rows:
+            error = (notes or result or '').lower()
+            if 'does not exist' in error and 'function' in error:
+                cat = 'Missing Function'
+            elif 'does not exist' in error and ('relation' in error or 'table' in error):
+                cat = 'Missing Table'
+            elif 'does not exist' in error and 'column' in error:
+                cat = 'Missing Column'
+            elif 'syntax error' in error:
+                cat = 'Syntax Error'
+            elif 'type' in error and ('mismatch' in error or 'cast' in error or 'operator' in error):
+                cat = 'Type Mismatch'
+            elif 'saxparse' in error or 'xml' in error:
+                cat = 'XML Parse Error'
+            else:
+                cat = 'Other'
+            if cat not in fail_categories:
+                fail_categories[cat] = []
+            fail_categories[cat].append((mapper, sql_id, notes or result or ''))
+
+        lines.append(f"\n## ❌ Failed ({failed}건)\n")
+        for cat, items in sorted(fail_categories.items(), key=lambda x: -len(x[1])):
+            lines.append(f"### {cat} ({len(items)}건)\n")
+            lines.append("| XML | SQL ID | 오류 |")
+            lines.append("|-----|--------|------|")
+            for mapper, sql_id, error in items:
+                lines.append(f"| {mapper} | {sql_id} | {error[:80]} |")
+            lines.append("")
+
+    # Skip 분류
+    if skip_rows:
+        skip_categories = {}
+        for mapper, sql_id, sql_type, notes in skip_rows:
+            reason = notes or 'Unknown'
+            # Group by first part of reason
+            group = reason.split(' — ')[0] if ' — ' in reason else reason.split(':')[0] if ':' in reason else reason[:30]
+            if group not in skip_categories:
+                skip_categories[group] = []
+            skip_categories[group].append((mapper, sql_id, sql_type, reason))
+
+        lines.append(f"\n## ⏭️ Skip ({skipped}건)\n")
+        for group, items in sorted(skip_categories.items(), key=lambda x: -len(x[1])):
+            lines.append(f"### {group} ({len(items)}건)\n")
+            lines.append("| XML | SQL ID | Type | 사유 |")
+            lines.append("|-----|--------|------|------|")
+            for mapper, sql_id, sql_type, reason in items[:10]:  # Show first 10 per category
+                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason[:60]} |")
+            if len(items) > 10:
+                lines.append(f"| ... | ... | ... | +{len(items) - 10}건 |")
+            lines.append("")
+
+    REPORTS_DIR = OUTPUT_DIR / "reports"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORTS_DIR / "test_result_report.md"
+    report_path.write_text('\n'.join(lines), encoding='utf-8')
+    print(f"📊 종합 보고서: {report_path}", flush=True)
+
+    # Also generate individual reports for backward compatibility
     _generate_test_failure_report()
     _generate_test_skip_report()
 
