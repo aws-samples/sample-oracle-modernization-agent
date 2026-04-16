@@ -578,6 +578,43 @@ def generate_test_report() -> dict:
 
 
 @tool
+def setup_test_parameters() -> dict:
+    """Generate or regenerate parameters.properties for test execution.
+
+    Use when: "parameter setup", "파라미터 초기화", "파라미터 생성",
+    "parameters.properties 만들어줘", "테스트 파라미터 세팅"
+
+    Scans transform XMLs and generates type-appropriate parameter values:
+    - <if test="xxx != null"> params → empty (skip dynamic blocks)
+    - Metadata-matched params → type-accurate values
+    - SQL ::cast params → cast-based values
+    - Others → default '1'
+
+    Force regeneration even if file already exists.
+    """
+    from utils.project_paths import TRANSFORM_DIR
+    from agents.sql_test.tools.generate_parameters import generate_parameters_file
+
+    params_file = str(TRANSFORM_DIR / "parameters.properties")
+
+    # Delete existing to force regeneration
+    from pathlib import Path
+    p = Path(params_file)
+    if p.exists():
+        p.unlink()
+        print(f"  🗑️  기존 parameters.properties 삭제", flush=True)
+
+    result = generate_parameters_file(params_file)
+
+    if result.get('status') == 'success':
+        print(f"  ✅ parameters.properties 생성 완료", flush=True)
+    else:
+        print(f"  ⚠️  생성 실패: {result}", flush=True)
+
+    return result
+
+
+@tool
 def skip_sql(mapper_file: str, sql_id: str, reason: str = "") -> dict:
     """Mark a single SQL ID as SKIP in test results.
 
