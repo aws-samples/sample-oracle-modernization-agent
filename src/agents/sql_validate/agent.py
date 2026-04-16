@@ -29,6 +29,8 @@ def _load_system_prompt():
 
 
 def create_sql_validate_agent(*, suppress_streaming: bool = False) -> Agent:
+    from strands.agent.conversation_manager import SlidingWindowConversationManager
+
     model = BedrockModel(
         model_id=MODEL_ID,
         max_tokens=64000,
@@ -40,6 +42,11 @@ def create_sql_validate_agent(*, suppress_streaming: bool = False) -> Agent:
         "system_prompt": _load_system_prompt(),
         "tools": [get_pending_validations, read_sql_source, read_transform,
                   convert_sql, set_validated, lookup_column_type],
+        # Safety net: trim old messages on context overflow (primary fix: small group size)
+        "conversation_manager": SlidingWindowConversationManager(
+            window_size=180000,
+            should_truncate_results=True,
+        ),
     }
     if suppress_streaming:
         kwargs["callback_handler"] = None
