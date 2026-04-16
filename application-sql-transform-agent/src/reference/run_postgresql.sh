@@ -82,7 +82,7 @@ if [ -z "$TEST_FOLDER" ] && [ -n "$1" ]; then
     export TEST_FOLDER="$1"
 fi
 
-java -cp ".:lib/*" com.test.mybatis.MyBatisBulkExecutorWithJson "$@" --db postgres --all
+java -cp ".:lib/*" com.test.mybatis.MyBatisBulkExecutorWithJson "$@" --db postgres --select-only
 
 echo ""
 echo "=== Execution Completed ==="
