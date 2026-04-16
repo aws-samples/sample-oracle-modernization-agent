@@ -502,6 +502,8 @@ def _generate_test_result_report():
         failed = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list")
         total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='N' AND LOWER(sql_type) IN ('select','insert','update','delete')")
+        untested = cursor.fetchone()[0]
 
         # Failed details
         cursor.execute("""
@@ -524,21 +526,26 @@ def _generate_test_result_report():
     tested_total = passed + fixed + skipped + failed
     pass_rate = ((passed + fixed) * 100 // tested_total) if tested_total else 0
 
+    def _pct(n):
+        return f"{n * 100 // total:.0f}%" if total else "0%"
+
     lines = [
         "# Test 종합 보고서",
         f"\n**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"\n## Summary\n",
         f"| 항목 | 건수 | 비율 |",
         f"|------|:----:|:----:|",
-        f"| ✅ Pass | {passed} | |",
+        f"| ✅ Pass | {passed} | {_pct(passed)} |",
     ]
     if fixed > 0:
-        lines.append(f"| ✅ Fixed | {fixed} | |")
+        lines.append(f"| ✅ Fixed | {fixed} | {_pct(fixed)} |")
     lines.extend([
-        f"| ❌ Fail | {failed} | |",
-        f"| ⏭️ Skip | {skipped} | |",
-        f"| **Tested** | **{tested_total}** / {total} | **Pass Rate: {pass_rate}%** |",
+        f"| ❌ Fail | {failed} | {_pct(failed)} |",
+        f"| ⏭️ Skip | {skipped} | {_pct(skipped)} |",
     ])
+    if untested > 0:
+        lines.append(f"| ⏳ Not Tested | {untested} | {_pct(untested)} |")
+    lines.append(f"| **Total** | **{total}** | **Pass Rate: {pass_rate}%** |")
 
     # Failed 분류
     if fail_rows:
@@ -588,10 +595,8 @@ def _generate_test_result_report():
             lines.append(f"### {group} ({len(items)}건)\n")
             lines.append("| XML | SQL ID | Type | 사유 |")
             lines.append("|-----|--------|------|------|")
-            for mapper, sql_id, sql_type, reason in items[:10]:  # Show first 10 per category
-                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason[:60]} |")
-            if len(items) > 10:
-                lines.append(f"| ... | ... | ... | +{len(items) - 10}건 |")
+            for mapper, sql_id, sql_type, reason in items:
+                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason[:80]} |")
             lines.append("")
 
     REPORTS_DIR = OUTPUT_DIR / "reports"
