@@ -253,17 +253,34 @@ def run_bulk_test(test_folder: str = "") -> dict:
 
             # Copy untested mappers + their include-refid dependencies to temp folder
             tmpdir = tempfile.mkdtemp(prefix="oma_merge_test_")
-            all_merge_xmls = {f.name: f for f in MERGE_DIR.rglob("*.xml")}
+            # Build full relative path → absolute path mapping
+            all_merge_xmls = {}
+            for f in MERGE_DIR.rglob("*.xml"):
+                rel = str(f.relative_to(MERGE_DIR))
+                all_merge_xmls[rel] = f
 
-            # Step 1: Copy untested mappers
+            # Step 1: Copy untested mappers (strict path matching)
             copied_files = set()
-            for xml_file in all_merge_xmls.values():
-                if any(xml_file.name in m for m in untested_mappers):
-                    rel = xml_file.relative_to(MERGE_DIR)
-                    dst = Path(tmpdir) / rel
+            for xml_rel, xml_path in all_merge_xmls.items():
+                # Strict match: mapper_file must match exactly or as path suffix
+                # e.g., DB has "api/Mapper.xml" → xml_rel "api/Mapper.xml" matches
+                # e.g., DB has "Mapper.xml" → only matches if no duplicate filenames
+                is_match = False
+                for m in untested_mappers:
+                    if m == xml_rel:
+                        is_match = True  # Exact path match
+                        break
+                    if m == xml_path.name:
+                        # Filename-only match — only if unique
+                        dupes = [u for u in untested_mappers if Path(u).name == xml_path.name]
+                        if len(dupes) == 1:
+                            is_match = True
+                            break
+                if is_match:
+                    dst = Path(tmpdir) / xml_rel
                     dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(xml_file), str(dst))
-                    copied_files.add(xml_file.name)
+                    shutil.copy2(str(xml_path), str(dst))
+                    copied_files.add(xml_rel)
 
             # Step 2: Find include refid dependencies and copy referenced mappers
             import re as _re

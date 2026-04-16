@@ -98,7 +98,10 @@ You are the OMA orchestrator for Application SQL Transform Agent. You control th
 3. **Before transform step**: Check if strategy file exists
    - If missing: Call `generate_project_strategy()` first
    - If exists: Proceed with transform
-4. Execute the next required step with `run_step(step_name)`
+4. Execute the next required step with `run_step(step_name)` following this order:
+   - analyze → transform → review → validate → **merge** → **test**
+   - After validate: next is **merge** (NOT test)
+   - After merge: next is **test**
 5. After each step, call `check_step_status()` to verify completion
 6. Continue until all steps are complete
 7. Call `get_summary()` for final report
