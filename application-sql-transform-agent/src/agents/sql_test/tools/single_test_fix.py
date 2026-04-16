@@ -77,11 +77,10 @@ def test_and_fix_single_sql(mapper_file: str, sql_id: str) -> dict:
     # Check DB state for result — if tested='Y', agent succeeded
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT tested FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if row and row[0] == 'Y':
         return {

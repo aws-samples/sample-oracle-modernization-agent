@@ -20,11 +20,12 @@ def read_transform(mapper_file: str, sql_id: str) -> dict:
     """
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(
+            cursor,
             "SELECT target_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
+            mapper_file, sql_id
         )
-        row = cursor.fetchone()
 
     if not row:
         return {'error': f'Not found: {mapper_file}/{sql_id}'}
@@ -57,11 +58,10 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                conn.execute("""
-                    UPDATE transform_target_list
-                    SET validated = 'Y', validation_result = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE mapper_file = ? AND sql_id = ?
-                """, (result, mapper_file, sql_id))
+                from utils.db_utils import update_by_mapper
+                update_by_mapper(conn,
+                    "UPDATE transform_target_list SET validated='Y', validation_result=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(result,))
                 conn.commit()
             flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
             print(f"  {flag} {mapper_file}/{sql_id} {notes}")

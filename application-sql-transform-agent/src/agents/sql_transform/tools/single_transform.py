@@ -30,11 +30,10 @@ def transform_single_sql(mapper_file: str, sql_id: str) -> dict:
     """
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT id FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if not row:
         return {
@@ -67,11 +66,10 @@ def transform_single_sql(mapper_file: str, sql_id: str) -> dict:
     # Check DB state for result (not stdout parsing)
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT transformed FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if row and row[0] == 'Y':
         return {

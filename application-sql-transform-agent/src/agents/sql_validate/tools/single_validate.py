@@ -30,11 +30,10 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     """
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT id, transformed, updated_at FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if not row:
         return {
@@ -77,11 +76,10 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     # Check DB state for result
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(cursor,
             "SELECT validated, updated_at FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
-            (mapper_file, sql_id)
-        )
-        row = cursor.fetchone()
+            mapper_file, sql_id)
 
     if not row or row[0] != 'Y':
         return {
@@ -96,10 +94,10 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     if updated_at_after != updated_at_before:
         # Agent fixed the SQL — ensure validation_result reflects PASS
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-            conn.execute(
-                "UPDATE transform_target_list SET validation_result = 'PASS' WHERE mapper_file = ? AND sql_id = ?",
-                (mapper_file, sql_id)
-            )
+            from utils.db_utils import update_by_mapper
+            update_by_mapper(conn,
+                "UPDATE transform_target_list SET validation_result='PASS' WHERE mapper_file=? AND sql_id=?",
+                mapper_file, sql_id)
             conn.commit()
         return {
             'status': 'FIXED',

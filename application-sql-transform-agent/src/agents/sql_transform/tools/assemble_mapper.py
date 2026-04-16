@@ -23,13 +23,21 @@ def assemble_mapper(mapper_file: str) -> dict:
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
 
-        # Get all converted SQL IDs for this mapper
+        # Get all converted SQL IDs for this mapper (try exact match, then fallback)
         cursor.execute("""
             SELECT sql_id, target_file FROM transform_target_list
             WHERE mapper_file = ? AND transformed = 'Y'
             ORDER BY seq_no
         """, (mapper_file,))
         rows = cursor.fetchall()
+        if not rows:
+            file_name_only_check = Path(mapper_file).name
+            cursor.execute("""
+                SELECT sql_id, target_file FROM transform_target_list
+                WHERE (mapper_file = ? OR mapper_file LIKE ?) AND transformed = 'Y'
+                ORDER BY seq_no
+            """, (file_name_only_check, f'%/{file_name_only_check}'))
+            rows = cursor.fetchall()
 
         # Get relative_path for output directory
         # mapper_file may include sub_dir prefix (e.g., "master/Mapper.xml")

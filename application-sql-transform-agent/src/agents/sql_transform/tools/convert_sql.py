@@ -72,12 +72,12 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         cursor = conn.cursor()
 
         # Get target_file and source info from DB
-        cursor.execute("""
-            SELECT id, target_file, source_file, namespace, sql_type, seq_no
-            FROM transform_target_list
-            WHERE mapper_file = ? AND sql_id = ?
-        """, (mapper_file, sql_id))
-        row = cursor.fetchone()
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(
+            cursor,
+            "SELECT id, target_file, source_file, namespace, sql_type, seq_no FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            mapper_file, sql_id
+        )
 
     if not row:
         return {'status': 'error', 'message': f'Not found in DB: {mapper_file}/{sql_id}'}
