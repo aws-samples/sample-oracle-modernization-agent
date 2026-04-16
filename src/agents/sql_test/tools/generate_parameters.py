@@ -90,6 +90,7 @@ def generate_parameters_file(output_path: str = "") -> dict:
 
 
 _PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
+_DOLLAR_PARAM = re.compile(r'\$\{(\w+)\}')
 _IF_NULL_CHECK = re.compile(r'<if\s+test=["\'](\w+)\s*!=\s*null', re.IGNORECASE)
 
 # Date function patterns: to_date(#{param}, 'FORMAT') or to_timestamp(#{param}, 'FORMAT')
@@ -140,6 +141,12 @@ def _extract_params_from_xmls() -> tuple:
                 if param_name and not param_name.startswith('_'):
                     if param_name not in params or cast_type:
                         params[param_name] = cast_type
+
+            # Extract ${dollar} params — direct string substitution, needs a value
+            for match in _DOLLAR_PARAM.finditer(content):
+                param_name = match.group(1).strip()
+                if param_name and param_name not in params:
+                    params[param_name] = None  # No cast type for ${}
 
             # Extract <if test="xxx != null"> patterns
             for match in _IF_NULL_CHECK.finditer(content):
