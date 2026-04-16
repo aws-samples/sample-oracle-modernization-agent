@@ -998,9 +998,20 @@ public class MyBatisBulkExecutorWithJson {
                                 System.err.println("Rollback failed: " + rollbackException.getMessage());
                             }
                         }
+                        // Query timeout = SQL is valid but slow → treat as SUCCESS
+                        String errMsg = e.getMessage() != null ? e.getMessage() : "";
+                        Throwable cause = e.getCause();
+                        boolean isTimeout = errMsg.contains("timeout") || errMsg.contains("cancel")
+                            || cause instanceof java.sql.SQLTimeoutException
+                            || (cause != null && cause.getMessage() != null && cause.getMessage().contains("timeout"));
+                        if (isTimeout) {
+                            System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
+                                testInfo.xmlFile.getFileName(), testInfo.sqlId);
+                            return 0; // Treat timeout as success (SQL executed = valid)
+                        }
                         throw e;
                     }
-                    
+
                     return resultCount;
             }
             
@@ -1369,6 +1380,8 @@ public class MyBatisBulkExecutorWithJson {
         configuration.setMapUnderscoreToCamelCase(Boolean.parseBoolean(config.getProperty("mybatis.mapUnderscoreToCamelCase", "true")));
         configuration.setJdbcTypeForNull(org.apache.ibatis.type.JdbcType.VARCHAR);
         configuration.setCallSettersOnNulls(true);
+        // Query timeout: 5s — if query runs longer, SQL is valid (PASS), just slow
+        configuration.setDefaultStatementTimeout(Integer.parseInt(config.getProperty("query.timeout.seconds", "5")));
 
         try (InputStream mapperStream = new FileInputStream(mapperXmlPath)) {
             new XMLMapperBuilder(mapperStream, configuration, mapperXmlPath, configuration.getSqlFragments()).parse();

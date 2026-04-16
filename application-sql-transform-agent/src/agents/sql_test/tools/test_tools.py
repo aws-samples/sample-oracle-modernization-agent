@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR, get_target_dbms, get_target_db_display_name
+from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR, MERGE_DIR, get_target_dbms, get_target_db_display_name
 from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
 
 
@@ -45,7 +45,7 @@ def _extract_sql_for_explain(target_file: str) -> tuple[str, str] | None:
 
     # Extract SQL body from XML tag
     body_match = re.search(
-        r'<(select|insert|update|delete)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
+        r'<(insert|update|delete)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
         content, re.DOTALL | re.IGNORECASE,
     )
     if not body_match:
@@ -162,10 +162,7 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
             )
             if result.returncode == 0:
                 passed += 1
-                # DML: EXPLAIN pass = done. SELECT: EXPLAIN pass = syntax OK, Phase 1 will verify with actual execution
-                if sql_type in ('insert', 'update', 'delete'):
-                    _update_tested(mapper_file, sql_id)
-                # SELECT stays tested='N' → Phase 1 picks it up
+                _update_tested(mapper_file, sql_id)
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
                 # Don't mark as tested — leave for Phase 1 Java bulk test to retry
@@ -233,35 +230,15 @@ def run_bulk_test(test_folder: str = "") -> dict:
         return {'status': 'skipped', 'error': f'No {display_name} connection info'}
 
     if not test_folder:
-        # Only pass SELECT SQLs to Java executor (DML is tested via EXPLAIN in Phase 0)
-        import shutil
-        import tempfile
-
-        select_files = []
-        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT target_file FROM transform_target_list
-                WHERE validated = 'Y' AND tested = 'N' AND sql_type = 'select'
-            """)
-            select_files = [row[0] for row in cursor.fetchall() if row[0]]
-
-        if not select_files:
-            print("  ℹ️  No SELECT SQLs to test", flush=True)
-            return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
-
-        # Copy SELECT XMLs to temp folder preserving directory structure
-        tmpdir = tempfile.mkdtemp(prefix="oma_select_test_")
-        for src in select_files:
-            src_path = Path(src)
-            if src_path.exists():
-                rel = src_path.relative_to(TRANSFORM_DIR)
-                dst = Path(tmpdir) / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dst)
-
-        test_folder = tmpdir
-        print(f"  📋 SELECT 대상: {len(select_files)}개 (DML 제외)", flush=True)
+        # Use MERGE_DIR — merged mapper XMLs with full context (include refid resolved)
+        if MERGE_DIR.exists() and any(MERGE_DIR.rglob("*.xml")):
+            test_folder = str(MERGE_DIR)
+            xml_count = len(list(MERGE_DIR.rglob("*.xml")))
+            print(f"  📋 Test 대상: MERGE_DIR ({xml_count} mapper XMLs, include refid 해석됨)", flush=True)
+        else:
+            # Fallback: TRANSFORM_DIR (merge 안 된 경우)
+            test_folder = str(TRANSFORM_DIR)
+            print(f"  ⚠️  MERGE_DIR 없음 — TRANSFORM_DIR fallback", flush=True)
 
     # Run Java test
     try:
@@ -269,7 +246,8 @@ def run_bulk_test(test_folder: str = "") -> dict:
         test_folder_abs = str(Path(test_folder).resolve())
         
         # Timeout: 5 seconds per SQL, minimum 120s, maximum 3600s
-        sql_count = len(select_files) if 'select_files' in dir() else 100
+        xml_files = list(Path(test_folder).rglob("*.xml")) if test_folder else []
+        sql_count = len(xml_files) if xml_files else 100
         bulk_timeout = max(120, min(sql_count * 5, 3600))
 
         print(f"  🔧 Executing: bash {test_script} {test_folder_abs}", flush=True)
@@ -447,10 +425,7 @@ def run_bulk_test(test_folder: str = "") -> dict:
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
     finally:
-        # Clean up temp folder if we created one
-        if 'tmpdir' in dir() and tmpdir and Path(tmpdir).exists():
-            import shutil as _shutil
-            _shutil.rmtree(tmpdir, ignore_errors=True)
+        pass  # MERGE_DIR is permanent, no temp cleanup needed
 
 
 @tool
