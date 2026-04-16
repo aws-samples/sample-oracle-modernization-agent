@@ -90,6 +90,7 @@ def generate_parameters_file(output_path: str = "") -> dict:
 
 
 _PARAM_WITH_CAST = re.compile(r'#\{([^},]+?)(?:::(\w+))?\s*[},]')
+_DOLLAR_PARAM = re.compile(r'\$\{(\w+)\}')
 _IF_NULL_CHECK = re.compile(r'<if\s+test=["\'](\w+)\s*!=\s*null', re.IGNORECASE)
 
 # Date function patterns: to_date(#{param}, 'FORMAT') or to_timestamp(#{param}, 'FORMAT')
@@ -140,6 +141,15 @@ def _extract_params_from_xmls() -> tuple:
                 if param_name and not param_name.startswith('_'):
                     if param_name not in params or cast_type:
                         params[param_name] = cast_type
+
+            # Extract ${dollar} params — direct string substitution
+            # These control SQL structure (table names, paging, etc.) — set empty to skip
+            for match in _DOLLAR_PARAM.finditer(content):
+                param_name = match.group(1).strip()
+                if param_name:
+                    nullable_params.add(param_name)  # Force empty — SQL structure params
+                    if param_name not in params:
+                        params[param_name] = None
 
             # Extract <if test="xxx != null"> patterns
             for match in _IF_NULL_CHECK.finditer(content):
@@ -271,63 +281,7 @@ def _value_from_type(data_type: str, param_name: str) -> str:
     if 'time' in dt and 'stamp' not in dt:
         return '00:00:00'
 
-    # varchar, text, char, etc.
-    name_lower = param_name.lower()
-    if 'email' in name_lower:
-        return 'test@example.com'
-    if 'status' in name_lower:
-        return 'ACTIVE'
-    if 'type' in name_lower or 'cd' in name_lower or 'code' in name_lower:
-        return '01'
-    if 'yn' in name_lower:
-        return 'Y'
-    if 'name' in name_lower:
-        return 'TEST'
-
-    return 'TEST'
-
-
-def _value_from_name(param_name: str) -> str:
-    """Generate test value based on parameter name patterns (no metadata)."""
-    lower = param_name.lower()
-
-    # IDs and keys
-    if any(p in lower for p in ['id', 'key', 'seq', 'no', 'num']):
-        return '1'
-
-    # Dates
-    if any(p in lower for p in ['date', 'day', 'dt', 'ymd', 'yyyymmdd']):
-        return '20250101'
-    if any(p in lower for p in ['frdate', 'fromdate', 'startdate', 'frdt']):
-        return '20250101'
-    if any(p in lower for p in ['todate', 'enddate', 'todt']):
-        return '20251231'
-    if 'sysdate' in lower:
-        return '20250101'
-
-    # Numerics
-    if any(p in lower for p in ['amount', 'price', 'amt']):
-        return '1000'
-    if any(p in lower for p in ['qty', 'cnt', 'count', 'quantity']):
-        return '1'
-    if any(p in lower for p in ['limit', 'size', 'pagesize']):
-        return '10'
-    if any(p in lower for p in ['offset', 'page']):
-        return '0'
-    if any(p in lower for p in ['days', 'months']):
-        return '30'
-
-    # Strings
-    if 'status' in lower or 'wkstatus' in lower:
-        return 'ACTIVE'
-    if 'email' in lower:
-        return 'test@example.com'
-    if any(p in lower for p in ['yn', 'flag', 'yesno']):
-        return 'Y'
-    if any(p in lower for p in ['type', 'cd', 'code']):
-        return '01'
-    if 'name' in lower:
-        return 'TEST'
-
-    # Default
+    # varchar, text, char — '1' is safest (works with FK, ENUM, etc.)
     return '1'
+
+
