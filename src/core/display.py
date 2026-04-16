@@ -80,7 +80,7 @@ def print_pipeline_status(status: dict) -> None:
     test_failed = status.get('test_failed', 0)
     test_skipped = status.get('test_skipped', 0)
     test_non_testable = status.get('test_non_testable', 0)
-    test_passed = tested - test_failed
+    test_passed = tested - test_failed - test_skipped
     if test_passed < 0:
         test_passed = 0
     test_extras = []
