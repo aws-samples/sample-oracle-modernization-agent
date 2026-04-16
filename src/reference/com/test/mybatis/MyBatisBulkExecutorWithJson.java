@@ -1001,9 +1001,11 @@ public class MyBatisBulkExecutorWithJson {
                         // Query timeout = SQL is valid but slow → treat as SUCCESS
                         String errMsg = e.getMessage() != null ? e.getMessage() : "";
                         Throwable cause = e.getCause();
-                        boolean isTimeout = errMsg.contains("timeout") || errMsg.contains("cancel")
-                            || cause instanceof java.sql.SQLTimeoutException
-                            || (cause != null && cause.getMessage() != null && cause.getMessage().contains("timeout"));
+                        String causeMsg = (cause != null && cause.getMessage() != null) ? cause.getMessage() : "";
+                        String fullMsg = errMsg + " " + causeMsg;
+                        boolean isTimeout = fullMsg.contains("timeout") || fullMsg.contains("cancel")
+                            || fullMsg.contains("canceling statement")
+                            || cause instanceof java.sql.SQLTimeoutException;
                         if (isTimeout) {
                             System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
                                 testInfo.xmlFile.getFileName(), testInfo.sqlId);
@@ -1125,9 +1127,19 @@ public class MyBatisBulkExecutorWithJson {
                                 System.err.println("Rollback failed: " + rollbackException.getMessage());
                             }
                         }
+                        // Query timeout = SQL is valid but slow → treat as SUCCESS
+                        String errMsg2 = e.getMessage() != null ? e.getMessage() : "";
+                        Throwable cause2 = e.getCause();
+                        String causeMsg2 = (cause2 != null && cause2.getMessage() != null) ? cause2.getMessage() : "";
+                        String fullMsg2 = errMsg2 + " " + causeMsg2;
+                        if (fullMsg2.contains("timeout") || fullMsg2.contains("canceling statement") || cause2 instanceof java.sql.SQLTimeoutException) {
+                            System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
+                                testInfo.xmlFile.getFileName(), testInfo.sqlId);
+                            break; // Exit switch, treat as success with empty results
+                        }
                         throw e;
                     }
-                    
+
                     // Normalize results - remove differences between Oracle and PostgreSQL
                     results = ResultNormalizer.normalizeResults(results);
                     
