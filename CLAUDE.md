@@ -33,12 +33,12 @@ All scripts run from `src/` with `PYTHONPATH=.`. Working directory for state/out
 
 ```bash
 cd src
-PYTHONPATH=. python3 run_source_analyzer.py          # Scan mappers, extract SQLs, generate strategy
-PYTHONPATH=. python3 run_sql_transform.py --workers 8   # Oracle → Target DB conversion
-PYTHONPATH=. python3 run_sql_review.py --workers 4 --max-rounds 3  # Multi-perspective review
-PYTHONPATH=. python3 run_sql_validate.py --workers 6    # Functional equivalence validation
-PYTHONPATH=. python3 run_sql_test.py --workers 6        # DB execution test (requires target DB)
-PYTHONPATH=. python3 run_sql_merge.py                   # Reassemble final Mapper XMLs
+PYTHONPATH=. python3 run_source_analyzer.py          # 1. Scan mappers, extract SQLs, generate strategy
+PYTHONPATH=. python3 run_sql_transform.py --workers 8   # 2. Oracle → Target DB conversion
+PYTHONPATH=. python3 run_sql_review.py --workers 4 --max-rounds 3  # 3. Multi-perspective review
+PYTHONPATH=. python3 run_sql_validate.py --workers 6    # 4. Functional equivalence validation
+PYTHONPATH=. python3 run_sql_merge.py                   # 5. Reassemble final Mapper XMLs
+PYTHONPATH=. python3 run_sql_test.py --workers 6        # 6. DB execution test (requires target DB)
 PYTHONPATH=. python3 run_strategy.py                    # Manual strategy refinement
 ```
 
@@ -64,13 +64,13 @@ src/
 
 | Agent | Location | Role |
 |-------|----------|------|
-| **Orchestrator** | `src/agents/orchestrator/` | Pipeline control, interactive CLI (14 tools) |
-| **ReviewManager** | `src/agents/review_manager/` | Diff comparison/approval (5 tools) |
+| **Orchestrator** | `src/agents/orchestrator/` | Pipeline control, interactive CLI (17 tools) |
+| **ReviewManager** | `src/agents/review_manager/` | Diff comparison/approval + test failure report (6 tools) |
 | **Source Analyzer** | `src/agents/source_analyzer/` | Mapper scan, SQL extraction, strategy generation |
 | **Transform** | `src/agents/sql_transform/` | Oracle → Target DB conversion |
 | **Review** | `src/agents/sql_review/` | Multi-perspective: Syntax + Equivalence agents in parallel → LLM Facilitator |
 | **Validate** | `src/agents/sql_validate/` | Functional equivalence verification |
-| **Test** | `src/agents/sql_test/` | Phase 0: EXPLAIN DML, Phase 1: Java SELECT, Phase 2: Agent fix |
+| **Test** | `src/agents/sql_test/` | Phase 0: EXPLAIN DML, Phase 1: Java SELECT (MERGE_DIR), Phase 2: Agent fix + auto re-merge |
 | **Strategy Refine** | `src/agents/strategy_refine/` | Strategy learning and compression |
 
 Each agent directory follows: `agent.py` (factory), `tools/` (Strands @tool functions), `prompt.md` (system prompt).
@@ -78,9 +78,16 @@ Each agent directory follows: `agent.py` (factory), `tools/` (Strands @tool func
 ### Pipeline Flow
 
 ```
-Setup → Analyze → Transform → Review → Validate → Test → Merge
+Setup → Analyze → Transform → Review → Validate → Merge → Test
                                 ↓ FAIL (specific feedback)
                           Re-transform (max 3 rounds, round 2+: Strategy Refine)
+
+Test Flow (Phase 0 → Phase 1 → Phase 2):
+  Pre-skip: sql/resultMap → SKIP
+  Phase 0: EXPLAIN (DML only) → PASS/FAIL
+  Phase 1: Java bulk test (SELECT only, MERGE_DIR, --select-only) → PASS/FAIL
+  Phase 2: Agent fix → convert_sql → auto re-merge → re-test
+  Reports: test_result_report.md (Pass/Fail/Skip by category)
 ```
 
 ### Key Modules
@@ -89,6 +96,7 @@ Setup → Analyze → Transform → Review → Validate → Test → Merge
 - **`src/core/state_manager.py`** — Centralized DB access interface (SQLAlchemy ORM)
 - **`src/core/progress.py`** — Real-time progress tracking
 - **`src/utils/project_paths.py`** — All path constants, model IDs, DB path resolution, target DBMS config (`get_target_dbms()`, `get_rules_path()`, `load_prompt_text()`)
+- **`src/utils/db_utils.py`** — Common mapper_file resolution (`query_by_mapper()`, `update_by_mapper()`) — handles both `sub_dir/filename` and `filename` formats
 
 ### 2-Tier Rule System
 
@@ -113,6 +121,7 @@ Agents use SystemContentBlock with cachePoints for cost optimization:
 - **StateManager** uses SQLAlchemy ORM — use it for transform_target_list operations
 - **Tool functions** use parameterized `sqlite3` queries — never use f-string SQL
 - Always use `with sqlite3.connect(str(DB_PATH), timeout=10) as conn:` for connections
+- **mapper_file queries** — always use `db_utils.query_by_mapper()` / `update_by_mapper()` for mapper_file + sql_id lookups (handles path prefix variations)
 
 ### Agent Creation
 - Use `suppress_streaming=True` parameter in agent factory to set `callback_handler=None` at creation time
