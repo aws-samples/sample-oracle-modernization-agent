@@ -946,6 +946,14 @@ public class MyBatisBulkExecutorWithJson {
                             paramMap.put(paramName, "1"); // Default value for missing params
                         }
                     }
+                    // Convert __LIST__ markers to ArrayList for <foreach> support
+                    for (String key : new ArrayList<>(paramMap.keySet())) {
+                        if ("__LIST__".equals(paramMap.get(key))) {
+                            List<String> list = new ArrayList<>();
+                            list.add("1");
+                            paramMap.put(key, list);
+                        }
+                    }
 
                     int resultCount = 0;
                     
@@ -1069,6 +1077,14 @@ public class MyBatisBulkExecutorWithJson {
                         String paramName = pm2.group(1).trim().split("::")[0].split("\\.")[0];
                         if (!paramMap.containsKey(paramName)) {
                             paramMap.put(paramName, "1");
+                        }
+                    }
+                    // Convert __LIST__ markers to ArrayList for <foreach> support
+                    for (String key : new ArrayList<>(paramMap.keySet())) {
+                        if ("__LIST__".equals(paramMap.get(key))) {
+                            List<String> list = new ArrayList<>();
+                            list.add("1");
+                            paramMap.put(key, list);
                         }
                     }
 
