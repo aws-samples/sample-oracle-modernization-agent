@@ -75,10 +75,11 @@ def print_pipeline_status(status: dict) -> None:
         "[green]Done[/green]" if status.get('merge_complete', False) else "[dim]Pending[/dim]",
     )
 
-    # Test — show Pass count (= tested - failed - skipped)
+    # Test — Pass = tested - failed (SKIP and non-testable are separate)
     tested = status.get('tested', 0)
     test_failed = status.get('test_failed', 0)
     test_skipped = status.get('test_skipped', 0)
+    test_non_testable = status.get('test_non_testable', 0)
     test_passed = tested - test_failed - test_skipped
     if test_passed < 0:
         test_passed = 0
@@ -86,7 +87,9 @@ def print_pipeline_status(status: dict) -> None:
     if test_failed > 0:
         test_extras.append(f"[red]{test_failed} FAIL[/red]")
     if test_skipped > 0:
-        test_extras.append(f"[dim]{test_skipped} SKIP[/dim]")
+        test_extras.append(f"[yellow]{test_skipped} SKIP[/yellow]")
+    if test_non_testable > 0:
+        test_extras.append(f"[dim]{test_non_testable} N/A[/dim]")
     test_extra = f" ({', '.join(test_extras)})" if test_extras else ""
     table.add_row(
         "Test",

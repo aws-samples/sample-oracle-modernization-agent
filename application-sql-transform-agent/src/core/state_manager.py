@@ -290,12 +290,10 @@ class StateManager:
                 ).scalar()
 
             test_skipped = session.query(func.count(TransformTargetList.id))\
-                .filter(
-                    or_(
-                        ~_testable_filter,  # sql, resultMap
-                        TransformTargetList.test_result == 'SKIP',
-                    )
-                ).scalar()
+                .filter(_testable_filter, TransformTargetList.test_result == 'SKIP').scalar()
+
+            test_non_testable = session.query(func.count(TransformTargetList.id))\
+                .filter(~_testable_filter).scalar()
 
             validate_failed = session.query(func.count(TransformTargetList.id))\
                 .filter(
@@ -327,6 +325,7 @@ class StateManager:
                 'tested': tested,
                 'test_failed': test_failed,
                 'test_skipped': test_skipped,
+                'test_non_testable': test_non_testable,
                 'merged': self._count_merge_files(),
                 'transform_complete': transform_complete,
                 'review_complete': review_complete,

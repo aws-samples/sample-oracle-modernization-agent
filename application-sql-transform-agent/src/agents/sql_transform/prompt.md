@@ -18,7 +18,11 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
 - **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.kns.framework.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
-- **`<include refid="..."/>`**: SQL fragment references must be preserved exactly as-is. Do NOT inline/expand the referenced SQL. Do NOT remove or replace with actual SQL content. The fragment is defined in another mapper and resolved at runtime by MyBatis.
+- **`<include refid="..."/>`**: SQL fragment references must be preserved **exactly as-is** — both the tag AND the refid value. Do NOT:
+  - Change the refid value (e.g., `refid="sql_tOrderMstAdcdUnion"` must NOT become `refid="sql_tOrderCtgDiv"`)
+  - Inline/expand the referenced SQL
+  - Remove or replace with actual SQL content
+  - Guess/infer refid names based on SQL ID patterns — the refid is defined in the original and must be copied verbatim
 
 **User-defined package functions (PKG_*, custom) → flatten with underscore, NOTHING ELSE.**
 - `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` — NOT `pgp_sym_encrypt()`, NOT `AES_ENCRYPT()`
@@ -131,6 +135,7 @@ Scan your output SQL line by line and verify:
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags, #{param} references, and `<if test="">` OGNL expressions are intact? (Do NOT rewrite `@class@method()` expressions)
 - [ ] **JOIN conditions unchanged**: Every JOIN ON condition uses the EXACT same table aliases and column names as the original (lowercased only)? No table alias substitution (e.g., I joins L in original → must still join L, NOT changed to join B)?
+- [ ] **include refid unchanged**: Every `<include refid="xxx"/>` has the EXACT same refid value as the original? Do NOT infer/guess refid names from SQL ID patterns.
 - [ ] **Package functions flattened**: Any `PKG_*.FUNC()` converted to `pkg_*_func()` with underscore? NOT mapped to built-in functions like `pgp_sym_encrypt`, `AES_ENCRYPT`, etc.?
 - [ ] **Comments preserved**: All original `--` and `/* */` comments remain?
 - [ ] **Variable names intact**: Only lowercased, prefixes NOT changed? (V_RETURN → v_return, NOT p_return)
