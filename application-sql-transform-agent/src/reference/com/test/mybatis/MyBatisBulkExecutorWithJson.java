@@ -1873,20 +1873,24 @@ public class MyBatisBulkExecutorWithJson {
      * Remove quotes from properties file so MyBatis can handle them correctly
      */
     private String cleanParameterValue(String value) {
-        if (value == null || value.trim().isEmpty()) {
-            return "1"; // Set default value "1" for null or empty values
+        if (value == null) {
+            return "1"; // null → default "1"
         }
-        
+        // Empty string stays empty — allows <if test="param != ''"> to evaluate correctly
+        if (value.trim().isEmpty()) {
+            return "";
+        }
+
         String cleanValue = value.trim();
-        
+
         // Remove if wrapped in single quotes
         if (cleanValue.startsWith("'") && cleanValue.endsWith("'") && cleanValue.length() > 1) {
             cleanValue = cleanValue.substring(1, cleanValue.length() - 1);
         }
-        
-        // Set default value if still empty
+
+        // Keep empty after quote removal — intentional empty value
         if (cleanValue.isEmpty()) {
-            cleanValue = "1";
+            return "";
         }
         
         return cleanValue;

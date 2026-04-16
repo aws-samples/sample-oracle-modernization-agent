@@ -128,7 +128,7 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
 
 
-def run(max_workers=8):
+def run(max_workers=8, auto_fix=False):
     from core.display import console_err
     console_err.print("[bold]SQL Test Agent[/bold]")
 
@@ -308,7 +308,47 @@ def run(max_workers=8):
         _generate_test_result_report()
         return
 
-    # Phase 2: Agent fixes failures
+    # Phase 2: Agent fixes failures (opt-in only)
+    if not auto_fix:
+        log_and_print(f"\n⚠️  {len(failures)}건 실패 — Agent fix 생략 (--fix 옵션으로 활성화)")
+        log_and_print("  💡 실패 분류 확인: classify test failures")
+        log_and_print("  💡 SKIP 처리: skip category <카테고리명>")
+        log_and_print("  💡 Agent 수정: retry failed test --fix")
+        # Jump to final status
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+            passed = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS','FIXED','SKIP')")
+            failed_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE sql_type IN ('sql', 'resultMap')")
+            skip_type = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND tested='N' AND sql_type NOT IN ('sql', 'resultMap')")
+            not_tested = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transform_target_list")
+            total_all = cursor.fetchone()[0]
+        from core.display import print_step_result
+        tested = passed + failed_count
+        skipped = skip_type + not_tested
+        rows = [("Passed", str(passed))]
+        if failed_count > 0:
+            rows.append(("Failed", f"[red]{failed_count}[/red]"))
+        else:
+            rows.append(("Failed", "0"))
+        if skipped > 0:
+            rows.append(("Skipped", f"[dim]{skipped}[/dim]"))
+        rows.append(("Total", f"{tested + skipped}/{total_all} SQL IDs"))
+        if failed_count > 0:
+            report_path = _generate_test_failure_report()
+            if report_path:
+                rows.append(("Failure Report", str(report_path)))
+        rows.append(("Logs", str(_log_dir)))
+        rows.append(("Execution log", str(test_log_file)))
+        print_step_result("Test Result", rows)
+        _print_sql_type_distribution()
+        _generate_test_result_report()
+        return
+
     log_and_print(f"\nPhase 2: {len(failures)}건 실패 SQL 수정 (Agent)...\n")
 
     mapper_failures = {}
@@ -860,6 +900,7 @@ if __name__ == "__main__":
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--reset', action='store_true', help='Reset all tested flags before running')
     parser.add_argument('--retry-failed', action='store_true', help='Reset only failed tests for re-test')
+    parser.add_argument('--fix', action='store_true', help='Enable Phase 2 Agent auto-fix for failures')
     args = parser.parse_args()
 
     if args.reset:
@@ -884,4 +925,4 @@ if __name__ == "__main__":
             conn.commit()
         print(f"✅ Reset {reset_count} failed SQL IDs for re-test\n", flush=True)
 
-    run(max_workers=args.workers)
+    run(max_workers=args.workers, auto_fix=args.fix)
