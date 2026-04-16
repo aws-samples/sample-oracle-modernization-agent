@@ -117,8 +117,23 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
     # Save fix history log (before overwrite) for Test/Validate phase debugging
     _save_fix_history(mapper_file, sql_id, target_path, converted_sql, notes)
 
+    # Sanitize: remove <> from SQL comments to prevent XML parsing errors
+    import re
+    def _sanitize_sql_comments(sql: str) -> str:
+        """Remove angle brackets from /* ... */ comments to prevent SAXParseException."""
+        def _clean_comment(m):
+            comment = m.group(0)
+            # Replace < and > inside comment with empty string
+            inner = comment[2:-2]  # strip /* and */
+            inner = inner.replace('<', '').replace('>', '')
+            return f"/*{inner}*/"
+        return re.sub(r'/\*.*?\*/', _clean_comment, sql, flags=re.DOTALL)
+
+    converted_sql = _sanitize_sql_comments(converted_sql)
+
     # Build individual XML file (same format as xmlExtractor output)
-    note_comment = f"\n<!-- NOTES: {notes} -->" if notes else ""
+    sanitized_notes = notes.replace('<', '').replace('>', '') if notes else ""
+    note_comment = f"\n<!-- NOTES: {sanitized_notes} -->" if sanitized_notes else ""
     output_content = f"""{xml_header}
 {xml_doctype}
 <mapper namespace="{namespace}">

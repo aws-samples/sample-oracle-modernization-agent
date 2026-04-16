@@ -118,6 +118,7 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 /* [OMA] NVL→COALESCE, (+)→LEFT JOIN, SYSDATE→CURRENT_TIMESTAMP, @DBLINK removed(NDS01) */
 ```
 Keep it on ONE line, listing only the key conversions applied. This comment goes inside the SQL body, before the first SELECT/INSERT/UPDATE/DELETE.
+**CRITICAL: Do NOT include `<` or `>` characters in the comment.** Use tag names without angle brackets (e.g., `include refid removed` NOT `<include refid="..."/> removed`). Angle brackets in SQL comments break MyBatis XML parsing.
 
 Scan your output SQL line by line and verify:
 - [ ] No Oracle syntax remains? (NVL, DECODE, SYSDATE, TO_DATE, (+), FROM DUAL, etc.)
