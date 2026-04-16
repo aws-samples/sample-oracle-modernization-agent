@@ -85,7 +85,7 @@ if [ -z "$TEST_FOLDER" ] && [ -n "$1" ]; then
     export TEST_FOLDER="$1"
 fi
 
-java -cp ".:lib/*" com.test.mybatis.MyBatisBulkExecutorWithJson "$@" --db mysql --all
+java -cp ".:lib/*" com.test.mybatis.MyBatisBulkExecutorWithJson "$@" --db mysql --select-only
 
 echo ""
 echo "=== Execution Completed ==="
