@@ -375,6 +375,171 @@ def _extract_review_reason(review_result: str) -> str:
 
 
 @tool
+def classify_test_failures() -> dict:
+    """Classify test failures by category and show SKIP recommendations.
+
+    Use after test phase when user asks: "실패 분류해줘", "skip 대상 보여줘",
+    "test 결과 분류", "어떤 걸 skip할까"
+
+    Returns:
+        Dict with categories, counts, skip_candidates, and actionable advice
+    """
+    import sqlite3
+    from rich.table import Table
+    from core.display import console_err
+
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sql_id, mapper_file, test_result, test_notes
+            FROM transform_target_list
+            WHERE tested = 'Y' AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
+        """)
+        failures = cursor.fetchall()
+
+    # Categorize
+    categories = {}
+    for sql_id, mapper, result, notes in failures:
+        error = notes or result or ''
+        error_lower = error.lower()
+        if 'does not exist' in error_lower and 'function' in error_lower:
+            cat = 'Missing Function'
+        elif 'does not exist' in error_lower and ('relation' in error_lower or 'table' in error_lower):
+            cat = 'Missing Table'
+        elif 'does not exist' in error_lower and 'column' in error_lower:
+            cat = 'Missing Column'
+        elif 'syntax error' in error_lower:
+            cat = 'Syntax Error'
+        elif 'type' in error_lower and ('mismatch' in error_lower or 'cast' in error_lower or 'operator' in error_lower):
+            cat = 'Type Mismatch'
+        elif 'timeout' in error_lower or 'cancel' in error_lower:
+            cat = 'Timeout'
+        elif 'null' in error_lower and ('entrySet' in error or 'NullPointer' in error):
+            cat = 'Parameter Binding'
+        elif 'SAXParse' in error or 'xml' in error_lower:
+            cat = 'XML Parse Error'
+        elif 'IncompleteElement' in error or 'include refid' in error_lower:
+            cat = 'Include Refid'
+        elif 'ClassNotFoundException' in error or 'Cannot find class' in error:
+            cat = 'Missing Java Class'
+        else:
+            cat = 'Other'
+
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append({'sql_id': sql_id, 'mapper_file': mapper, 'error': error[:100]})
+
+    # Determine skip-able categories
+    skip_categories = {'Missing Function', 'Missing Table', 'Missing Column', 'Timeout',
+                       'Parameter Binding', 'Include Refid', 'Missing Java Class'}
+
+    # Display
+    table = Table(title="Test 실패 분류", show_lines=True)
+    table.add_column("#", justify="right")
+    table.add_column("카테고리", style="bold")
+    table.add_column("건수", justify="right")
+    table.add_column("SKIP 가능", justify="center")
+    table.add_column("권고 조치")
+
+    actions = {
+        'Missing Function': '타겟 DB에 함수 생성 후 재테스트',
+        'Missing Table': '스키마 마이그레이션 후 재테스트',
+        'Missing Column': '스키마 확인 필요',
+        'Syntax Error': '재변환 필요 (변환 규칙 보강)',
+        'Type Mismatch': '메타데이터 기반 파라미터 캐스팅 확인',
+        'Timeout': 'SQL은 정상 — 성능 최적화 필요',
+        'Parameter Binding': '테스트 파라미터 보강 필요',
+        'XML Parse Error': '변환 시 XML 이스케이프 확인',
+        'Include Refid': 'cross-mapper fragment 참조 — dependency mapper 확인',
+        'Missing Java Class': '테스트 환경에 stub 클래스 추가',
+        'Other': '수동 확인 필요',
+    }
+
+    total_skip = 0
+    for idx, (cat, items) in enumerate(sorted(categories.items(), key=lambda x: -len(x[1])), 1):
+        is_skip = cat in skip_categories
+        if is_skip:
+            total_skip += len(items)
+        table.add_row(
+            str(idx), cat, str(len(items)),
+            "[green]Yes[/green]" if is_skip else "[red]No[/red]",
+            actions.get(cat, '수동 확인')
+        )
+
+    console_err.print(table)
+
+    if total_skip > 0:
+        console_err.print(f"\n💡 [yellow]{total_skip}건[/yellow] SKIP 가능. "
+                         f"\"skip category Missing Function\" 등으로 카테고리별 SKIP 처리")
+
+    return {
+        'total_failures': len(failures),
+        'categories': {cat: len(items) for cat, items in categories.items()},
+        'skip_candidates': total_skip,
+        'details': categories,
+    }
+
+
+@tool
+def skip_by_category(category: str) -> dict:
+    """Mark test failures of a specific category as SKIP.
+
+    Use when user says: "Missing Function skip해줘", "skip category Timeout",
+    "테이블 없는 거 skip"
+
+    Args:
+        category: Category name from classify_test_failures output
+                  e.g., 'Missing Function', 'Missing Table', 'Timeout', etc.
+    """
+    import sqlite3
+
+    import sqlite3
+
+    # Category → error pattern mapping for DB matching
+    category_patterns = {
+        'Missing Function': ['does not exist', 'function'],
+        'Missing Table': ['does not exist', 'relation'],
+        'Missing Column': ['does not exist', 'column'],
+        'Timeout': ['timeout', 'cancel'],
+        'Parameter Binding': ['entrySet', 'NullPointer'],
+        'Include Refid': ['IncompleteElement', 'include refid'],
+        'Missing Java Class': ['ClassNotFoundException', 'Cannot find class'],
+    }
+
+    patterns = category_patterns.get(category)
+    if not patterns:
+        # Try fuzzy match
+        for cat, pats in category_patterns.items():
+            if category.lower() in cat.lower():
+                category = cat
+                patterns = pats
+                break
+        if not patterns:
+            return {'status': 'error', 'message': f'SKIP 가능 카테고리: {", ".join(category_patterns.keys())}'}
+
+    skip_count = 0
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        # Get all non-PASS/SKIP failures
+        cursor.execute("""
+            SELECT id, test_result, test_notes FROM transform_target_list
+            WHERE tested = 'Y' AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
+        """)
+        for record_id, result, notes in cursor.fetchall():
+            error_text = (notes or result or '').lower()
+            if all(p.lower() in error_text for p in patterns):
+                cursor.execute(
+                    "UPDATE transform_target_list SET test_result='SKIP', test_notes=? WHERE id=?",
+                    (f'{category} — SKIP 처리 (사용자 선택)', record_id)
+                )
+                skip_count += 1
+        conn.commit()
+
+    print(f"  ⏭️  {category}: {skip_count}건 SKIP 처리 완료")
+    return {'status': 'success', 'category': category, 'skipped': skip_count}
+
+
+@tool
 def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
     """Reset a pipeline step by clearing its completion flags in DB and removing output files.
 

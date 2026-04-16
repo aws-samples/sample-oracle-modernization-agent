@@ -305,7 +305,7 @@ def run(max_workers=8):
         rows.append(("Log", str(test_log_file)))
         print_step_result("Test Result", rows)
         _print_sql_type_distribution()
-        _generate_test_skip_report()
+        _generate_test_result_report()
         return
 
     # Phase 2: Agent fixes failures
@@ -384,7 +384,7 @@ def run(max_workers=8):
 
     # Show SQL type distribution table
     _print_sql_type_distribution()
-    _generate_test_skip_report()
+    _generate_test_result_report()  # Combined Failed + Skip report
 
 
 def _print_sql_type_distribution():
@@ -482,6 +482,12 @@ def _pre_mark_skips(log_fn=print) -> int:
         log_fn(f"\n⏭️  Pre-skip: {total_marked}개 (non-testable types)")
 
     return total_marked
+
+
+def _generate_test_result_report():
+    """Generate combined test result report (Failed + Skip)."""
+    _generate_test_failure_report()
+    _generate_test_skip_report()
 
 
 def _generate_test_skip_report():
