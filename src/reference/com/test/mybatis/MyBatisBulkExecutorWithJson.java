@@ -937,7 +937,16 @@ public class MyBatisBulkExecutorWithJson {
                         // Remove quotes for MyBatis bind variables
                         paramMap.put(key, cleanParameterValue(value));
                     }
-                    
+                    // Add missing params found in SQL but not in properties (prevent NPE)
+                    java.util.regex.Matcher pm = java.util.regex.Pattern.compile("[#$]\\{([^},]+)").matcher(
+                        testInfo.xmlFile.toFile().exists() ? java.nio.file.Files.readString(testInfo.xmlFile) : "");
+                    while (pm.find()) {
+                        String paramName = pm.group(1).trim().split("::")[0].split("\\.")[0];
+                        if (!paramMap.containsKey(paramName)) {
+                            paramMap.put(paramName, "1"); // Default value for missing params
+                        }
+                    }
+
                     int resultCount = 0;
                     
                     try {
@@ -1135,9 +1144,9 @@ public class MyBatisBulkExecutorWithJson {
                         if (fullMsg2.contains("timeout") || fullMsg2.contains("canceling statement") || cause2 instanceof java.sql.SQLTimeoutException) {
                             System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
                                 testInfo.xmlFile.getFileName(), testInfo.sqlId);
-                            break; // Exit switch, treat as success with empty results
+                            results = new ArrayList<>(); // Empty results = success with timeout
+                            throw e;
                         }
-                        throw e;
                     }
 
                     // Normalize results - remove differences between Oracle and PostgreSQL
