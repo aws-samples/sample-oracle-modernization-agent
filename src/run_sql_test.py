@@ -605,6 +605,17 @@ def _generate_test_result_report():
     report_path.write_text('\n'.join(lines), encoding='utf-8')
     print(f"📊 종합 보고서: {report_path}", flush=True)
 
+    # Generate skip_list.csv
+    if skip_rows:
+        import csv
+        csv_path = REPORTS_DIR / "skip_list.csv"
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+            w = csv.writer(f)
+            w.writerow(['No', 'XML', 'SQL ID', '사유'])
+            for i, (mapper, sql_id, sql_type, notes) in enumerate(skip_rows, 1):
+                w.writerow([i, mapper, sql_id, (notes or '').replace('\n', ' ')])
+        print(f"📋 Skip List: {csv_path} ({len(skip_rows)}건)", flush=True)
+
     # Also generate individual reports for backward compatibility
     _generate_test_failure_report()
     _generate_test_skip_report()
