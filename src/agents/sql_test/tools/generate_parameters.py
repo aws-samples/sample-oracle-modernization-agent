@@ -39,14 +39,14 @@ def generate_parameters_file(output_path: str = "") -> dict:
     matched = 0
     param_values = {}
     for param_name in sorted(params):
-        # Try metadata match first
+        # Try metadata match first for accurate type-based value
         col_type = _match_metadata(param_name, metadata)
         if col_type:
             param_values[param_name] = _value_from_type(col_type, param_name)
             matched += 1
         else:
-            # Fallback: pattern-based
-            param_values[param_name] = _value_from_name(param_name)
+            # Default: '1' works for most types (string/number implicit conversion)
+            param_values[param_name] = '1'
 
     # 4. Write parameters.properties
     output = Path(output_path)
@@ -54,20 +54,10 @@ def generate_parameters_file(output_path: str = "") -> dict:
     with open(output, 'w', encoding='utf-8') as f:
         f.write(f"# Auto-generated test parameters\n")
         f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"# Total: {len(param_values)} params (metadata matched: {matched})\n\n")
+        f.write(f"# Total: {len(param_values)} params (metadata matched: {matched}, default: {len(param_values) - matched})\n\n")
 
-        if matched > 0:
-            f.write("# --- Metadata-matched parameters ---\n")
-            for name, value in sorted(param_values.items()):
-                if _match_metadata(name, metadata):
-                    f.write(f"{name}={value}\n")
-            f.write("\n# --- Pattern-matched parameters ---\n")
-            for name, value in sorted(param_values.items()):
-                if not _match_metadata(name, metadata):
-                    f.write(f"{name}={value}\n")
-        else:
-            for name, value in sorted(param_values.items()):
-                f.write(f"{name}={value}\n")
+        for name, value in sorted(param_values.items()):
+            f.write(f"{name}={value}\n")
 
     print(f"  📝 parameters.properties: {len(param_values)}개 파라미터 (metadata: {matched})", flush=True)
     return {
