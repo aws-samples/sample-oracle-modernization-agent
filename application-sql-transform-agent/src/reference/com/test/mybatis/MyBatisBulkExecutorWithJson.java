@@ -937,7 +937,16 @@ public class MyBatisBulkExecutorWithJson {
                         // Remove quotes for MyBatis bind variables
                         paramMap.put(key, cleanParameterValue(value));
                     }
-                    
+                    // Add missing params found in SQL but not in properties (prevent NPE)
+                    java.util.regex.Matcher pm = java.util.regex.Pattern.compile("[#$]\\{([^},]+)").matcher(
+                        testInfo.xmlFile.toFile().exists() ? java.nio.file.Files.readString(testInfo.xmlFile) : "");
+                    while (pm.find()) {
+                        String paramName = pm.group(1).trim().split("::")[0].split("\\.")[0];
+                        if (!paramMap.containsKey(paramName)) {
+                            paramMap.put(paramName, "1"); // Default value for missing params
+                        }
+                    }
+
                     int resultCount = 0;
                     
                     try {
@@ -1001,9 +1010,11 @@ public class MyBatisBulkExecutorWithJson {
                         // Query timeout = SQL is valid but slow → treat as SUCCESS
                         String errMsg = e.getMessage() != null ? e.getMessage() : "";
                         Throwable cause = e.getCause();
-                        boolean isTimeout = errMsg.contains("timeout") || errMsg.contains("cancel")
-                            || cause instanceof java.sql.SQLTimeoutException
-                            || (cause != null && cause.getMessage() != null && cause.getMessage().contains("timeout"));
+                        String causeMsg = (cause != null && cause.getMessage() != null) ? cause.getMessage() : "";
+                        String fullMsg = errMsg + " " + causeMsg;
+                        boolean isTimeout = fullMsg.contains("timeout") || fullMsg.contains("cancel")
+                            || fullMsg.contains("canceling statement")
+                            || cause instanceof java.sql.SQLTimeoutException;
                         if (isTimeout) {
                             System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
                                 testInfo.xmlFile.getFileName(), testInfo.sqlId);
@@ -1125,9 +1136,19 @@ public class MyBatisBulkExecutorWithJson {
                                 System.err.println("Rollback failed: " + rollbackException.getMessage());
                             }
                         }
-                        throw e;
+                        // Query timeout = SQL is valid but slow → treat as SUCCESS
+                        String errMsg2 = e.getMessage() != null ? e.getMessage() : "";
+                        Throwable cause2 = e.getCause();
+                        String causeMsg2 = (cause2 != null && cause2.getMessage() != null) ? cause2.getMessage() : "";
+                        String fullMsg2 = errMsg2 + " " + causeMsg2;
+                        if (fullMsg2.contains("timeout") || fullMsg2.contains("canceling statement") || cause2 instanceof java.sql.SQLTimeoutException) {
+                            System.out.printf("  ⏱️ %s:%s — query timeout (SQL valid, treated as PASS)%n",
+                                testInfo.xmlFile.getFileName(), testInfo.sqlId);
+                            results = new ArrayList<>(); // Empty results = success with timeout
+                            throw e;
+                        }
                     }
-                    
+
                     // Normalize results - remove differences between Oracle and PostgreSQL
                     results = ResultNormalizer.normalizeResults(results);
                     

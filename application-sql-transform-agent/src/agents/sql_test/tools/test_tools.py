@@ -271,6 +271,11 @@ def run_bulk_test(test_folder: str = "") -> dict:
                 print("  ℹ️  No matching mapper files found", flush=True)
                 return {'status': 'completed', 'total': 0, 'passed': 0, 'failed': 0, 'failures': []}
 
+            # Copy parameters.properties if exists
+            params_file = TRANSFORM_DIR / "parameters.properties"
+            if params_file.exists():
+                shutil.copy2(str(params_file), str(Path(tmpdir) / "parameters.properties"))
+
             test_folder = tmpdir
             print(f"  📋 Test 대상: {copied} mapper XMLs (untested only, include refid 해석됨)", flush=True)
         else:
