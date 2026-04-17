@@ -10,11 +10,35 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, OUTPUT_DIR, get_target_dbms, get_target_db_display_name
 from core.progress import drain_progress
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_current_step_column
 
-from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested
+from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested, set_logger
+from agents.sql_transform.tools.convert_sql import set_step
 from agents.sql_test.agent import create_sql_test_agent
 
 _log_dir = LOGS_DIR / "test"
+
+
+def _classify_error(error_msg: str) -> str:
+    """Classify error message into a FAIL category."""
+    if not error_msg:
+        return 'unknown'
+    e = error_msg.lower()
+
+    if any(p in e for p in ['invalid input syntax', 'operator does not exist',
+                             'type mismatch', 'cannot cast']):
+        return 'parameter'
+    if any(p in e for p in ['syntax error', 'unexpected token', 'near "',
+                             'missing keyword']):
+        return 'sql_syntax'
+    if any(p in e for p in ['relation "', 'does not exist', 'column "',
+                             'table "', 'unknown column']):
+        return 'schema'
+    if any(p in e for p in ['classnotfound', 'connection refused', 'timeout',
+                             'could not connect', 'java.lang.']):
+        return 'infra'
+    return 'other'
 
 
 def create_agent():
@@ -132,6 +156,13 @@ def run(max_workers=8, auto_fix=False):
     from core.display import console_err
     console_err.print("[bold]SQL Test Agent[/bold]")
 
+    ensure_current_step_column()
+    set_step("test")
+
+    logger = PipelineLogger(step='test')
+    set_logger(logger)
+    start_time = time.time()
+
     TRANSFORM_DIR.mkdir(parents=True, exist_ok=True)
 
     test_log_file = LOGS_DIR / "test_execution.log"
@@ -234,6 +265,17 @@ def run(max_workers=8, auto_fix=False):
                 log_and_print(f"    ❌ {f['mapper_file']}/{f['sql_id']}: {f['error'][:100]}")
             if explain_result['failed'] > 5:
                 log_and_print(f"    ... and {explain_result['failed'] - 5} more")
+            # Phase 0 JSON logging
+            fail_set = {(f['mapper_file'], f['sql_id']) for f in explain_result.get('failures', [])}
+            for item in dml_items:
+                key = (item['mapper_file'], item['sql_id'])
+                if key in fail_set:
+                    fail_info = next(f for f in explain_result['failures'] if (f['mapper_file'], f['sql_id']) == key)
+                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'fail',
+                                          phase=0, fail_category='sql_syntax',
+                                          error=fail_info.get('error', ''))
+                else:
+                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'success', phase=0)
         elif explain_result.get('status') == 'skipped':
             log_and_print(f"  ⚠️  DML EXPLAIN skipped: {explain_result.get('error', '')}")
     else:
@@ -257,6 +299,15 @@ def run(max_workers=8, auto_fix=False):
     failures = bulk_result.get('failures', [])
     log_and_print(f"  ✅ Passed: {passed}")
     log_and_print(f"  ❌ Failed: {failed}")
+
+    # Phase 1 JSON logging for failures
+    for f in failures:
+        err = f.get('error', '')
+        logger.log_sql_result(
+            f['mapper_file'], f['sql_id'], 'fail',
+            phase=1, fail_category=_classify_error(err),
+            error=err,
+        )
 
     if not failures:
         with sqlite3.connect(str(DB_PATH)) as conn:
@@ -303,9 +354,11 @@ def run(max_workers=8, auto_fix=False):
             rows.append(("Status", "[green]All tests passed[/green]"))
 
         rows.append(("Log", str(test_log_file)))
+        rows.append(("JSON Log", str(logger.log_path)))
         print_step_result("Test Result", rows)
         _print_sql_type_distribution()
         _generate_test_result_report()
+        _finalize_logger(logger, start_time)
         return
 
     # Phase 2: Agent fixes failures (opt-in only)
@@ -344,9 +397,11 @@ def run(max_workers=8, auto_fix=False):
                 rows.append(("Failure Report", str(report_path)))
         rows.append(("Logs", str(_log_dir)))
         rows.append(("Execution log", str(test_log_file)))
+        rows.append(("JSON Log", str(logger.log_path)))
         print_step_result("Test Result", rows)
         _print_sql_type_distribution()
         _generate_test_result_report()
+        _finalize_logger(logger, start_time)
         return
 
     log_and_print(f"\nPhase 2: {len(failures)}건 실패 SQL 수정 (Agent)...\n")
@@ -420,11 +475,30 @@ def run(max_workers=8, auto_fix=False):
 
     rows.append(("Logs", str(_log_dir)))
     rows.append(("Execution log", str(test_log_file)))
+    rows.append(("JSON Log", str(logger.log_path)))
     print_step_result("Test Result", rows)
 
     # Show SQL type distribution table
     _print_sql_type_distribution()
     _generate_test_result_report()  # Combined Failed + Skip report
+    _finalize_logger(logger, start_time)
+
+
+def _finalize_logger(logger, start_time):
+    """Write run summary and generate summary.md."""
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+        p = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')")
+        f = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE test_result='SKIP'")
+        s = cursor.fetchone()[0]
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.log_summary(total=p + f + s, pass_=p, fail=f, skip=s, duration_ms=duration_ms)
+    summary_path = logger.generate_summary_md()
+    print(f"📊 JSON Log: {logger.log_path}", flush=True)
+    print(f"📊 Summary: {summary_path}", flush=True)
 
 
 def _print_sql_type_distribution():

@@ -10,10 +10,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import DB_PATH, LOGS_DIR
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_current_step_column
 from agents.sql_review.perspectives import run_multi_perspective_review
 from agents.sql_review.tools.review_tools import get_pending_reviews, set_reviewed
+from agents.sql_transform.tools.convert_sql import set_step
 
 _log_dir = LOGS_DIR / "review"
+_pipeline_logger = None
 
 
 def _group_by_file_size(sql_ids: list, max_group_bytes=30000) -> list:
@@ -115,14 +119,22 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
                 if res == 'PASS':
                     console(sid, "✅ PASS")
                     log(f"  ✅ PASS {sid}")
+                    if _pipeline_logger:
+                        _pipeline_logger.log_sql_result(mapper_file, sid, 'success')
                 elif res == 'PASS_WITH_WARNINGS':
                     summary = "; ".join(issue_strs[:2]) if issue_strs else ""
                     console(sid, f"⚠️  PASS_WITH_WARNINGS - {summary[:80]}")
                     log(f"  ⚠️  PASS_WITH_WARNINGS {sid}: {summary}")
+                    if _pipeline_logger:
+                        _pipeline_logger.log_sql_result(mapper_file, sid, 'success',
+                                                        warnings=summary[:200])
                 else:
                     summary = "; ".join(issue_strs[:2]) if issue_strs else "review failed"
                     console(sid, f"❌ FAIL - {summary[:80]}")
                     log(f"  ❌ FAIL {sid}: {summary}")
+                    if _pipeline_logger:
+                        _pipeline_logger.log_sql_result(mapper_file, sid, 'fail',
+                                                        error=summary[:200])
 
         log(f"✅ {mapper_file} 리뷰 완료")
         return {'mapper': mapper_file, 'status': 'success', 'count': len(sql_ids)}
@@ -226,6 +238,12 @@ def run(max_workers=8, max_rounds=3):
     from core.display import console_err
     console_err.print("[bold]SQL Review Agent[/bold]")
 
+    global _pipeline_logger
+    _pipeline_logger = PipelineLogger(step='review')
+    start_time = time.time()
+    set_step("review")
+    ensure_current_step_column()
+
     # Reset previous FAIL items so they get re-reviewed on re-run
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
@@ -308,7 +326,12 @@ def run(max_workers=8, max_rounds=3):
     else:
         rows.append(("Status", "[green]All passed[/green]"))
     rows.append(("Logs", str(_log_dir)))
+    rows.append(("JSON Log", str(_pipeline_logger.log_path)))
     print_step_result("Review Result", rows)
+
+    duration_ms = int((time.time() - start_time) * 1000)
+    _pipeline_logger.log_summary(total=total, pass_=passed, fail=failed, skip=skipped, duration_ms=duration_ms)
+    _pipeline_logger.generate_summary_md()
 
 
 if __name__ == "__main__":

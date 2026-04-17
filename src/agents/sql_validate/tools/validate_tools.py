@@ -55,13 +55,14 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
         result: 'PASS' or 'FAIL'
         notes: Validation notes
     """
+    next_step = 'test' if result == 'PASS' else 'validate'
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
                 from utils.db_utils import update_by_mapper
                 update_by_mapper(conn,
-                    "UPDATE transform_target_list SET validated='Y', validation_result=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-                    mapper_file, sql_id, extra_params=(result,))
+                    "UPDATE transform_target_list SET validated='Y', validation_result=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(result, next_step))
                 conn.commit()
             flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
             print(f"  {flag} {mapper_file}/{sql_id} {notes}")

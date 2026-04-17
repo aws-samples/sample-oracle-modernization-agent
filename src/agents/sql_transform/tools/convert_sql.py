@@ -5,6 +5,14 @@ from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH
 
+_current_step = "transform"
+
+
+def set_step(step: str):
+    """Runner calls this before Agent creation to set the current pipeline step."""
+    global _current_step
+    _current_step = step
+
 
 def _db_execute_with_retry(func, max_retries=5):
     """Execute DB operation with retry for concurrent access."""
@@ -27,7 +35,7 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
     stem = f"{Path(mapper_file).stem}_{sql_id}"
     existing = list(fix_dir.glob(f"{stem}_v*.log"))
     ver = len(existing) + 1
-    log_path = fix_dir / f"{stem}_v{ver}.log"
+    log_path = fix_dir / f"{stem}_v{ver}_{_current_step}.log"
     old_sql = target_path.read_text(encoding='utf-8')
 
     # Read original Oracle SQL for reference
@@ -46,7 +54,7 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
         pass
 
     content = (
-        f"=== FIX v{ver} | {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
+        f"=== FIX v{ver} [{_current_step}] | {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
         f"Notes: {notes}\n\n"
     )
     if original:
@@ -176,7 +184,7 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn2:
             conn2.execute("""
                 UPDATE transform_target_list
-                SET transformed = 'Y', updated_at = CURRENT_TIMESTAMP
+                SET transformed = 'Y', current_step = 'review', updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (record_id,))
             conn2.commit()

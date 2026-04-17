@@ -443,6 +443,8 @@ public class MyBatisBulkExecutorWithJson {
                 testNode.put("sqlId", result.testInfo.sqlId);
                 testNode.put("sqlType", result.testInfo.sqlType);
                 testNode.put("errorMessage", result.errorMessage != null ? result.errorMessage : "");
+                testNode.put("sqlState", result.sqlState != null ? result.sqlState : "");
+                testNode.put("errorCode", result.errorCode);
                 
                 // Include result data in JSON even for failed cases (error information etc.)
                 if (result.resultData != null) {
@@ -857,7 +859,16 @@ public class MyBatisBulkExecutorWithJson {
                 } catch (Exception sqlException) {
                     result.success = false;
                     result.errorMessage = sqlException.getMessage();
-                    
+                    if (sqlException instanceof java.sql.SQLException) {
+                        java.sql.SQLException se = (java.sql.SQLException) sqlException;
+                        result.sqlState = se.getSQLState();
+                        result.errorCode = se.getErrorCode();
+                    } else if (sqlException.getCause() instanceof java.sql.SQLException) {
+                        java.sql.SQLException se = (java.sql.SQLException) sqlException.getCause();
+                        result.sqlState = se.getSQLState();
+                        result.errorCode = se.getErrorCode();
+                    }
+
                     // Save as empty result even for failed cases (to be included in comparison statistics)
                     sqlResults = new ArrayList<>();
                     Map<String, Object> errorResult = new HashMap<>();
@@ -1832,6 +1843,8 @@ public class MyBatisBulkExecutorWithJson {
         boolean success;
         int rowCount;
         String errorMessage;
+        String sqlState;
+        int errorCode;
         List<Map<String, Object>> resultData;
     }
     

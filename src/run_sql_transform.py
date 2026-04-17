@@ -13,6 +13,8 @@ from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, OUTPUT_DIR, MODEL_ID, get_rules_path, get_target_db_display_name, load_prompt_text
 from core.progress import drain_progress
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_current_step_column
 
 from agents.sql_transform.tools.load_mapper_list import load_mapper_list, get_pending_transforms, read_sql_source
 from agents.sql_transform.tools.split_mapper import split_mapper
@@ -156,6 +158,10 @@ def run(max_workers=8, sample=0):
     label = f" [cyan](sample={sample})[/cyan]" if sample > 0 else ""
     console_err.print(f"[bold]SQL Transform Agent[/bold]{label}")
 
+    logger = PipelineLogger(step='transform')
+    start_time = time.time()
+    ensure_current_step_column()
+
     # 1. 전처리 (extract 파일이 없으면 실행)
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
@@ -213,7 +219,20 @@ def run(max_workers=8, sample=0):
             for future in as_completed(futures):
                 results.append(future.result())
 
-    # 4. Generate report
+    # 4. Log SQL-level results from DB
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        for mapper_file, sql_ids in mapper_list:
+            for s in sql_ids:
+                cursor.execute(
+                    "SELECT transformed FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                    (mapper_file, s['sql_id'])
+                )
+                row = cursor.fetchone()
+                status = 'success' if row and row[0] == 'Y' else 'fail'
+                logger.log_sql_result(mapper_file, s['sql_id'], status)
+
+    # 5. Generate report
     print(f"\n📊 Generating report...", flush=True)
     save_conversion_report()
 
@@ -226,6 +245,10 @@ def run(max_workers=8, sample=0):
         done = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='N'")
         remaining = cursor.fetchone()[0]
+
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.log_summary(total=total, pass_=done, fail=remaining, duration_ms=duration_ms)
+    logger.generate_summary_md()
 
     from core.display import print_step_result
 
@@ -242,6 +265,7 @@ def run(max_workers=8, sample=0):
             rows.append(("Failed", f"[red]{r['mapper']}: {r.get('error', 'unknown')}[/red]"))
 
     rows.append(("Logs", str(_log_dir)))
+    rows.append(("JSON Log", str(logger.log_path)))
     print_step_result("Transform Result", rows)
 
 

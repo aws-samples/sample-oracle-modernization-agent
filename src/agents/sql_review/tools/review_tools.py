@@ -50,13 +50,14 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
     feedback_to_store = review_feedback if review_feedback else violations
     # PASS and PASS_WITH_WARNINGS both store reviewed='Y'; only FAIL stores 'F'
     reviewed_flag = 'F' if result == 'FAIL' else 'Y'
+    next_step = 'validate' if reviewed_flag == 'Y' else 'review'
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
                 from utils.db_utils import update_by_mapper
                 update_by_mapper(conn,
-                    "UPDATE transform_target_list SET reviewed=?, review_result=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-                    mapper_file, sql_id, extra_params=(reviewed_flag, feedback_to_store))
+                    "UPDATE transform_target_list SET reviewed=?, review_result=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(reviewed_flag, feedback_to_store, next_step))
                 conn.commit()
 
             if result == 'PASS':

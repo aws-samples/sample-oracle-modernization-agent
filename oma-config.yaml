@@ -1,0 +1,29 @@
+# OMA Application SQL Transform Agent — Unified Configuration
+# Priority: env var > this yaml > DB properties table
+
+project:
+  output_dir: ./output
+  target_dbms: postgresql
+  # model_id: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+database:
+  host: ${PGHOST}
+  port: ${PGPORT}
+  user: ${PGUSER}
+  password: ${PGPASSWORD}
+  database: ${PGDATABASE}
+
+pipeline:
+  definition: pipeline.md
+  transform:
+    workers: 8
+  review:
+    workers: 4
+    max_rounds: 3
+  validate:
+    workers: 6
+  test:
+    workers: 6
+    timeout: 5
+  stop_on_fail: true
+  retry_failed: true

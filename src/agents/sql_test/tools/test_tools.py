@@ -10,6 +10,14 @@ from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR, MERGE_DIR, get_target_dbms, get_target_db_display_name
 from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
 
+_logger = None
+
+
+def set_logger(logger):
+    """Inject PipelineLogger from runner."""
+    global _logger
+    _logger = logger
+
 
 REFERENCE_DIR = PROJECT_ROOT / "src" / "reference"
 _TEST_SCRIPTS = {
@@ -648,18 +656,17 @@ def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: s
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                # Store result and notes separately
-                test_result_val = result  # PASS, FAIL, SKIP, FIXED
+                test_result_val = result
                 test_notes_val = error if result != "PASS" else ""
                 if result == "FAIL":
                     test_result_val = "FAIL"
                     test_notes_val = error[:500] if error else "Unknown error"
+                next_step = 'completed' if result == 'PASS' else 'test'
                 from utils.db_utils import update_by_mapper
                 update_by_mapper(conn,
-                    "UPDATE transform_target_list SET tested='Y', test_result=?, test_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-                    mapper_file, sql_id, extra_params=(test_result_val, test_notes_val))
+                    "UPDATE transform_target_list SET tested='Y', test_result=?, test_notes=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(test_result_val, test_notes_val, next_step))
                 conn.commit()
-            # Emit progress event via thread-safe queue
             from core.progress import emit_progress
             emit_progress(mapper_file, sql_id, result)
             return
