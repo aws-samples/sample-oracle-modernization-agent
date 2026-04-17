@@ -4,6 +4,9 @@ import { getDb } from '@/lib/db';
 export async function GET(request: NextRequest) {
   try {
     const db = getDb();
+    if (!db) {
+      return NextResponse.json({ total: 0, limit: 100, offset: 0, data: [] });
+    }
     const { searchParams } = new URL(request.url);
 
     const step = searchParams.get('step');
@@ -49,6 +52,9 @@ export async function GET(request: NextRequest) {
       data: rows,
     });
   } catch (error) {
+    if (String(error).includes('no such table')) {
+      return NextResponse.json({ total: 0, limit: 100, offset: 0, data: [] });
+    }
     return NextResponse.json(
       { error: String(error) },
       { status: 500 }

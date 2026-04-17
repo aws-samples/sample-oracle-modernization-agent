@@ -25,9 +25,10 @@ export default function OverviewPage() {
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
   if (error) return <div className="text-destructive">Error: {error.message}</div>;
   if (!data) return null;
+  if (data.error) return <div className="text-destructive">API Error: {data.error}</div>;
 
-  const { steps, totals } = data;
-  const stepMap = new Map(steps.map((s: { current_step: string; count: number }) => [s.current_step, s.count]));
+  const { steps = [], totals = {} } = data;
+  const stepMap = new Map((steps || []).map((s: { current_step: string; count: number }) => [s.current_step, s.count]));
 
   return (
     <div className="space-y-6">

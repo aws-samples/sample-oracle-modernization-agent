@@ -4,6 +4,13 @@ import { getDb } from '@/lib/db';
 export async function GET() {
   try {
     const db = getDb();
+    if (!db) {
+      return NextResponse.json({
+        steps: [],
+        totals: { total: 0, passed: 0, failed: 0, skipped: 0, passRate: 0 },
+        message: 'No database found. Run the pipeline first to generate data.',
+      });
+    }
 
     const stepCounts = db.prepare(`
       SELECT current_step, COUNT(*) as count
@@ -33,6 +40,13 @@ export async function GET() {
       totals: { ...totals, passRate },
     });
   } catch (error) {
+    if (String(error).includes('no such table')) {
+      return NextResponse.json({
+        steps: [],
+        totals: { total: 0, passed: 0, failed: 0, skipped: 0, passRate: 0 },
+        message: 'Pipeline not started yet. Run analyze first.',
+      });
+    }
     return NextResponse.json(
       { error: String(error) },
       { status: 500 }

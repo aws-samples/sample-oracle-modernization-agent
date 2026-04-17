@@ -9,6 +9,9 @@ def ensure_current_step_column():
         return
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transform_target_list'")
+        if not cursor.fetchone():
+            return
         cursor.execute("PRAGMA table_info(transform_target_list)")
         columns = {row[1] for row in cursor.fetchall()}
         if 'current_step' in columns:

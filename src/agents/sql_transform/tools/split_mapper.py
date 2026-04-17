@@ -127,7 +127,9 @@ def _init_table(conn):
             transform_count INTEGER,
             review_result TEXT,
             validation_result TEXT,
-            test_result TEXT
+            test_result TEXT,
+            test_notes TEXT,
+            current_step TEXT DEFAULT 'pending'
         )
     """)
     conn.commit()

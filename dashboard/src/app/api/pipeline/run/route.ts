@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import path from 'path';
+import { setRunning, getRunning } from '@/lib/process-tracker';
 
-const SRC_DIR = path.resolve(process.cwd(), '..', 'src');
+const PROJECT_DIR = path.resolve(process.cwd(), '..');
+const SRC_DIR = path.join(PROJECT_DIR, 'src');
+const VENV_PYTHON = path.join(PROJECT_DIR, '.venv', 'bin', 'python3');
 
 const STEP_COMMANDS: Record<string, string[]> = {
   analyze: ['run_source_analyzer.py'],
@@ -18,27 +21,43 @@ export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const step = searchParams.get('step') || 'all';
 
+  const current = getRunning();
+  if (current?.alive) {
+    return NextResponse.json({
+      error: `Step "${current.step}" is already running (pid: ${current.pid})`,
+      running: current,
+    }, { status: 409 });
+  }
+
   const cmd = STEP_COMMANDS[step];
   if (!cmd) {
     return NextResponse.json({ error: `Unknown step: ${step}` }, { status: 400 });
   }
 
   try {
-    const proc = spawn('python3', cmd, {
+    const proc = spawn(VENV_PYTHON, cmd, {
       cwd: SRC_DIR,
-      env: { ...process.env, PYTHONPATH: SRC_DIR },
+      env: { ...process.env, PYTHONPATH: SRC_DIR, VIRTUAL_ENV: path.join(PROJECT_DIR, '.venv') },
       detached: true,
       stdio: 'ignore',
     });
     proc.unref();
 
-    return NextResponse.json({
-      status: 'started',
+    const info = {
+      pid: proc.pid!,
       step,
-      pid: proc.pid,
+      startedAt: new Date().toISOString(),
       command: `python3 ${cmd.join(' ')}`,
-    });
+    };
+    setRunning(info);
+
+    return NextResponse.json({ status: 'started', ...info });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
+}
+
+export async function GET() {
+  const current = getRunning();
+  return NextResponse.json({ running: current });
 }
