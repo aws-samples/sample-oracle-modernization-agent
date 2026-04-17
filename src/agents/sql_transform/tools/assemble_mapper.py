@@ -108,6 +108,40 @@ def assemble_mapper(mapper_file: str) -> dict:
 
     converted_content = sql_pattern.sub(replace_sql, content)
 
+    # Flatten nested SQL comments: /* ... /* ... */ ... */ → single /* ... */
+    def _flatten_nested_comments(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i:i+2] == '/*':
+                depth = 1
+                start = i
+                i += 2
+                while i < len(text) and depth > 0:
+                    if text[i:i+2] == '/*':
+                        depth += 1
+                        i += 2
+                    elif text[i:i+2] == '*/':
+                        depth -= 1
+                        if depth == 0:
+                            i += 2
+                            break
+                        i += 2
+                    else:
+                        i += 1
+                if depth > 0:
+                    result.append(text[start:i])
+                else:
+                    inner = text[start+2:i-2]
+                    inner = inner.replace('/*', '').replace('*/', '')
+                    result.append(f"/*{inner}*/")
+            else:
+                result.append(text[i])
+                i += 1
+        return ''.join(result)
+
+    converted_content = _flatten_nested_comments(converted_content)
+
     # Write to output/merge/
     if sub_dir:
         merge_dir = MERGE_DIR / sub_dir

@@ -120,14 +120,40 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
     # Sanitize: remove <> from SQL comments to prevent XML parsing errors
     import re
     def _sanitize_sql_comments(sql: str) -> str:
-        """Remove angle brackets from /* ... */ comments to prevent SAXParseException."""
-        def _clean_comment(m):
-            comment = m.group(0)
-            # Replace < and > inside comment with empty string
-            inner = comment[2:-2]  # strip /* and */
-            inner = inner.replace('<', '[').replace('>', ']')
-            return f"/*{inner}*/"
-        return re.sub(r'/\*.*?\*/', _clean_comment, sql, flags=re.DOTALL)
+        """Remove angle brackets and nested comments from SQL to prevent parse errors.
+
+        Handles nested /* */ by stripping inner delimiters before outer comment closes.
+        e.g., /* [OMA] selectInvnList - /* 재고조회 */ NVL→COALESCE */ → single comment
+        """
+        # First pass: flatten nested comments
+        # Find outermost /* ... */ allowing nested ones
+        result = []
+        i = 0
+        while i < len(sql):
+            if sql[i:i+2] == '/*':
+                depth = 1
+                start = i
+                i += 2
+                while i < len(sql) and depth > 0:
+                    if sql[i:i+2] == '/*':
+                        depth += 1
+                        i += 2
+                    elif sql[i:i+2] == '*/':
+                        depth -= 1
+                        if depth == 0:
+                            i += 2
+                            break
+                        i += 2
+                    else:
+                        i += 1
+                inner = sql[start+2:i-2]
+                inner = inner.replace('/*', '').replace('*/', '')
+                inner = inner.replace('<', '[').replace('>', ']')
+                result.append(f"/*{inner}*/")
+            else:
+                result.append(sql[i])
+                i += 1
+        return ''.join(result)
 
     converted_sql = _sanitize_sql_comments(converted_sql)
 

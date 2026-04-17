@@ -90,6 +90,7 @@ Common Oracle functions to check ({{TARGET_DB}} equivalents differ — see Gener
 - [ ] `%ROWTYPE`, `%TYPE` → explicit types
 
 ### Always Check
+- [ ] **Original names preserved**: All sql id, refid, resultMap id must match original verbatim (lowercased only). No added prefixes, no typo "fixes", no renaming. (e.g., `sql_putawayLocation` must NOT become `sql_selectPutawayLocation`)
 - [ ] Parameter casting (PostgreSQL only): `#{param}` in WHERE/LIMIT/OFFSET should have `::type` cast. MySQL does NOT use `::type` — skip this check for MySQL.
 - [ ] CDATA preserved: if original used `<![CDATA[...]]>`, converted must keep CDATA (not replace with `&lt;`)
 - [ ] XML escaping: raw `<` or `<=` outside CDATA must be `&lt;` / `&lt;=`
