@@ -1,10 +1,10 @@
-# Pipeline Logging Improvement Plan
+# Pipeline Logging & Dashboard Plan
 
-> **Summary**: 파이프라인 전 단계에 구조화된 JSON Lines 로그 체계 구축 — SQL별 결과 추적, Agent 동작 가시성 확보, 타이밍/에러 집계
+> **Summary**: JSON Lines 로그 체계 + Next.js 대시보드 + 파이프라인 관리 UI — SQL별 여정 추적, FAIL 분석, 실행 제어, 통계/트렌드
 >
 > **Project**: Application SQL Transform Agent (OMA sub-module)
 > **Author**: Plan
-> **Date**: 2026-04-17
+> **Date**: 2026-04-17 (확장: 2026-04-18)
 > **Status**: Active
 
 ---
@@ -13,10 +13,10 @@
 
 | Perspective | Content |
 |-------------|---------|
-| **Problem** | 6개 파이프라인 단계 중 Transform/Validate는 SQL별 로그 없음, Merge/Analyze는 로그 파일 자체 없음. Agent 내부 tool call 불가시. emit_progress 데이터 폐기. 1000+ SQL 변환 시 문제 추적 불가 |
-| **Solution** | JSON Lines 기반 구조화 로그 — 단계별 SQL 결과, 타이밍, Agent tool call 추적. 실행 요약 자동 생성. 이전 실행 이력 보존 |
-| **Function/UX Effect** | 변환 완료 후 `jq` 한 줄로 실패 SQL 추출, 느린 SQL 식별, 단계별 통계 즉시 확인. 이전 실행과 비교 가능 |
-| **Core Value** | 대규모 변환 프로젝트에서 디버깅 시간 80% 단축 — "어디서 실패했는지"를 즉시 파악 |
+| **Problem** | 1000+ SQL 변환 시 개별 SQL 실패 원인 추적 불가. CLI 텍스트 로그만 존재. 파이프라인 실행/모니터링이 CLI 수동 명령어에 의존. 전체 현황 한눈에 파악 불가 |
+| **Solution** | (1) JSON Lines 구조화 로그 — SQL별 결과/타이밍/파라미터/에러 기록, (2) Next.js 대시보드 — SQL 여정 추적, FAIL 분석, 파이프라인 제어, 실행 통계/트렌드 |
+| **Function/UX Effect** | 웹 브라우저에서 변환 현황 확인, FAIL SQL 클릭으로 에러+파라미터+fix_history 추적, 파이프라인 실행/재시도/SKIP을 UI에서 제어 |
+| **Core Value** | 대규모 변환 프로젝트의 운영 효율화 — CLI 없이도 비개발자가 변환 현황 모니터링 가능 |
 
 ---
 
@@ -24,11 +24,11 @@
 
 | Anchor | Content |
 |--------|---------|
-| **WHY** | 현재 로그 체계로는 1000+ SQL 변환 시 개별 SQL 실패 원인 추적이 불가능. 로그 부재로 디버깅에 과도한 시간 소요 |
-| **WHO** | OMA 운영자 (변환 실행/결과 확인), 개발자 (Agent 동작 디버깅) |
-| **RISK** | 로그 과다 생성 시 디스크/성능 부담, Agent tool_use 캡처 시 코드 침습도 증가 |
-| **SUCCESS** | 모든 단계에서 SQL별 결과 로그 생성, jq로 실패 SQL 즉시 추출 가능, 실행 시간 통계 확인 가능 |
-| **SCOPE** | 6개 파이프라인 단계 (Transform, Review, Validate, Merge, Test, Analyze) 로그 체계. Agent SDK 내부 hook은 제외 |
+| **WHY** | CLI 수동 운영 한계 — 1000+ SQL 변환 시 실패 추적 불가, 비개발자 접근 불가, 실행 제어가 명령어 의존 |
+| **WHO** | OMA 운영자 (변환 실행/결과 확인), 프로젝트 매니저 (현황 모니터링), 개발자 (Agent 디버깅) |
+| **RISK** | 프론트엔드 추가로 기술 스택 복잡도 증가, API 서버 운영 부담, 로그 데이터 크기 |
+| **SUCCESS** | 웹 대시보드에서 SQL별 여정 추적 + FAIL 분석 + 파이프라인 제어 + 실행 트렌드 확인 가능 |
+| **SCOPE** | 백엔드(JSON 로그 + API) + 프론트엔드(Next.js 대시보드). Agent SDK 내부 hook은 제외 |
 
 ---
 
@@ -289,30 +289,166 @@ FAIL 사유 분류(parameter/SQL변환/스키마)도 로그에 없음.
 | Validate 보강 | `src/run_sql_validate.py` | SQL별 결과 추가 |
 | **flag → current_step 전환** | 20곳+ WHERE 조건 | `WHERE transformed='Y' AND reviewed='N'` → `WHERE current_step='validate'` 점진 교체. Phase 1 안정화 후 진행 |
 
-### Phase 3: 고급 기능
+### Phase 3: Next.js 대시보드 + API 서버
+
+**기술 스택**: Next.js 15 (App Router) + React + Tailwind CSS + shadcn/ui
+**데이터 소스**: SQLite DB (transform_target_list) + JSON Lines 로그 (events.jsonl) + fix_history/
+
+#### 3-1. API 서버 (Next.js API Routes 또는 Python FastAPI)
+
+| API | 설명 |
+|-----|------|
+| `GET /api/pipeline/status` | 전체 파이프라인 현황 (단계별 Pass/Fail/Skip 카운트) |
+| `GET /api/sql/:mapper/:sqlId` | SQL별 상세 — 현재 상태 + 전체 여정 (JSON 로그 + fix_history) |
+| `GET /api/sql?status=fail&step=test` | 필터 조회 (단계, 상태, 사유 카테고리) |
+| `GET /api/runs` | 실행 이력 목록 (타임스탬프별 run summary) |
+| `GET /api/runs/:runId/summary` | 특정 실행의 요약 통계 |
+| `GET /api/stats/trend` | Pass Rate 트렌드 (실행별 시계열) |
+| `POST /api/pipeline/run/:step` | 파이프라인 단계 실행 (Transform, Review, Test 등) |
+| `POST /api/sql/:mapper/:sqlId/retry` | 특정 SQL 재시도 |
+| `POST /api/sql/:mapper/:sqlId/skip` | 특정 SQL SKIP 처리 |
+| `POST /api/sql/skip-category` | 카테고리별 일괄 SKIP |
+| `GET /api/config` | 현재 config 조회 |
+| `PUT /api/config` | config 수정 (DB/파이프라인/프로젝트 설정) |
+
+#### 3-2. 대시보드 페이지
+
+| 페이지 | 기능 |
+|--------|------|
+| **Overview** (`/`) | 파이프라인 전체 현황 — 단계별 진행 바, Pass/Fail/Skip 도넛차트, 최근 실행 목록 |
+| **SQL Explorer** (`/sql`) | SQL 목록 테이블 — 필터(단계/상태/카테고리), 정렬, 검색. 행 클릭 → 상세 |
+| **SQL Detail** (`/sql/[mapper]/[sqlId]`) | SQL 여정 타임라인 (Transform→Review→Test), FAIL 상세 (파라미터+sqlState+에러), fix_history diff 뷰어 |
+| **FAIL Analysis** (`/analysis`) | FAIL 사유 분류 차트, 카테고리별 SQL 목록, 일괄 SKIP/재시도 UI |
+| **Run History** (`/runs`) | 실행별 요약 카드, Pass Rate 트렌드 차트, 실행 간 비교 |
+| **Pipeline Control** (`/control`) | 단계별 실행 버튼, 진행 상태 실시간 모니터링, 로그 스트리밍 |
+| **Settings** (`/settings`) | 통합 config 편집 — DB 접속, 파이프라인 옵션, 프로젝트 설정. yaml 기반 |
+
+#### 3-3. 디렉토리 구조
+
+```
+dashboard/                    ← Next.js 프로젝트 (프로젝트 루트에 분리)
+  ├── app/
+  │   ├── layout.tsx
+  │   ├── page.tsx            ← Overview
+  │   ├── sql/
+  │   │   ├── page.tsx        ← SQL Explorer
+  │   │   └── [mapper]/[sqlId]/page.tsx  ← SQL Detail
+  │   ├── analysis/page.tsx   ← FAIL Analysis
+  │   ├── runs/page.tsx       ← Run History
+  │   ├── control/page.tsx    ← Pipeline Control
+  │   └── api/                ← API Routes
+  ├── components/
+  │   ├── pipeline-status.tsx
+  │   ├── sql-journey-timeline.tsx
+  │   ├── fail-category-chart.tsx
+  │   └── diff-viewer.tsx
+  ├── lib/
+  │   ├── db.ts               ← SQLite 연결 (better-sqlite3)
+  │   ├── log-parser.ts       ← JSON Lines 파서
+  │   └── pipeline-runner.ts  ← Python runner 실행 (child_process)
+  └── package.json
+```
+
+### Phase 3-1: MD 기반 오케스트레이터 (Python Orchestrator Agent 대체)
+
+현재 Python Orchestrator는 Strands Agent + 17개 tool + LLM 판단으로 파이프라인을 제어하지만,
+실제 하는 일은 **순서 호출 + 상태 확인 + 에러 핸들링** 뿐. LLM 비용 불필요.
+
+**현재:**
+```
+CLI → Python Orchestrator Agent (LLM 호출, 비용 발생)
+  → "다음에 뭘 할까?" LLM 판단
+  → run_source_analyzer.py → run_sql_transform.py → ...
+```
+
+**목표:**
+```
+CLI / 대시보드 → pipeline.md (순서 정의) → Pipeline Runner (Python, LLM 불필요)
+  → 순차 실행 + 상태 체크 + 에러 시 중단/재시도
+  → 대시보드 Pipeline Control 페이지 = 웹 오케스트레이터
+```
+
+**pipeline.md 예시:**
+```markdown
+# Pipeline: Oracle → PostgreSQL
+
+## Steps
+1. analyze    | run_source_analyzer.py | required
+2. transform  | run_sql_transform.py --workers 8 | required
+3. review     | run_sql_review.py --workers 4 --max-rounds 3 | optional
+4. validate   | run_sql_validate.py --workers 6 | optional
+5. merge      | run_sql_merge.py | required
+6. test       | run_sql_test.py --workers 6 | required
+
+## Options
+- stop_on_fail: true
+- retry_failed: true
+- max_retries: 2
+```
+
+**통합 config 파일 (`oma-config.yaml`):**
+현재 env var, CLI args, run_setup.py 대화형, DB properties 테이블에 흩어진 설정을 통합.
+```yaml
+project:
+  output_dir: ./output
+  target_dbms: postgresql
+  model_id: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: ${DB_PASSWORD}    # env var 참조
+  database: mydb
+pipeline:
+  transform: { workers: 8 }
+  review: { workers: 4, max_rounds: 3 }
+  test: { workers: 6, timeout: 5 }
+  stop_on_fail: true
+  retry_failed: true
+```
+- env var > yaml > DB properties 우선순위 (기존 호환)
+- 대시보드 Settings 페이지에서 웹 편집
+
+**Pipeline Runner (Python, ~100줄):**
+- MD 파싱 → step 목록 추출
+- `oma-config.yaml`에서 workers/옵션 로드
+- 순차 실행 (subprocess)
+- DB에서 current_step 갱신
+- 실패 시 stop/retry 로직
+- JSON 로그에 step_start/step_complete 이벤트
+- 대시보드 API에서 호출 가능 (`POST /api/pipeline/run`)
+
+**대시보드 Pipeline Control 페이지와 연결:**
+- pipeline.md 내용 표시 + 편집
+- 단계별 실행/건너뛰기/재시도 UI
+- 실행 중 상태 표시 (current_step DB 연동)
+
+### Phase 4: 고급 기능
 
 | 항목 | 설명 |
 |------|------|
 | Analyze 로그 추가 | 분석 결과 로깅 |
 | Agent tool call 추적 | ToolCallLogger 핸들러 (SDK 호환 확인 후) |
-| 에러 집계 리포트 | 실행 완료 후 카테고리별 통계 |
-| 로그 뷰어 CLI | `python run_log_viewer.py --step test --status fail` |
+| 실시간 로그 스트리밍 | WebSocket — Pipeline Control 페이지에서 실행 중 로그 실시간 표시 |
+| 사용자 인증 | (필요 시) 내부 도구이므로 간단한 토큰 인증 |
 
 ---
 
 ## 6. 성공 기준
 
-| 항목 | 현재 | Phase 1 목표 | Phase 2 목표 |
-|------|:----:|:----:|:----:|
-| SQL별 로그 (Test) | 에러만 | ✅ 전체 (Phase 0/1/2) | ✅ |
-| SQL별 로그 (Transform) | ❌ | ❌ | ✅ |
-| SQL별 로그 (모든 단계) | 1/6 | 2/6 (Test+Review) | 6/6 |
-| FAIL 사유 분류 | ❌ | ✅ (4 카테고리) | ✅ |
-| JSON 구조화 | ❌ | ✅ | ✅ |
-| jq로 실패 SQL 추출 | ❌ | ✅ | ✅ |
-| 타이밍 기록 | ❌ | ✅ | ✅ |
-| 실행 이력 보존 | ❌ | ✅ | ✅ |
-| 실행 요약 자동 생성 | ❌ | ✅ | ✅ |
+| 항목 | 현재 | Phase 1 | Phase 2 | Phase 3 |
+|------|:----:|:----:|:----:|:----:|
+| SQL별 로그 (Test) | 에러만 | ✅ 전체 | ✅ | ✅ |
+| SQL별 로그 (모든 단계) | 1/6 | 2/6 | 6/6 | 6/6 |
+| FAIL 사유 분류 | ❌ | ✅ (4카테고리) | ✅ | ✅ |
+| JSON 구조화 | ❌ | ✅ | ✅ | ✅ |
+| 타이밍 기록 | ❌ | ✅ | ✅ | ✅ |
+| 실행 이력 보존 | ❌ | ✅ | ✅ | ✅ |
+| summary.md 자동 생성 | ❌ | ✅ | ✅ | ✅ |
+| **웹 대시보드** | ❌ | ❌ | ❌ | ✅ |
+| **SQL 여정 추적 UI** | ❌ | ❌ | ❌ | ✅ |
+| **파이프라인 실행 제어** | CLI만 | CLI만 | CLI만 | ✅ 웹 UI |
+| **실행 통계/트렌드** | ❌ | ❌ | ❌ | ✅ |
 
 **검증 명령어:**
 ```bash
@@ -334,6 +470,8 @@ jq 'select(.fail_category=="parameter")' output/logs/test/20260417_143000.jsonl
 | Strands SDK callback 제약 | FR-06 구현 불가 | Phase 3으로 연기, 대안 검토 |
 | current_step ↔ flag 불일치 | 조회 결과 혼란 | DB가 truth. Phase 1에서는 current_step은 보조 뷰. Phase 2 전환 시 flag deprecated 후 제거 |
 | FR-10 파라미터 로깅 소스 | Java가 SQL별 사용 파라미터 미리턴 | Python에서 `parameters.properties` 읽어서 JSON 로그에 첨부 (Phase 1). sql_parameters.json 도입 후 SQL별 매칭 (Phase 2) |
+| Next.js + Python 이중 스택 | 기술 스택 복잡도 증가 | dashboard/는 독립 프로젝트, Python 코드와 분리. API는 Next.js API Routes로 DB/로그 직접 접근 또는 Python FastAPI 별도 |
+| SQLite 동시 접근 | 대시보드 read + runner write 충돌 | WAL 모드 + read-only 연결 (대시보드), timeout 설정 |
 
 ---
 
@@ -376,11 +514,11 @@ jq 'select(.fail_category=="parameter")' output/logs/test/20260417_143000.jsonl
 
 ## 9. Next Steps
 
-1. [ ] Phase 1 Design 문서 작성 (`/pdca design pipeline-logging`)
-2. [ ] `PipelineLogger` 클래스 구현
-3. [ ] Test runner 통합 (Phase 0/1/2 전체)
-4. [ ] FAIL 사유 분류 로직 구현
-5. [ ] example/ 프로젝트로 검증 (42 SQL)
+1. [ ] Design 문서 작성 (`/pdca design pipeline-logging`)
+2. [ ] Phase 1: `PipelineLogger` + Test runner 통합 + current_step + fix_history 연결
+3. [ ] Phase 2: 나머지 5단계 로그 통합 + current_step 전면 적용
+4. [ ] Phase 3: Next.js 대시보드 + API (PDCA Team: developer + frontend + qa)
+5. [ ] example/ 프로젝트로 E2E 검증
 
 ---
 
@@ -389,3 +527,4 @@ jq 'select(.fail_category=="parameter")' output/logs/test/20260417_143000.jsonl
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 1.0 | 2026-04-17 | Initial plan — 6단계 로그 분석, JSON Lines 설계 | Plan |
+| 2.0 | 2026-04-18 | 확장 — Next.js 대시보드 + 파이프라인 관리 UI (Phase 3) + MD 기반 오케스트레이터 (Phase 3-1) | Plan |
