@@ -29,6 +29,7 @@ example/output/
 example/.mcp.json
 example/AGENT.md
 example/skills
+example2/
 GITHUB_PUSH_GUIDE.md
 push-github.sh
 src/config/

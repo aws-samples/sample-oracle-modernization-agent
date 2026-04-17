@@ -56,8 +56,28 @@ Test 실행 결과 품질 (Pass Rate, SKIP 감소)
 | `<choose><when>` 분기별 파라미터 | 하나의 파라미터 세트로 일부 분기만 테스트 | 분기별 멀티 파라미터 세트 |
 | 복합 조건 `<if test="a != null and b == 'Y'">` | 단순 매칭만 | 조건 조합 파서 |
 | `${param}` SQL 구조 파라미터 | 빈값 → SKIP | 테이블명/컬럼명 추론 |
+| `#{param}` SQL 구조 파라미터 (비교연산자 없이 독립 사용) | `?` 바인딩 → syntax error | 테스트 전 XML 전처리로 제거 |
 | 동일 param, 다른 용도 (SQL마다 다른 타입) | 글로벌 1개 값 | SQL별 파라미터 프로파일 |
 | `<bind>` 표현식 | 미처리 | bind 값 추출/평가 |
+
+#### #{param} SQL 구조 파라미터 문제 (Phase 2)
+
+`#{GRIDPAGING_ROWNUMTYPE_TOP}`, `#{SEARCH_CONDITION}` 등 — 데이터 값이 아니라 SQL 구조를 조립하는 파라미터가 `#{}` (prepared statement)로 바인딩됨. `<if>`로 감싸져 있지 않아 파라미터를 empty로 해도 MyBatis가 `?`로 치환 → syntax error 발생.
+
+**패턴 예시:**
+```sql
+-- GRIDPAGING: Oracle ROWNUM 페이징 래퍼 (sql_pagingTop/Bottom fragment)
+#{GRIDPAGING_ROWNUMTYPE_TOP}
+SELECT B.* FROM (
+  -- 실제 SQL
+) B
+#{GRIDPAGING_ROWNUMTYPE_BOTTOM}
+
+-- SEARCH_CONDITION: 동적 WHERE 조건 주입
+WHERE 1=1 AND #{SEARCH_CONDITION}
+```
+
+**해결 방향:** 테스트 전 XML 전처리 — tmpdir 복사 후 Java 실행 전에 구조 파라미터를 감지하여 제거/치환. 판별 기준: `#{param}` 주변에 비교 연산자(`=`, `LIKE`, `IN`, `>`, `<`)가 없으면 구조 파라미터.
 
 ---
 

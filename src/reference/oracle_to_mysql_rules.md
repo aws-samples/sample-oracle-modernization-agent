@@ -73,25 +73,14 @@ MySQL identifier case sensitivity depends on `lower_case_table_names` system var
 #### 6. Stored Procedure / Package Function Conversion
 - `{call PROC()}` → `CALL PROC()`
 - `SCHEMA.PACKAGE.PROC()` → `PACKAGE_PROC()`
-- `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot notation to underscore)
+- `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot → underscore + lowercase)
 
-**Only Oracle standard packages (`DBMS_*`, `UTL_*`) get special handling** (see Phase 4 §6 PL/SQL Constructs).
-**ALL other packages are user-defined** — apply flattening unconditionally, regardless of the name.
-Do NOT interpret package names (e.g., CRYPTO, ENCRYPT, HTTP, MAIL) as functionality hints.
-Examples of user-defined packages:
+**Only `DBMS_*`, `UTL_*` are Oracle standard** (see Phase 4 §6). ALL others are user-defined — flatten unconditionally. Do NOT map to built-in functions (`AES_ENCRYPT()`, etc.).
 ```sql
--- Oracle
-SELECT PKG_CRYPTO.ENCRYPT(col, 'key') FROM users
-WHERE PKG_UTIL.IS_VALID(status) = 'Y'
-
--- MySQL
-SELECT pkg_crypto_encrypt(col, 'key') FROM users
-WHERE pkg_util_is_valid(status) = 'Y'
+-- Oracle → MySQL
+PKG_CRYPTO.ENCRYPT(col, 'key')   →  pkg_crypto_encrypt(col, 'key')
+PKG_UTIL.IS_VALID(status)        →  pkg_util_is_valid(status)
 ```
-- `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` (dot → underscore + lowercase)
-- This rule applies to ALL package.function calls, not just Oracle standard packages
-- The actual function must exist in the target DB (created separately during migration)
-- **Crypto/encryption packages (PKG_CRYPTO, PKG_ENCRYPT, etc.) are user-defined packages** — apply the same flattening rule. Do NOT replace with MySQL built-in crypto functions (e.g., `AES_ENCRYPT()`, `AES_DECRYPT()`, `SHA2()`). Do NOT flag as CRITICAL during review for "encryption equivalence" — the migrated function handles this.
 
 ---
 
@@ -176,28 +165,16 @@ Does this <if> condition need OR col IS NULL?
 ```
 
 #### 3. Multi-Column SET with Subquery (Oracle-specific)
-MySQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to JOIN-based UPDATE:
+`SET (col1, col2) = (SELECT ...)` → UPDATE ... JOIN pattern. Move subquery to JOIN, assign individually.
 ```sql
 -- Oracle
-UPDATE orders o
-SET (status, updated_at, updated_by) = (
-    SELECT s.new_status, SYSDATE, s.user_id
-    FROM status_changes s WHERE s.order_id = o.order_id
-)
-WHERE EXISTS (SELECT 1 FROM status_changes s WHERE s.order_id = o.order_id)
+UPDATE orders o SET (status, updated_at, updated_by) = (
+    SELECT s.new_status, SYSDATE, s.user_id FROM status_changes s WHERE s.order_id = o.order_id)
 
 -- MySQL
-UPDATE orders o
-JOIN (
-    SELECT order_id, new_status, user_id
-    FROM status_changes
-) sub ON o.order_id = sub.order_id
-SET o.status = sub.new_status,
-    o.updated_at = NOW(),
-    o.updated_by = sub.user_id
+UPDATE orders o JOIN (SELECT order_id, new_status, user_id FROM status_changes) sub ON o.order_id = sub.order_id
+SET o.status = sub.new_status, o.updated_at = NOW(), o.updated_by = sub.user_id
 ```
-- Move subquery to `JOIN` clause (MySQL UPDATE ... JOIN pattern)
-- Assign each column individually with table prefix: `SET o.col1 = sub.x`
 
 #### 4. Subquery Alias (Required in MySQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
@@ -211,24 +188,11 @@ SET o.status = sub.new_status,
 Convert expression-level functions and operators.
 
 #### 1. String Concatenation (CRITICAL)
-**MySQL `||` is logical OR. Always use `CONCAT()`.**
-
+**MySQL `||` is logical OR. Always use `CONCAT()`.** `CONCAT(NULL, 'text')` → NULL. Use IFNULL for NULL safety.
 ```sql
--- Oracle
-col1 || col2 || col3
-
--- MySQL
-CONCAT(col1, col2, col3)
-
--- LIKE pattern
-LIKE '%' || #{param} || '%'  →  LIKE CONCAT('%', #{param}, '%')
-```
-
-**MySQL CONCAT with NULL:**
-`CONCAT(NULL, 'text')` returns `NULL` in MySQL (same as Oracle `||`).
-Use `CONCAT_WS` or `IFNULL` for NULL safety:
-```sql
-CONCAT(IFNULL(col1, ''), col2)
+col1 || col2 || col3                  →  CONCAT(col1, col2, col3)
+LIKE '%' || #{param} || '%'           →  LIKE CONCAT('%', #{param}, '%')
+NVL(col1,'') || col2                  →  CONCAT(IFNULL(col1, ''), col2)
 ```
 
 #### 2. Basic Functions
@@ -291,23 +255,15 @@ ROUND(1.2345, 3) = 1.235      -- ❌ WRONG: different result!
 | UNION ALL / INTERSECT | Identical syntax |
 | CASE WHEN ... END | Identical syntax |
 
-**CRITICAL: XMLAGG String Aggregation Idiom**
-Oracle commonly uses `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` as a string aggregation pattern. This MUST be converted to `GROUP_CONCAT()`, NOT left as XML functions:
+**CRITICAL: XMLAGG String Aggregation Idiom** — `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` is string aggregation. Convert to `GROUP_CONCAT()`:
 ```sql
--- Oracle (string aggregation idiom)
+-- Oracle
 SUBSTR(XMLAGG(XMLELEMENT(COL, ',', col_name) ORDER BY col_name).EXTRACT('//text()').GETSTRINGVAL(), 2) AS result
-
--- MySQL
+-- MySQL (SUBSTR not needed — GROUP_CONCAT has no leading delimiter)
 GROUP_CONCAT(col_name ORDER BY col_name SEPARATOR ',') AS result
 ```
-- `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` → `GROUP_CONCAT(col ORDER BY ... SEPARATOR delim)`
-- The `SUBSTR(..., 2)` removes the leading delimiter — `GROUP_CONCAT` does not add a leading delimiter, so `SUBSTR` is not needed
 
-**Note**: MySQL does not support `CUBE` — use UNION of multiple ROLLUP queries.
-**Note**: MySQL does not support `NULLS FIRST / NULLS LAST` directly — use:
-```sql
-ORDER BY CASE WHEN col IS NULL THEN 0 ELSE 1 END, col
-```
+**Note**: MySQL has no `CUBE` (use UNION of ROLLUP). No `NULLS FIRST/LAST` — use `ORDER BY CASE WHEN col IS NULL THEN 0 ELSE 1 END, col`.
 
 #### 2-3. Regular Expression Functions
 | Oracle | MySQL |
@@ -374,14 +330,10 @@ DATE_ADD(date_col, INTERVAL 30 DAY)
 ```
 
 #### 5. Interval Construction
-MySQL does not have an `interval` data type like PostgreSQL. Use `DATE_ADD` / `DATE_SUB`:
+MySQL has no interval data type. Use `DATE_ADD`/`DATE_SUB`:
 ```sql
--- Oracle: date + INTERVAL '5' DAY
--- MySQL:
-DATE_ADD(date, INTERVAL 5 DAY)
-
--- Dynamic parameter:
-DATE_ADD(date, INTERVAL #{param} DAY)
+date + INTERVAL '5' DAY   →  DATE_ADD(date, INTERVAL 5 DAY)
+date + #{param} days       →  DATE_ADD(date, INTERVAL #{param} DAY)
 ```
 
 #### 5-1. ROUND with Integer Arithmetic
@@ -392,22 +344,12 @@ ROUND(DATEDIFF(date1, date2) * 24, 2)
 ```
 
 #### 6. Sequence Functions
-MySQL does not have sequences in the same way as Oracle.
-
 | Oracle | MySQL |
 |--------|-------|
-| SEQ_NAME.NEXTVAL | Use AUTO_INCREMENT column (for INSERT PK) |
-| SEQ_NAME.CURRVAL | LAST_INSERT_ID() (session-specific) |
+| SEQ_NAME.NEXTVAL | AUTO_INCREMENT (INSERT PK) or sequence table |
+| SEQ_NAME.CURRVAL | LAST_INSERT_ID() |
 
-For explicit sequence behavior, use a sequence table:
-```sql
--- Create sequence table
-CREATE TABLE sequences (name VARCHAR(100) PRIMARY KEY, val BIGINT DEFAULT 0);
-
--- Get next value
-UPDATE sequences SET val = LAST_INSERT_ID(val + 1) WHERE name = 'seq_name';
-SELECT LAST_INSERT_ID();
-```
+For explicit sequence: `UPDATE sequences SET val = LAST_INSERT_ID(val + 1) WHERE name = 'seq_name'; SELECT LAST_INSERT_ID();`
 
 ---
 
@@ -433,19 +375,15 @@ WITH RECURSIVE hierarchy AS (
 SELECT id, parent_id, name FROM hierarchy
 ```
 
-**Recursive CTE rules (same as PostgreSQL):**
-- Base case must NOT reference CTE name
-- Exactly one UNION ALL between base and recursive
-- MySQL has default recursion limit of 1000 (`cte_max_recursion_depth`)
+**Recursive CTE rules:** Base case must NOT reference CTE name. Exactly one UNION ALL. MySQL recursion limit: 1000 (`cte_max_recursion_depth`).
 
-**CONNECT BY related functions:**
 | Oracle | MySQL (in WITH RECURSIVE) |
 |--------|--------------------------|
-| LEVEL | Add `1 as level` in base, `h.level + 1` in recursive |
-| PRIOR col | Use JOIN condition: `c.parent_id = h.id` |
-| SYS_CONNECT_BY_PATH(col,'/') | Accumulate string: base `CAST(col AS CHAR(1000)) as path`, recursive `CONCAT(h.path, '/', c.col)` |
-| CONNECT_BY_ROOT col | Carry from base case: `col as root_col`, recursive `h.root_col` |
-| CONNECT_BY_ISLEAF | `CASE WHEN NOT EXISTS (SELECT 1 FROM t WHERE t.parent_id = h.id) THEN 1 ELSE 0 END` |
+| LEVEL | `1 as level` in base, `h.level + 1` in recursive |
+| PRIOR col | JOIN condition: `c.parent_id = h.id` |
+| SYS_CONNECT_BY_PATH(col,'/') | base `CAST(col AS CHAR(1000)) as path`, recursive `CONCAT(h.path, '/', c.col)` |
+| CONNECT_BY_ROOT col | base `col as root_col`, recursive `h.root_col` |
+| CONNECT_BY_ISLEAF | `CASE WHEN NOT EXISTS (...) THEN 1 ELSE 0 END` |
 | ORDER SIBLINGS BY col | `ORDER BY path` |
 
 #### 2. MERGE Statement
@@ -497,73 +435,40 @@ LIMIT 10
 - `OFFSET M ROWS FETCH NEXT N ROWS ONLY` → `LIMIT N OFFSET M`
 
 #### 6. PL/SQL Constructs in SQL
-These Oracle PL/SQL constructs may appear in MyBatis mappers:
-
 | Oracle | MySQL |
 |--------|-------|
-| `BULK COLLECT INTO` | Remove — use plain `SELECT` (MyBatis handles result collection) |
-| `RETURNING ... INTO :var` | Remove entirely — MySQL `INSERT` does not support `RETURNING`. Use `LAST_INSERT_ID()` for auto-increment PKs |
-| `%ROWTYPE` | Remove — use explicit column types |
-| `%TYPE` | Remove — use explicit types |
-| `UTL_HTTP.*` | **MANUAL_REVIEW** — requires project-specific replacement (e.g., `aws_lambda.invoke`, HTTP client) |
-| `UTL_SMTP.*` | **MANUAL_REVIEW** — requires project-specific mail service replacement |
-| `DBMS_PIPE.*` | **MANUAL_REVIEW** — requires project-specific messaging replacement |
+| `BULK COLLECT INTO` | Remove — use plain `SELECT` |
+| `RETURNING ... INTO :var` | Remove — MySQL has no RETURNING. Use `LAST_INSERT_ID()` |
+| `%ROWTYPE`, `%TYPE` | Remove — use explicit types |
+| `UTL_HTTP.*`, `UTL_SMTP.*`, `DBMS_PIPE.*` | **MANUAL_REVIEW** |
 
 ```sql
--- Oracle: RETURNING INTO
-INSERT INTO orders (id, status) VALUES (seq.NEXTVAL, 'NEW')
-RETURNING id INTO :order_id
-
--- MySQL: no RETURNING — use LAST_INSERT_ID() if needed
-INSERT INTO orders (status) VALUES ('NEW')
--- then: SELECT LAST_INSERT_ID()
+-- Oracle                                          -- MySQL
+INSERT INTO orders VALUES (seq.NEXTVAL, 'NEW')     INSERT INTO orders (status) VALUES ('NEW')
+RETURNING id INTO :order_id                        -- then: SELECT LAST_INSERT_ID()
 ```
 
 ---
 
 ## XML Special Character Handling (MyBatis)
 
-**⚠️ Problem**: Using `<` operator outside CDATA causes XML parsing errors. (`>` is safe in XML.)
+Outside CDATA: `<` → `&lt;`, `<=` → `&lt;=`. (`>` `>=` are safe — no escaping needed.)
 
-**What MUST be escaped (outside CDATA):**
-- `<` → `&lt;`
-- `<=` → `&lt;=`
-
-**What does NOT need escaping:**
-- `>` and `>=` — safe in XML, keep as-is
-- Anything inside `<![CDATA[]]>` — keep as-is
-
-**Decision criteria during conversion:**
-
-1. **If original uses CDATA → keep CDATA**
-2. **If original uses entity escapes → keep escapes**
-3. **If conversion introduces `<` or `<=` → must escape or wrap in CDATA**
+1. **Original uses CDATA → keep CDATA**: `<![CDATA[ WHERE age <= 30 ]]>`
+2. **Original uses entity escapes → keep**: `WHERE age &lt;= #{maxAge}`
+3. **Conversion introduces `<`/`<=` → must escape or CDATA**: `WHERE qty &lt; 10`
 
 ---
 
 ## Reference Rule: Parameter Handling
 
-**MySQL does NOT require explicit parameter casting** like PostgreSQL (no `::type` syntax).
-MyBatis `#{param}` parameters are bound via PreparedStatement and JDBC handles type conversion.
-
-**Exception**: When explicit type conversion is needed:
+MySQL does NOT need `::type` casting — JDBC handles type conversion. Use explicit conversion only when needed:
 ```sql
--- Cast string to date
-STR_TO_DATE(#{param}, '%Y-%m-%d')
-
--- Cast to specific numeric type
-CAST(#{param} AS DECIMAL(10,2))
-CAST(#{param} AS SIGNED)
+STR_TO_DATE(#{param}, '%Y-%m-%d')     -- string to date
+CAST(#{param} AS DECIMAL(10,2))       -- explicit numeric
+CAST(#{param} AS SIGNED)              -- explicit integer
 ```
-
-**Remove PostgreSQL-style casts**: If migrating from already-converted PostgreSQL SQL:
-```sql
--- Remove these PostgreSQL-specific casts:
-#{param}::integer  →  #{param}
-#{param}::bigint   →  #{param}
-#{param}::date     →  #{param}  (or STR_TO_DATE if format conversion needed)
-#{param}::numeric  →  #{param}
-```
+**Remove PostgreSQL-style casts**: `#{param}::integer` → `#{param}`, `#{param}::date` → `#{param}` (or `STR_TO_DATE` if format needed).
 
 ---
 
@@ -594,35 +499,20 @@ When converting comma JOINs to explicit JOINs with subqueries:
 ## Common Wrong Conversions (AVOID THESE)
 
 ### 1. Using `||` for String Concatenation
+See Phase 3 §1. `||` is OR in MySQL — always use `CONCAT()`.
 ```sql
--- ❌ WRONG: || is OR in MySQL
-col1 || col2
-
--- ✅ RIGHT: always use CONCAT
-CONCAT(col1, col2)
+-- ❌ col1 || col2
+-- ✅ CONCAT(col1, col2)
 ```
 
-### 2. Redundant OR IS NULL (see Decision Tree in Phase 2 §2)
+### 2. Redundant OR IS NULL
+**See Decision Tree in Phase 2 §2.** OR IS NULL is ONLY for direct equality on LEFT-joined columns. Never for LIKE, IFNULL, or INNER-joined.
 ```sql
--- ❌ WRONG: LIKE on outer-joined column — OR IS NULL changes semantics
-WHERE (UPPER(u.EMAIL) LIKE CONCAT('%', #{kw}, '%') OR u.EMAIL IS NULL)
-
--- ✅ RIGHT: NULL LIKE → NULL → falsy, identical in both DBs
-WHERE UPPER(u.EMAIL) LIKE CONCAT('%', #{kw}, '%')
-
--- ❌ WRONG: IFNULL already handles NULL
-WHERE IFNULL(addr.COUNTRY, 'UNKNOWN') = #{country} OR addr.COUNTRY IS NULL
-
--- ✅ RIGHT: IFNULL alone is sufficient
-WHERE IFNULL(addr.COUNTRY, 'UNKNOWN') = #{country}
-
--- ❌ WRONG: column from INNER-joined table — never NULL from join
-WHERE (u.EMAIL = #{email} OR u.EMAIL IS NULL)
-
--- ✅ RIGHT: only for direct comparison on LEFT-joined column
-WHERE (addr.STATUS = #{status} OR addr.STATUS IS NULL)
+-- ❌ WRONG                                          -- ✅ RIGHT
+(UPPER(u.EMAIL) LIKE CONCAT('%',#{kw},'%') OR u.EMAIL IS NULL)  UPPER(u.EMAIL) LIKE CONCAT('%',#{kw},'%')
+(IFNULL(addr.COUNTRY,'UNKNOWN')=#{c} OR addr.COUNTRY IS NULL)   IFNULL(addr.COUNTRY,'UNKNOWN')=#{c}
+(u.EMAIL=#{email} OR u.EMAIL IS NULL) /*INNER*/      u.EMAIL=#{email}
 ```
-**Rule**: Follow the Decision Tree in Phase 2 §2. `OR col IS NULL` is ONLY needed for **direct equality comparison** on **outer-joined table** columns. Never for LIKE, COALESCE/IFNULL, or INNER-joined columns.
 
 ### 3. Using PostgreSQL-style Casting
 ```sql
@@ -682,16 +572,19 @@ TO_DATE(#{param}, 'YYYYMMDD')  →  STR_TO_DATE(#{param}, '%Y%m%d')
 ```
 
 ### 9. User-Defined Package Function Mapped to Built-in
+See Phase 1 §6. Flatten with underscore — NEVER map to built-in.
 ```sql
--- ❌ WRONG: PKG_CRYPTO is user-defined, NOT Oracle standard
-PKG_CRYPTO.ENCRYPT(col, key)  →  AES_ENCRYPT(col, key)
-PKG_CRYPTO.DECRYPT(col, key)  →  AES_DECRYPT(col, key)
-
--- ✅ RIGHT: flatten with underscore
-PKG_CRYPTO.ENCRYPT(col, key)  →  pkg_crypto_encrypt(col, key)
-PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
+-- ❌ PKG_CRYPTO.ENCRYPT(col, key) → AES_ENCRYPT(col, key)
+-- ✅ PKG_CRYPTO.ENCRYPT(col, key) → pkg_crypto_encrypt(col, key)
 ```
-**Only `DBMS_*` and `UTL_*` are Oracle standard.** All other `PACKAGE.FUNCTION()` calls must be flattened to `package_function()`. Never map to target DB built-in functions based on name similarity.
+
+### 10. Original Name/Identifier Changed (Hallucination)
+NEVER change ANY name. Copy verbatim (lowercase only). No prefixes, no typo "fixes", no renaming.
+```sql
+-- ❌ sql_putawayLocation → sql_selectPutawayLocation (added prefix)
+-- ❌ sql_tWorkInfoIbat → sql_tWorkInfoIvat (typo "fix")
+-- ✅ sql_putawaylocation, sql_tworkinfoibat, sql_waybillno (verbatim lowercase)
+```
 
 ---
 
@@ -707,3 +600,4 @@ PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
 9. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
 10. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
 11. **NO optimization** — convert syntax only, do not change logic or structure
+12. **Preserve ALL original names** — sql id, refid, resultMap id, aliases must match the original verbatim (lowercase only). NEVER add prefixes, fix typos, or rename
