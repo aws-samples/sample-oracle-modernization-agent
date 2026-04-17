@@ -1,4 +1,6 @@
 """OMA Pipeline TUI — Terminal UI for pipeline control and monitoring."""
+import os
+import subprocess
 import sys
 import sqlite3
 from pathlib import Path
@@ -255,17 +257,12 @@ class OmaTuiApp(App):
         yield Footer()
 
     COMMANDS_HELP = """[bold]Commands:[/bold]
-  analyze, transform, review, validate, merge, test — run step
-  transform sample=5                                — sample mode
-  all                                               — run full pipeline
-  skip [mapper] [sql_id] [reason]                   — skip a SQL
-  skip_category [category]                          — skip by category
-  classify                                          — classify test failures
-  failures [step]                                   — show failures
-  reset [step]                                      — reset step
-  search [keyword]                                  — search SQL IDs
-  status                                            — refresh dashboard
-  help                                              — show this help"""
+  analyze, transform, review, validate, merge, test  — run step
+  transform --workers 4 --sample 5                   — with options
+  all                                                — run full pipeline
+  skip [mapper] [sql_id]                             — skip a SQL
+  status                                             — refresh dashboard
+  help                                               — show this help"""
 
     def on_mount(self) -> None:
         self.title = "OMA Pipeline Dashboard"
@@ -302,53 +299,35 @@ class OmaTuiApp(App):
         elif verb == "fail":
             self.push_screen(FailAnalysisScreen())
         elif verb == "all":
-            self._run_orchestrator_step("all", console)
+            self._execute_step("all", "run_pipeline.py")
         elif verb == "skip" and len(parts) >= 3:
-            self._call_tool(console, "skip_sql", parts[1], parts[2], " ".join(parts[3:]) or "Manual skip via TUI")
-        elif verb == "skip_category" and len(parts) >= 2:
-            self._call_tool(console, "skip_by_category", parts[1])
-        elif verb == "classify":
-            self._call_tool(console, "classify_test_failures")
-        elif verb == "failures":
-            step = parts[1] if len(parts) > 1 else "all"
-            self._call_tool(console, "get_failures", step)
-        elif verb == "reset" and len(parts) >= 2:
-            self._call_tool(console, "reset_step", parts[1])
-        elif verb == "search" and len(parts) >= 2:
-            self._call_tool(console, "search_sql_ids", " ".join(parts[1:]))
-        elif verb == "report":
-            self._call_tool(console, "generate_test_report")
+            self._skip_sql(parts[1], parts[2], console)
         elif verb in ("analyze", "transform", "review", "validate", "merge", "test"):
-            sample = 0
-            for p in parts[1:]:
-                if p.startswith("sample="):
-                    sample = int(p.split("=")[1])
-            self._run_orchestrator_step(verb, console, sample=sample)
+            # Build command with extra args
+            for s_name, _label, s_cmd, _req in STEPS:
+                if s_name == verb:
+                    extra = " ".join(parts[1:])
+                    full_cmd = f"{s_cmd} {extra}".strip() if extra else s_cmd
+                    self._execute_step(verb, full_cmd)
+                    break
         else:
-            console.write(f"[red]Unknown: {verb}[/red] — type [bold]help[/bold]")
+            console.write(f"[red]Unknown command: {verb}[/red] — type [bold]help[/bold]")
 
-    def _call_tool(self, console: ConsolePanel, tool_name: str, *args) -> None:
-        """Call an orchestrator tool function and display result."""
+    def _skip_sql(self, mapper: str, sql_id: str, console: ConsolePanel) -> None:
+        """Mark a SQL as SKIP."""
         try:
-            from agents.orchestrator.tools import orchestrator_tools as ot
-            func = getattr(ot, tool_name)
-            result = func(*args)
-            if isinstance(result, dict):
-                for k, v in result.items():
-                    if isinstance(v, dict):
-                        console.write(f"  [bold]{k}:[/bold]")
-                        for k2, v2 in v.items():
-                            console.write(f"    {k2}: {v2}")
-                    elif isinstance(v, list) and len(v) > 0:
-                        console.write(f"  [bold]{k}:[/bold] ({len(v)} items)")
-                        for item in v[:10]:
-                            console.write(f"    {item}")
-                        if len(v) > 10:
-                            console.write(f"    ... +{len(v)-10} more")
-                    else:
-                        console.write(f"  [bold]{k}:[/bold] {v}")
-            else:
-                console.write(str(result))
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                conn.execute(
+                    "UPDATE transform_target_list SET tested='Y', test_result='SKIP', "
+                    "test_notes='Manual skip via TUI', current_step='completed' "
+                    "WHERE mapper_file LIKE ? AND sql_id=?",
+                    (f"%{mapper}%", sql_id)
+                )
+                if conn.total_changes > 0:
+                    console.write(f"[yellow]Skipped: {mapper}/{sql_id}[/yellow]")
+                else:
+                    console.write(f"[red]Not found: {mapper}/{sql_id}[/red]")
+                conn.commit()
             self._refresh_dashboard()
         except Exception as e:
             console.write(f"[red]Error: {e}[/red]")
@@ -366,74 +345,55 @@ class OmaTuiApp(App):
         self.push_screen(FailAnalysisScreen())
 
     def action_run_step(self, step_name: str) -> None:
-        console = self.query_one("#console", ConsolePanel)
-        self._run_orchestrator_step(step_name, console)
-
-    def _run_orchestrator_step(self, step_name: str, console: ConsolePanel, sample: int = 0) -> None:
-        """Run a pipeline step via orchestrator tool (no subprocess)."""
         if step_name == "all":
-            steps_to_run = [s[0] for s in STEPS]
+            cmd = "run_pipeline.py"
         else:
-            steps_to_run = [step_name]
-        self._run_steps_sequence(steps_to_run, console, sample)
+            cmd = None
+            for s_name, _label, s_cmd, _req in STEPS:
+                if s_name == step_name:
+                    cmd = s_cmd
+                    break
+        if cmd:
+            self._execute_step(step_name, cmd)
 
     @work(thread=True)
-    def _run_steps_sequence(self, steps: list, console: ConsolePanel, sample: int = 0) -> None:
-        import io
-        import contextlib
-        from agents.orchestrator.tools.orchestrator_tools import run_step as ot_run_step
-
+    def _execute_step(self, step_name: str, command: str) -> None:
+        console = self.query_one("#console", ConsolePanel)
         dashboard = self.query_one(DashboardPanel)
 
-        for step_name in steps:
-            self.call_from_thread(console.write, f"\n[bold cyan]> {step_name} started[/bold cyan]")
-            self.call_from_thread(setattr, dashboard, "running_step", step_name)
+        self.call_from_thread(console.write, f"\n[bold cyan]> {step_name} started[/bold cyan]")
+        self.call_from_thread(setattr, dashboard, "running_step", step_name)
+        self.call_from_thread(self._refresh_dashboard)
+
+        cmd_parts = command.split()
+        try:
+            proc = subprocess.Popen(
+                [sys.executable] + cmd_parts,
+                cwd=str(SRC_DIR),
+                env={**os.environ, "PYTHONPATH": str(SRC_DIR)},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            for line in iter(proc.stdout.readline, ""):
+                stripped = line.rstrip()
+                if stripped:
+                    self.call_from_thread(console.write, stripped)
+
+            proc.wait()
+
+            if proc.returncode == 0:
+                self.call_from_thread(console.write, f"[bold green]✅ {step_name} completed[/bold green]")
+            else:
+                self.call_from_thread(console.write, f"[bold red]❌ {step_name} failed (exit {proc.returncode})[/bold red]")
+
+        except Exception as e:
+            self.call_from_thread(console.write, f"[bold red]❌ {step_name}: {e}[/bold red]")
+        finally:
+            self.call_from_thread(setattr, dashboard, "running_step", "")
             self.call_from_thread(self._refresh_dashboard)
-
-            try:
-                # Redirect stdout to TUI console
-                class TuiStream(io.TextIOBase):
-                    def __init__(self, app, console_widget):
-                        self._app = app
-                        self._console = console_widget
-                        self._buf = ""
-                    def write(self, s):
-                        self._buf += s
-                        while "\n" in self._buf:
-                            line, self._buf = self._buf.split("\n", 1)
-                            if line.strip():
-                                self._app.call_from_thread(self._console.write, line)
-                        return len(s)
-                    def flush(self):
-                        if self._buf.strip():
-                            self._app.call_from_thread(self._console.write, self._buf)
-                            self._buf = ""
-
-                tui_stream = TuiStream(self, console)
-                with contextlib.redirect_stdout(tui_stream):
-                    if sample > 0 and step_name == "transform":
-                        result = ot_run_step(step_name, sample=sample)
-                    else:
-                        result = ot_run_step(step_name)
-                tui_stream.flush()
-
-                status = result.get("status", "unknown")
-                details = result.get("details", "")
-
-                if status == "success":
-                    self.call_from_thread(console.write, f"[bold green]✅ {step_name} completed[/bold green]")
-                elif status == "skipped":
-                    self.call_from_thread(console.write, f"[bold yellow]⏭️ {step_name} skipped: {details}[/bold yellow]")
-                else:
-                    self.call_from_thread(console.write, f"[bold red]❌ {step_name} failed: {details}[/bold red]")
-                    break
-
-            except Exception as e:
-                self.call_from_thread(console.write, f"[bold red]❌ {step_name}: {e}[/bold red]")
-                break
-            finally:
-                self.call_from_thread(setattr, dashboard, "running_step", "")
-                self.call_from_thread(self._refresh_dashboard)
 
 
 if __name__ == "__main__":
