@@ -1,11 +1,11 @@
 # Next-Gen SQL Test Framework Planning Document
 
-> **Summary**: 현재 Java Test Framework의 제약을 해소하고 Production 수준의 자동 테스트 체계 구축
+> **Summary**: Java Test Framework의 Parameter/동적SQL 제약 해소 + Production 수준 자동 테스트 체계 구축
 >
 > **Project**: Application SQL Transform Agent (OMA sub-module)
 > **Author**: Plan
-> **Date**: 2026-04-17
-> **Status**: Draft
+> **Date**: 2026-03-28
+> **Status**: Active (Phase 1.5 완료, Phase 2 설계 중)
 
 ---
 
@@ -13,203 +13,339 @@
 
 | Perspective | Content |
 |-------------|---------|
-| **Problem** | 현재 Java Test Framework는 파라미터 처리 한계(타입 추론 불가), 동적 SQL 핸들링 미흡(`<foreach>`, `<choose>`, `${param}`), 단일 파일 테스트 구조로 Production 활용 불가 |
-| **Solution** | MyBatis-native 테스트 엔진으로 전환 — 실제 MyBatis SqlSession으로 동적 SQL을 완전 해석하고, 메타데이터 기반 파라미터 자동 생성, 일괄 테스트 + 오류 분류 + 선택적 재테스트 워크플로우 |
-| **Function/UX Effect** | Test Pass Rate 향상 (파라미터/동적SQL 오류 감소), Skip 대폭 감소, Production 환경에서도 동일한 테스트 수행 가능 |
-| **Core Value** | "변환된 SQL이 실제 운영 환경에서 동작하는가"를 자동으로 검증할 수 있는 신뢰성 확보 |
+| **Problem** | Java Test Framework는 Parameter 처리 한계(타입 추론, 동적 분기), 동적 SQL 핸들링 미흡(`<foreach>`, `<choose>`, `${param}`), 단일 파라미터 세트로 모든 SQL 테스트 — **Parameter 품질이 Test 결과 품질을 결정**하는데 현재 구조에서는 한계 |
+| **Solution** | 3단계 접근: (1) Smart Parameter Generator 고도화 — XML 컨텍스트 기반 파라미터 품질 극대화, (2) 동적 SQL 완전 해석 엔진 — `<choose>` 분기별 멀티 파라미터 세트, `<foreach>` native 지원, (3) Production 자동 Test — 일괄 실행 + PASS/FAIL 분류 + 오류만 선택적 재테스트 + CI/CD |
+| **Function/UX Effect** | 일괄 Test → Pass 처리, 오류만 따로 모아서 수정 가능. SKIP 대폭 감소, Test Pass Rate 95%+ 달성 |
+| **Core Value** | "변환된 SQL이 실제 운영 환경에서 동작하는가"를 자동 검증 — **Parameter가 잘 구성되면 동적 SQL을 더 정확히 처리하고, 이것이 결과 품질을 결정** |
 
 ---
 
-## 1. 현재 제약 분석
+## 1. 핵심 인사이트
 
-### 1.1 Parameter 처리 한계
-
-| 문제 | 현재 동작 | 영향 |
-|------|----------|------|
-| 타입 추론 불가 | `::cast`나 메타데이터 없으면 기본값 `'1'` | date 컬럼 에러, 풀스캔 |
-| `${param}` 직접 치환 | `${tableName}` → `'1'` → `FROM 1` | SQL 에러 |
-| Collection 파라미터 | `<foreach collection="list">` → String `'1'` | NPE |
-| 조건 제어 파라미터 | `<if test="flag == 'Y'">` → `'1'` ≠ `'Y'` | 분기 미실행 |
-
-### 1.2 동적 SQL 핸들링 미흡
-
-| 문제 | 현재 동작 | 영향 |
-|------|----------|------|
-| `<foreach>` | Java NPE → SKIP | 해당 SQL 미검증 |
-| `<choose><when>` | 파라미터 따라 분기 → 일부만 테스트 | 커버리지 불완전 |
-| `<where>` 동적 생성 | 파라미터 null이면 WHERE 자체 없음 | 의도와 다른 SQL 실행 |
-| `<include refid>` (cross-mapper) | dependency mapper 복사로 해결 중 | 부분 해결 |
-
-### 1.3 Production 활용 불가
-
-| 문제 | 현재 | Production 요구 |
-|------|------|---------------|
-| 파라미터 소스 | `parameters.properties` (고정) | 실제 데이터 / API 요청 기반 |
-| 테스트 범위 | 개별 SQL 파일 또는 Merge XML | 전체 Mapper + 트랜잭션 |
-| 결과 비교 | 실행 가능 여부만 | Oracle vs PostgreSQL 결과 비교 |
-| 반복 실행 | 수동 (`retry failed test`) | CI/CD 통합 자동화 |
-
----
-
-## 2. 목표 아키텍처
-
-### 2.1 테스트 레벨 3단계
+### 1.1 Parameter 품질 = Test 품질
 
 ```
-Level 1: Syntax Validation (현재 Phase 0 — EXPLAIN)
-  ├── DML: EXPLAIN으로 구문 검증
-  ├── SELECT: EXPLAIN으로 구문 검증
-  └── 파라미터 불필요, 가장 빠름
+Parameter 구성 품질
+  ↓ 결정
+동적 SQL 해석 정확도 (<if>, <choose>, <foreach>, <where>)
+  ↓ 결정
+Test 실행 결과 품질 (Pass Rate, SKIP 감소)
+  ↓ 결정
+전체 변환 신뢰도
+```
 
-Level 2: Execution Test (현재 Phase 1 — Java executor 개선)
-  ├── MyBatis SqlSession으로 실제 실행
-  ├── 메타데이터 기반 Smart Parameter 생성
-  ├── 동적 SQL 완전 해석 (<foreach>, <choose>, <where>)
+현재 시스템에서 Test FAIL/SKIP의 대부분은 **SQL 변환 오류가 아니라 Parameter 부족/부정확**에서 발생한다.
+따라서 Parameter 품질을 극대화하는 것이 Test Framework 개선의 핵심이다.
+
+### 1.2 현재 Parameter 처리 구조 (Phase 1.5 완료 기준)
+
+| 우선순위 | 소스 | 처리 방식 | 상태 |
+|:--------:|------|----------|:----:|
+| 1 | `<foreach collection="list">` | `__LIST__` 마커 → Java ArrayList | ✅ |
+| 2 | `<if test="x != null">`, `@Util@isNotEmpty(x)` | 빈값 (동적 블록 skip) | ✅ |
+| 3 | `<if test="flag == 'Y'">` | XML에서 비교값 추출 → `flag=Y` | ✅ |
+| 4 | `to_date(#{p}, 'YYYYMMDD')` | 포맷 추론 → `20250101` | ✅ |
+| 5 | DB 메타데이터 (oma_metadata.json) | 컬럼 타입 기반 값 생성 | ✅ |
+| 6 | SQL `::cast` 타입 | `#{p}::date` → `2025-01-01` | ✅ |
+| 7 | 기본값 | `'1'` | ✅ |
+
+### 1.3 남은 제약 (Phase 2에서 해결)
+
+| 제약 | 현재 영향 | 해결 방향 |
+|------|----------|----------|
+| `<choose><when>` 분기별 파라미터 | 하나의 파라미터 세트로 일부 분기만 테스트 | 분기별 멀티 파라미터 세트 |
+| 복합 조건 `<if test="a != null and b == 'Y'">` | 단순 매칭만 | 조건 조합 파서 |
+| `${param}` SQL 구조 파라미터 | 빈값 → SKIP | 테이블명/컬럼명 추론 |
+| 동일 param, 다른 용도 (SQL마다 다른 타입) | 글로벌 1개 값 | SQL별 파라미터 프로파일 |
+| `<bind>` 표현식 | 미처리 | bind 값 추출/평가 |
+
+---
+
+## 2. 현재 아키텍처 (Phase 1.5 완료)
+
+### 2.1 Test Pipeline
+
+```
+Pre-skip (non-testable: sql, resultMap)
+  ↓
+Phase 0: EXPLAIN DML (INSERT/UPDATE/DELETE)
+  ├── Parameter 불필요 (NULL 치환)
+  ├── 구문 검증 + 테이블/컬럼 존재 확인
+  └── FAIL → DB 업데이트
+  ↓
+Phase 1: Java Bulk Test (SELECT + DML from MERGE_DIR)
+  ├── MyBatis SqlSession 기반 실행
+  ├── parameters.properties 기반 파라미터 주입
   ├── Query timeout 5s → PASS
-  └── RowBounds(0,1) 결과 제한
-
-Level 3: Equivalence Test (향후 — Oracle vs Target 비교)
-  ├── Oracle에서 실행 → src_result
-  ├── Target DB에서 실행 → tgt_result
-  ├── JSON 결과 비교 (정규화 후)
-  └── 컬럼별 diff 리포트
+  ├── RowBounds(0,1) 결과 제한
+  └── JSON 결과 → DB 업데이트 (PASS/FAIL/SKIP)
+  ↓
+Phase 2: Agent Fix (opt-in, --fix)
+  └── FAIL만 Agent가 수정 시도
 ```
 
-### 2.2 Smart Parameter Generator (✅ Phase 1 대부분 구현 완료)
+### 2.2 Parameter Generator 구현 파일
 
-```
-파라미터 결정 우선순위 (구현 완료):
-1. 사용자 제공 (parameters.properties) — 있으면 최우선
-2. <if test="x != null"> → 빈값 (동적 블록 skip) ✅
-3. ${dollar} params → 빈값 (SQL 구조 파라미터, 에러 시 SKIP) ✅
-4. 날짜 함수 포맷 → to_date(#{p}, 'YYYYMMDD') → '20250101' ✅
-5. DB 메타데이터 (oma_metadata.json) — 컬럼 타입 기반 ✅
-6. SQL ::cast 타입 — #{param}::date → date 값 ✅
-7. 기본값 '1' ✅
+| 파일 | 역할 |
+|------|------|
+| `src/agents/sql_test/tools/generate_parameters.py` | Smart Parameter Generator (Python) |
+| `src/reference/com/test/mybatis/MyBatisBulkExecutorWithJson.java` | Java Test Executor |
+| `src/reference/run_postgresql.sh` / `run_mysql.sh` | Test 실행 스크립트 |
+| `parameters.properties` | 생성된 파라미터 파일 |
 
-미구현 (Phase 1 잔여):
-- <if test="flag == 'Y'"> → 비교값 'Y' 추론
-- <foreach collection="list"> → List 타입 파라미터 생성
-```
+### 2.3 Java Executor 핵심 기능
 
-### 2.3 동적 SQL 처리 전략
-
-| 동적 태그 | 현재 구현 | 상태 |
-|----------|----------|:----:|
-| `<if test="x != null">` | nullable(빈값) → 분기 skip | ✅ |
-| `<if test="x == 'Y'">` | 컨텍스트에서 'Y' 추론 필요 | ❌ Phase 1 잔여 |
-| `<choose><when>` | 각 분기별 파라미터 세트 필요 | ❌ Phase 2 |
-| `<foreach>` | NPE → SKIP (Java List 지원 필요) | ❌ Phase 1 잔여 |
-| `${param}` | 빈값 → 에러 시 SKIP | ✅ |
-| `<where>` | 조건 없으면 WHERE 미생성 (정상) | ✅ |
+- `__LIST__` 마커 → `ArrayList` 자동 변환 (`<foreach>` 지원)
+- `cleanParameterValue`: 빈값 유지 (빈문자열 → '1' 변환하지 않음)
+- `executeSingleSqlWithResults`: XML auto-fill (파라미터 자동 스캔)
+- Query timeout 5s → PASS (valid SQL, slow execution)
+- RowBounds(0,1) for SELECT
+- `--select-only`, `--json-file` 옵션
 
 ---
 
 ## 3. 구현 범위 (3 Phase)
 
-### Phase 1: Smart Parameter Generator — ✅ 대부분 완료
+### Phase 1: Smart Parameter Generator — ✅ 완료 (v1.0 ~ v1.5)
 
-**구현 완료:**
-- `<if test="x != null">` 파라미터 → 빈값 (동적 블록 skip)
-- `${param}` → 빈값 (SQL 구조 파라미터, SKIP 대상)
-- 날짜 함수 포맷 추론: `to_date(#{p}, 'YYYYMMDD')` → `20250101`
-- SQL `::cast` 타입 추론: `#{p}::date` → `2025-01-01`
-- 메타데이터 기반 컬럼 타입 매칭
-- `cleanParameterValue` 빈값 유지 (빈문자열 → '1' 변환 제거)
-- `executeSingleSqlWithResults` auto-fill 추가
-- `parameter setup` Orchestrator 도구
-- Phase 2 Agent fix opt-in (`--fix` 플래그)
+**v1.0** (기본): `::cast` 타입, 메타데이터 매칭, 기본값 '1'
+**v1.5** (완료): nullable 추론, conditional 값 추출, `<foreach>` List, date format, `@Util@` 패턴
 
-**잔여 (Phase 1.5):**
-- `<if test="flag == 'Y'">` → XML에서 비교값 추출해서 `flag=Y`
-- `<foreach collection="list">` → Java에서 List 타입 파라미터 지원
-- `<bind>` 표현식 처리
+### Phase 2: 동적 SQL 완전 해석 엔진 (현재 계획 중)
 
-### Phase 2: MyBatis-Native Test Engine (중기)
-- **전체 Mapper 로딩**: ✅ MERGE_DIR 기반 (dependency mapper 자동 복사 포함)
-- **SqlSession 기반**: ✅ 기존 Java executor 활용
-- **트랜잭션 관리**: ✅ 자동 rollback
-- **Query timeout**: ✅ 5s → PASS 처리
-- **멀티 파라미터 세트**: ❌ 하나의 SQL에 여러 파라미터 조합 테스트
+**핵심 목표**: Parameter 품질을 극대화하여 동적 SQL 커버리지를 90%+로 올림
 
-### Phase 3: Production Test Suite (장기)
-- **CI/CD 통합**: Jenkins/GitHub Actions에서 자동 실행
-- **Oracle ↔ Target 결과 비교**: 동일 파라미터로 양쪽 실행 + diff (Java --compare 기능 있음)
-- **Test Case 관리**: 프로젝트별 테스트 케이스 저장/재사용
-- **성능 벤치마크**: 실행 시간 비교 리포트
+#### 2.1 SQL별 파라미터 프로파일 (FR-01)
 
----
-
-## 4. Phase 1 상세 설계 (Smart Parameter Generator)
-
-### 4.1 XML 컨텍스트 분석기
+현재: 전체 XML에서 추출한 글로벌 파라미터 1세트
+목표: **SQL ID별 최적 파라미터 세트** 생성
 
 ```python
-# <if test="flag == 'Y'"> → flag = 'Y'
-# <if test="type != null and type != ''"> → type = '1' (null 아닌 값)
-# <foreach collection="list" item="item"> → list = ['1']
-# ${tableName} in FROM clause → tableName = (메타데이터에서 첫 번째 테이블)
-```
+# 현재: parameters.properties (글로벌)
+userId=1
+startDate=20250101
+flag=Y
 
-### 4.2 파라미터 프로파일
-
-```json
+# 목표: SQL별 파라미터 프로파일 (JSON)
 {
-  "startDate": {"type": "date", "source": "cast", "value": "2025-01-01"},
-  "userId": {"type": "integer", "source": "metadata", "value": "1"},
-  "flag": {"type": "string", "source": "context", "value": "Y"},
-  "orderList": {"type": "list", "source": "context", "value": ["1"]},
-  "tableName": {"type": "table_ref", "source": "dollar_param", "value": "actual_table"}
+  "selectUserList": {
+    "params": {"userId": "1", "startDate": "2025-01-01", "useYn": "Y"},
+    "dynamic_branches": ["if_userId", "if_startDate"],
+    "coverage": "2/3 branches"
+  },
+  "selectOrderDetail": {
+    "params": {"ordNo": "1", "itemList": ["1", "2"]},
+    "dynamic_branches": ["foreach_itemList"],
+    "coverage": "1/1 branches"
+  }
 }
 ```
 
-### 4.3 수정 대상
+#### 2.2 `<choose><when>` 멀티 파라미터 세트 (FR-02)
 
-| 파일 | 변경 |
+```xml
+<choose>
+  <when test="searchType == 'NAME'">
+    AND user_name LIKE #{keyword}
+  </when>
+  <when test="searchType == 'ID'">
+    AND user_id = #{keyword}::integer
+  </when>
+  <otherwise>
+    AND 1=1
+  </otherwise>
+</choose>
+```
+
+현재: `searchType=NAME` 하나만 테스트
+목표: `searchType=NAME`, `searchType=ID`, 빈값(otherwise) — **3세트 모두 테스트**
+
+```
+파라미터 세트 생성 전략:
+1. <when test="..."> 조건에서 분기 키 추출 (searchType)
+2. 각 분기별 값 생성 (NAME, ID, null)
+3. 나머지 파라미터는 기본값 유지
+4. 3세트 × 동일 SQL 실행 → 하나라도 PASS면 OK
+```
+
+#### 2.3 복합 조건 파서 (FR-03)
+
+```xml
+<if test="startDate != null and startDate != '' and endDate != null">
+  AND reg_date BETWEEN #{startDate}::date AND #{endDate}::date
+</if>
+```
+
+현재: `startDate != null` → nullable(빈값) → 이 블록 미실행
+목표: 복합 조건 파싱 → `startDate=2025-01-01, endDate=2025-12-31` 세트 + 빈값 세트 2가지
+
+#### 2.4 `${param}` 추론 개선 (FR-04)
+
+```xml
+FROM ${tableName}    → tableName = 'actual_table' (메타데이터에서 첫 번째 테이블)
+${GRIDPAGING_TOP}    → 빈값 유지 (동적 페이징)
+${columnName}        → columnName = 'col1' (메타데이터에서 추론)
+```
+
+#### 2.5 `<bind>` 표현식 처리 (FR-05)
+
+```xml
+<bind name="searchKeyword" value="'%' + keyword + '%'" />
+AND user_name LIKE #{searchKeyword}
+```
+
+`searchKeyword`는 `<bind>`에서 생성됨 → `keyword` 파라미터만 제공하면 MyBatis가 자동 처리
+
+#### 2.6 Java Executor 개선 (FR-06)
+
+| 개선 항목 | 설명 |
+|----------|------|
+| 멀티 파라미터 세트 지원 | JSON 파일에서 SQL별 파라미터 배열 로드 |
+| 분기 커버리지 리포트 | 어떤 `<when>` 분기가 실행됐는지 로그 |
+| 파라미터 타입 힌트 | `param.type=list` → Java에서 정확한 타입 생성 |
+
+### Phase 3: Production Test Suite (장기)
+
+| 항목 | 설명 |
 |------|------|
-| `src/agents/sql_test/tools/generate_parameters.py` | 컨텍스트 분석기 추가 |
-| Java `MyBatisBulkExecutorWithJson.java` | List 타입 파라미터 지원 |
-| `parameters.properties` 형식 | 타입 힌트 추가 (`param.type=list`) |
+| CI/CD 통합 | Jenkins/GitHub Actions 자동 실행 |
+| Oracle ↔ Target 결과 비교 | 동일 파라미터, 양쪽 실행 + diff |
+| Test Case 관리 | 프로젝트별 파라미터 세트 저장/재사용 |
+| 성능 벤치마크 | 실행 시간 비교 리포트 |
+| 회귀 테스트 | 변환 재실행 시 기존 PASS 유지 확인 |
 
 ---
 
-## 5. 리스크
+## 4. Phase 2 상세 설계
+
+### 4.1 파라미터 프로파일 생성기
+
+```
+입력: merge/ 디렉토리의 Mapper XML
+  ↓
+Step 1: SQL ID별 XML 컨텍스트 분석
+  - 사용된 #{param} 목록
+  - <if>, <choose>, <foreach>, <bind> 태그 구조
+  - 각 param의 용도 (WHERE, JOIN, LIMIT, ORDER BY)
+  ↓
+Step 2: 분기 분석 → 파라미터 세트 생성
+  - <if>: 활성화 세트 + 비활성화 세트
+  - <choose>: 분기 수만큼 세트
+  - <foreach>: List 파라미터 자동 생성
+  ↓
+Step 3: 타입 결정 (우선순위)
+  1. 사용자 지정 (parameters.properties override)
+  2. DB 메타데이터 (oma_metadata.json)
+  3. SQL ::cast 타입
+  4. 날짜 함수 포맷
+  5. 조건 비교값
+  6. 기본값 '1'
+  ↓
+출력: sql_parameters.json (SQL별 파라미터 프로파일)
+```
+
+### 4.2 테스트 실행 흐름 (Phase 2)
+
+```
+1. 일괄 테스트 (Batch Test)
+   ├── sql_parameters.json 로드
+   ├── SQL별 최적 파라미터 세트로 실행
+   ├── <choose> 분기별 멀티 세트 실행
+   └── 결과: PASS / FAIL / SKIP
+       ↓
+2. Pass 처리 (자동)
+   └── PASS된 SQL → test_result='PASS', 완료
+       ↓
+3. 오류 분류 (Classify)
+   ├── Parameter 오류 → 파라미터 조정 후 재테스트
+   ├── SQL 변환 오류 → Transform Agent 재변환
+   ├── 스키마 오류 → DDL 확인 필요
+   └── 테스트 불가 → SKIP + 사유 기록
+       ↓
+4. 선택적 재테스트 (Retry Failed Only)
+   ├── FAIL만 추출 → 수정 → 재테스트
+   ├── 카테고리별 일괄 SKIP 가능
+   └── 개별 SQL SKIP 가능
+```
+
+### 4.3 수정 대상 파일
+
+| 파일 | 변경 내용 | 우선순위 |
+|------|----------|:--------:|
+| `generate_parameters.py` | SQL별 프로파일 생성, `<choose>` 멀티 세트, `<bind>` 처리 | High |
+| 신규: `sql_parameters.json` | SQL별 파라미터 프로파일 포맷 | High |
+| `MyBatisBulkExecutorWithJson.java` | JSON 파라미터 프로파일 로드, 멀티 세트 실행 | High |
+| `run_sql_test.py` | Phase 1 JSON 파라미터 모드 통합 | Medium |
+| `test_tools.py` | 멀티 세트 결과 처리, 분기 커버리지 | Medium |
+| `orchestrator_tools.py` | 파라미터 프로파일 조회/수정 도구 | Low |
+
+---
+
+## 5. 성공 기준
+
+| 항목 | Phase 1.5 (현재) | Phase 2 목표 | Phase 3 목표 |
+|------|:----------------:|:------------:|:------------:|
+| Parameter SKIP | ~30건 | <5건 | 0건 |
+| 동적 SQL SKIP | ~80건 | <10건 | <5건 |
+| Test Pass Rate | ~85% | >95% | >98% |
+| `<choose>` 커버리지 | 1 분기만 | 전 분기 | 전 분기 |
+| Production 활용 | ❌ | ⚠️ (수동) | ✅ (CI/CD) |
+| 재테스트 워크플로우 | ✅ (FAIL만) | ✅ (카테고리별) | ✅ (자동) |
+
+---
+
+## 6. 리스크
 
 | 리스크 | 영향 | 대응 |
 |--------|------|------|
-| XML 컨텍스트 분석 정확도 | 잘못된 파라미터 → 의미 없는 테스트 | 메타데이터 교차 검증 |
-| `<choose>` 모든 분기 커버리지 | 일부 분기 미테스트 | 각 분기별 파라미터 세트 생성 |
-| Production 환경 차이 | 개발 DB vs 운영 DB 스키마 차이 | 메타데이터 갱신 주기 설정 |
-| Java executor 복잡도 증가 | 유지보수 어려움 | Python wrapper로 복잡도 분리 |
+| `<choose>` 멀티 세트로 테스트 시간 증가 | SQL당 2~5배 | 병렬 실행, timeout 유지 |
+| SQL별 프로파일 생성 정확도 | 잘못된 파라미터 → 무의미한 테스트 | 메타데이터 교차검증, 실패 시 fallback |
+| Java executor 복잡도 증가 | 유지보수 부담 | Python 래퍼로 복잡도 분리 |
+| 대규모 프로젝트 (1000+ SQL) 메모리 | JSON 프로파일 크기 | SQL 단위 스트리밍 처리 |
 
 ---
 
-## 6. 성공 기준
+## 7. 구현 전략
 
-| 항목 | 현재 | 목표 |
-|------|:----:|:----:|
-| Parameter 관련 SKIP | ~50건 | <5건 |
-| 동적 SQL SKIP | ~120건 | <20건 |
-| Test Pass Rate | ~80% | >95% |
-| Production 활용 가능 | ❌ | ✅ |
-| CI/CD 통합 | ❌ | ✅ (Phase 3) |
-
----
-
-## 7. 브랜치 전략
+### Phase 2 단계별 접근
 
 ```
-main (현재 안정 버전)
-  └── feature/smart-parameter-gen (Phase 1)
-        ├── XML 컨텍스트 분석기
-        ├── 파라미터 프로파일 생성
+Step 1: SQL별 파라미터 프로파일 JSON 생성기 (Python)
+  → generate_parameters.py 확장 → sql_parameters.json 출력
+  → 기존 parameters.properties와 병행 (backward compat)
+
+Step 2: Java executor JSON 파라미터 로드
+  → MyBatisBulkExecutorWithJson.java에 --params-json 옵션 추가
+  → SQL ID별 파라미터 매핑
+
+Step 3: <choose> 멀티 파라미터 세트
+  → 분기 분석기 + 세트별 실행 루프
+  → 하나라도 PASS면 해당 SQL PASS 처리
+
+Step 4: 커버리지 리포트
+  → 어떤 분기가 실행됐는지, 어떤 파라미터가 사용됐는지 리포트
+```
+
+### 브랜치 전략
+
+```
+main (현재 안정 버전, Phase 1.5 포함)
+  └── feature/sql-param-profile (Phase 2 Step 1~2)
         └── main merge 후 →
-  └── feature/mybatis-native-test (Phase 2)
-        ├── 전체 mapper 로딩
-        ├── SqlSession 기반 테스트
+  └── feature/choose-multi-set (Phase 2 Step 3~4)
         └── main merge 후 →
   └── feature/production-test-suite (Phase 3)
 ```
+
+---
+
+## 8. Next Steps
+
+1. [ ] Phase 2 Design 문서 작성 (`/pdca design next-gen-test-framework`)
+2. [ ] SQL별 파라미터 프로파일 JSON 포맷 확정
+3. [ ] `<choose>` 분기 분석기 프로토타입
+4. [ ] Java executor JSON 파라미터 로드 구현
+5. [ ] 통합 테스트 (실제 프로젝트 1000+ SQL 검증)
 
 ---
 
@@ -219,3 +355,4 @@ main (현재 안정 버전)
 |---------|------|---------|--------|
 | 0.1 | 2026-04-17 | Initial draft | Plan |
 | 0.2 | 2026-04-17 | Phase 1 대부분 구현 완료 반영, 잔여 항목 정리 | - |
+| 1.0 | 2026-03-28 | Phase 1.5 완료 반영, Phase 2 상세 설계, 핵심 인사이트(Parameter=품질) 추가 | Plan |
