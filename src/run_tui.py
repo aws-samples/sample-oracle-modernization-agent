@@ -8,9 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Button, DataTable, RichLog
+from textual.widgets import Header, Footer, Static, Button, DataTable, RichLog, Input
 from textual.reactive import reactive
 from textual import work
 
@@ -220,9 +220,17 @@ class OmaTuiApp(App):
         border: solid $primary;
         padding: 1 1;
     }
-    ConsolePanel {
+    #right-panel {
         width: 1fr;
+    }
+    ConsolePanel {
+        height: 1fr;
         border: solid $secondary;
+    }
+    #cmd-input {
+        dock: bottom;
+        height: 3;
+        border: solid $accent;
     }
     """
 
@@ -243,19 +251,86 @@ class OmaTuiApp(App):
         yield Header(show_clock=True)
         with Horizontal():
             yield DashboardPanel()
-            yield ConsolePanel(id="console", highlight=True, markup=True)
+            with Vertical(id="right-panel"):
+                yield ConsolePanel(id="console", highlight=True, markup=True)
+                yield Input(placeholder="> command (e.g. transform --workers 4, skip sql_id, help)", id="cmd-input")
         yield Footer()
+
+    COMMANDS_HELP = """[bold]Commands:[/bold]
+  analyze, transform, review, validate, merge, test  — run step
+  transform --workers 4 --sample 5                   — with options
+  all                                                — run full pipeline
+  skip [mapper] [sql_id]                             — skip a SQL
+  status                                             — refresh dashboard
+  help                                               — show this help"""
 
     def on_mount(self) -> None:
         self.title = "OMA Pipeline Dashboard"
         console = self.query_one("#console", ConsolePanel)
         console.write("[bold]OMA Pipeline Console[/bold]")
         console.write("─" * 50)
-        console.write("Press [bold]1-6[/bold] to run steps, [bold]R[/bold] = Run All")
-        console.write("Press [bold]S[/bold] = SQL Explorer, [bold]F[/bold] = FAIL Analysis, [bold]Q[/bold] = Quit")
+        console.write("Type commands below or use [bold]1-6/R/S/F/Q[/bold] keys")
         console.write("")
         self.set_interval(5.0, self._refresh_dashboard)
         self._refresh_dashboard()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle command input."""
+        cmd = event.value.strip()
+        event.input.value = ""
+        if not cmd:
+            return
+
+        console = self.query_one("#console", ConsolePanel)
+        console.write(f"\n[bold]> {cmd}[/bold]")
+
+        parts = cmd.split()
+        verb = parts[0].lower()
+
+        if verb == "help":
+            console.write(self.COMMANDS_HELP)
+        elif verb == "status":
+            self._refresh_dashboard()
+            console.write("[green]Dashboard refreshed[/green]")
+        elif verb == "quit" or verb == "exit":
+            self.exit()
+        elif verb == "sql":
+            self.push_screen(SqlExplorerScreen())
+        elif verb == "fail":
+            self.push_screen(FailAnalysisScreen())
+        elif verb == "all":
+            self._execute_step("all", "run_pipeline.py")
+        elif verb == "skip" and len(parts) >= 3:
+            self._skip_sql(parts[1], parts[2], console)
+        elif verb in ("analyze", "transform", "review", "validate", "merge", "test"):
+            # Build command with extra args
+            for s_name, _label, s_cmd, _req in STEPS:
+                if s_name == verb:
+                    extra = " ".join(parts[1:])
+                    full_cmd = f"{s_cmd} {extra}".strip() if extra else s_cmd
+                    self._execute_step(verb, full_cmd)
+                    break
+        else:
+            console.write(f"[red]Unknown command: {verb}[/red] — type [bold]help[/bold]")
+
+    def _skip_sql(self, mapper: str, sql_id: str, console: ConsolePanel) -> None:
+        """Mark a SQL as SKIP."""
+        try:
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+                conn.execute(
+                    "UPDATE transform_target_list SET tested='Y', test_result='SKIP', "
+                    "test_notes='Manual skip via TUI', current_step='completed' "
+                    "WHERE mapper_file LIKE ? AND sql_id=?",
+                    (f"%{mapper}%", sql_id)
+                )
+                if conn.total_changes > 0:
+                    console.write(f"[yellow]Skipped: {mapper}/{sql_id}[/yellow]")
+                else:
+                    console.write(f"[red]Not found: {mapper}/{sql_id}[/red]")
+                conn.commit()
+            self._refresh_dashboard()
+        except Exception as e:
+            console.write(f"[red]Error: {e}[/red]")
 
     def _refresh_dashboard(self) -> None:
         try:

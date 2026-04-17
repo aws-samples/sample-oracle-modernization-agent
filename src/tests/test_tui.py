@@ -90,3 +90,23 @@ async def test_keybindings_exist():
         bindings = {b[0] if isinstance(b, tuple) else b.key for b in pilot.app.BINDINGS}
         for key in ["1", "2", "3", "4", "5", "6", "r", "s", "f", "q"]:
             assert key in bindings
+
+
+@pytest.mark.asyncio
+async def test_command_input_exists():
+    """Command input field exists."""
+    async with OmaTuiApp().run_test() as pilot:
+        from textual.widgets import Input
+        cmd_input = pilot.app.query_one("#cmd-input", Input)
+        assert cmd_input is not None
+
+
+@pytest.mark.asyncio
+async def test_help_command():
+    """Help command writes to console."""
+    async with OmaTuiApp().run_test() as pilot:
+        from textual.widgets import Input
+        cmd_input = pilot.app.query_one("#cmd-input", Input)
+        cmd_input.value = "help"
+        await pilot.press("enter")
+        await pilot.pause()
