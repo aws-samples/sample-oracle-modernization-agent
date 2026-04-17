@@ -117,9 +117,13 @@ class DashboardPanel(Static):
         tested = stats.get("tested", 0)
         rate = round(passed / total * 100) if total > 0 else 0
 
+        mapper_rows = query_db("SELECT COUNT(DISTINCT mapper_file) as cnt FROM transform_target_list")
+        mapper_count = mapper_rows[0]["cnt"] if mapper_rows else 0
+
         color = "green" if rate >= 90 else "yellow" if rate >= 70 else "red"
         lines = [
             f"[bold]── Overview ──[/bold]",
+            f"  Mappers      : [bold]{mapper_count:>5d}[/bold]",
             f"  Total SQL    : [bold]{total:>5d}[/bold]",
             f"  [green]Pass[/green]         : [green]{passed:>5d}[/green]",
             f"  [red]Fail[/red]         : [red]{failed:>5d}[/red]",
