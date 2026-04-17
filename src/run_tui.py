@@ -169,7 +169,7 @@ class DashboardPanel(Static):
             lines.append(f"  {icon} [{name[0].upper()}] {label}{opt}")
 
         lines.append("")
-        lines.append("[dim]1-6:step  R:all  S:sql  F:fail  Q:quit[/dim]")
+        lines.append("[dim]1-6:step R:all P:report S:sql F:fail Q:quit[/dim]")
 
         self.query_one("#dash-content", Static).update("\n".join(lines))
 
@@ -267,6 +267,7 @@ class OmaTuiApp(App):
         ("5", "run_step('merge')", "Merge"),
         ("6", "run_step('test')", "Test"),
         ("r", "run_step('all')", "Run All"),
+        ("p", "report", "Report"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -279,12 +280,13 @@ class OmaTuiApp(App):
         yield Footer()
 
     COMMANDS_HELP = """[bold]Commands:[/bold]
-  analyze, transform, review, validate, merge, test  — run step
-  transform --workers 4 --sample 5                   — with options
-  all                                                — run full pipeline
-  skip [mapper] [sql_id]                             — skip a SQL
-  status                                             — refresh dashboard
-  help                                               — show this help"""
+  analyze, transform, review, validate, merge, test — run step
+  transform --workers 4 --sample 5                  — with options
+  all                                               — run full pipeline
+  report                                            — generate test report
+  skip [mapper] [sql_id]                            — skip a SQL
+  status                                            — refresh dashboard
+  help                                              — show this help"""
 
     def on_mount(self) -> None:
         self.title = "OMA Pipeline Dashboard"
@@ -322,6 +324,8 @@ class OmaTuiApp(App):
             self.push_screen(FailAnalysisScreen())
         elif verb == "all":
             self._execute_step("all", "run_pipeline.py")
+        elif verb == "report":
+            self._generate_report()
         elif verb == "skip" and len(parts) >= 3:
             self._skip_sql(parts[1], parts[2], console)
         elif verb in ("analyze", "transform", "review", "validate", "merge", "test"):
@@ -365,6 +369,31 @@ class OmaTuiApp(App):
 
     def action_fail_analysis(self) -> None:
         self.push_screen(FailAnalysisScreen())
+
+    def action_report(self) -> None:
+        self._generate_report()
+
+    @work(thread=True)
+    def _generate_report(self) -> None:
+        console = self.query_one("#console", ConsolePanel)
+        self.call_from_thread(console.write, "\n[bold cyan]> Generating report...[/bold cyan]")
+        try:
+            from agents.orchestrator.tools.orchestrator_tools import generate_test_report
+            result = generate_test_report()
+            status = result.get("status", "unknown")
+            if status == "success":
+                path = result.get("report_path", "")
+                passed = result.get("passed", 0)
+                failed = result.get("failed", 0)
+                skipped = result.get("skipped", 0)
+                rate = result.get("pass_rate", "")
+                self.call_from_thread(console.write, f"[bold green]✅ Report generated[/bold green]")
+                self.call_from_thread(console.write, f"  Pass:{passed}  Fail:{failed}  Skip:{skipped}  Rate:{rate}")
+                self.call_from_thread(console.write, f"  [dim]{path}[/dim]")
+            else:
+                self.call_from_thread(console.write, f"[yellow]{result}[/yellow]")
+        except Exception as e:
+            self.call_from_thread(console.write, f"[red]Error: {e}[/red]")
 
     def action_run_step(self, step_name: str) -> None:
         if step_name == "all":
