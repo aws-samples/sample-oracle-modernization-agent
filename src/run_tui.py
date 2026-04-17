@@ -98,22 +98,12 @@ def get_fail_categories() -> dict:
 
 
 class DashboardPanel(Static):
-    """Left panel — stats + step buttons."""
+    """Left panel — compact stats + step status (text only, no buttons)."""
 
     running_step = reactive("")
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="dash-stats")
-        yield Static("", id="dash-steps")
-        yield Static("─" * 36, id="dash-sep")
-        for name, label, _cmd, required in STEPS:
-            tag = "" if required else " [dim](opt)[/dim]"
-            yield Button(f"{label}{tag}", id=f"btn-{name}", variant="primary")
-        yield Static("")
-        yield Button("Run All", id="btn-all", variant="success")
-        yield Static("")
-        yield Button("SQL Explorer", id="btn-sql-explorer", variant="default")
-        yield Button("FAIL Analysis", id="btn-fail-analysis", variant="warning")
+        yield Static("", id="dash-content")
 
     def refresh_data(self) -> None:
         stats = get_pipeline_status()
@@ -124,34 +114,28 @@ class DashboardPanel(Static):
         rate = round(passed / total * 100) if total > 0 else 0
 
         color = "green" if rate >= 90 else "yellow" if rate >= 70 else "red"
-        stats_text = (
-            f"[bold]Total:[/bold] {total}  "
-            f"[green]Pass:[/green] {passed}  "
-            f"[red]Fail:[/red] {failed}  "
-            f"[yellow]Skip:[/yellow] {skipped}\n"
-            f"[bold]Pass Rate:[/bold] [{color}]{rate}%[/]"
-        )
-        self.query_one("#dash-stats", Static).update(stats_text)
+        lines = [
+            f"[bold]SQL:{total}[/] [green]P:{passed}[/] [red]F:{failed}[/] [yellow]S:{skipped}[/] [{color}]{rate}%[/]",
+            "",
+        ]
 
         step_counts = get_step_counts()
         if step_counts and total > 0:
-            lines = []
-            for step_name in ["pending", "transform", "review", "validate", "merge", "test", "completed"]:
-                cnt = step_counts.get(step_name, 0)
-                bar_len = int(cnt / total * 20) if total > 0 else 0
-                bar = "█" * bar_len + "░" * (20 - bar_len)
-                lines.append(f" {step_name:11s} {bar} {cnt:>3d}")
-            self.query_one("#dash-steps", Static).update("\n".join(lines))
+            for sn in ["pending", "transform", "review", "validate", "merge", "test", "completed"]:
+                cnt = step_counts.get(sn, 0)
+                bl = int(cnt / total * 8) if total > 0 else 0
+                bar = "█" * bl + "░" * (8 - bl)
+                lines.append(f"{sn:10s}{bar}{cnt:>5d}")
         else:
-            self.query_one("#dash-steps", Static).update(" No data")
+            lines.append("[dim]No data[/dim]")
 
-        # Update step button icons
-        for name, _label, _cmd, _req in STEPS:
-            btn = self.query_one(f"#btn-{name}", Button)
+        lines.append("")
+        lines.append("[bold]── Pipeline ──[/bold]")
+        for name, label, _cmd, _req in STEPS:
             if name == self.running_step:
-                btn.label = f"🔄 {_label}"
+                icon = "🔄"
             else:
-                step_map = {
+                done_map = {
                     "analyze": total > 0,
                     "transform": stats.get("transformed", 0) == total and total > 0,
                     "review": stats.get("reviewed", 0) == total and total > 0,
@@ -159,10 +143,14 @@ class DashboardPanel(Static):
                     "merge": False,
                     "test": stats.get("tested", 0) == total and total > 0,
                 }
-                done = step_map.get(name, False)
-                icon = "✅" if done else "⏳"
-                tag = "" if _req else " [dim](opt)[/dim]"
-                btn.label = f"{icon} {_label}{tag}"
+                icon = "✅" if done_map.get(name, False) else "⏳"
+            opt = "" if _req else "[dim]*[/dim]"
+            lines.append(f" {icon} [bold]{name[0].upper()}[/bold] {label}{opt}")
+
+        lines.append("")
+        lines.append("[dim]1-6[/dim]:step [dim]R[/dim]:all [dim]S[/dim]:sql [dim]F[/dim]:fail [dim]Q[/dim]:quit")
+
+        self.query_one("#dash-content", Static).update("\n".join(lines))
 
 
 class ConsolePanel(RichLog):
@@ -228,29 +216,13 @@ class OmaTuiApp(App):
         layout: horizontal;
     }
     DashboardPanel {
-        width: 38;
+        width: 32;
         border: solid $primary;
         padding: 1 1;
-    }
-    DashboardPanel Button {
-        width: 100%;
-        margin: 0 0;
-        min-height: 1;
-        height: 1;
     }
     ConsolePanel {
         width: 1fr;
         border: solid $secondary;
-    }
-    #dash-stats {
-        margin-bottom: 1;
-    }
-    #dash-steps {
-        margin-bottom: 0;
-    }
-    #dash-sep {
-        margin: 0;
-        color: $text-muted;
     }
     """
 
@@ -290,18 +262,6 @@ class OmaTuiApp(App):
             self.query_one(DashboardPanel).refresh_data()
         except Exception:
             pass
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        btn_id = event.button.id or ""
-        if btn_id == "btn-sql-explorer":
-            self.push_screen(SqlExplorerScreen())
-        elif btn_id == "btn-fail-analysis":
-            self.push_screen(FailAnalysisScreen())
-        elif btn_id == "btn-all":
-            self.action_run_step("all")
-        elif btn_id.startswith("btn-"):
-            step = btn_id[4:]
-            self.action_run_step(step)
 
     def action_sql_explorer(self) -> None:
         self.push_screen(SqlExplorerScreen())
