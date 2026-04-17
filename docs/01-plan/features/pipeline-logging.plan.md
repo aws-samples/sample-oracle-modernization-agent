@@ -423,6 +423,17 @@ pipeline:
 - 단계별 실행/건너뛰기/재시도 UI
 - 실행 중 상태 표시 (current_step DB 연동)
 
+### Phase 3-2: TUI Orchestrator Agent 연결
+
+TUI Input → Strands Orchestrator Agent (LLM) → 17 tools → 응답 RichLog 콘솔 스트리밍.
+기존 Orchestrator와 동일 tool/prompt, 출력 채널만 TUI ConsolePanel.
+
+### Phase 3-3: AGENT.md 기반 Orchestrator (계획)
+
+Python Orchestrator Agent 대체 — AGENT.md 마크다운으로 역할/도구/흐름 정의.
+Claude Code / Kiro CLI가 AGENT.md를 읽고 tool 함수 import → 자연어 상호작용.
+Python Agent 코드 (agent.py + Strands) 불필요. 17개 tool 함수만 유지.
+
 ### Phase 4: 고급 기능
 
 | 항목 | 설명 |
