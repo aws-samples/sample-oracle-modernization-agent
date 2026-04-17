@@ -111,44 +111,61 @@ class DashboardPanel(Static):
         passed = stats.get("passed", 0)
         failed = stats.get("failed", 0)
         skipped = stats.get("skipped", 0)
+        transformed = stats.get("transformed", 0)
+        reviewed = stats.get("reviewed", 0)
+        validated = stats.get("validated", 0)
+        tested = stats.get("tested", 0)
         rate = round(passed / total * 100) if total > 0 else 0
 
         color = "green" if rate >= 90 else "yellow" if rate >= 70 else "red"
         lines = [
-            f"[bold]SQL:{total}[/] [green]P:{passed}[/] [red]F:{failed}[/] [yellow]S:{skipped}[/] [{color}]{rate}%[/]",
+            f"[bold]── Overview ──[/bold]",
+            f"  Total SQL    : [bold]{total:>5d}[/bold]",
+            f"  [green]Pass[/green]         : [green]{passed:>5d}[/green]",
+            f"  [red]Fail[/red]         : [red]{failed:>5d}[/red]",
+            f"  [yellow]Skip[/yellow]         : [yellow]{skipped:>5d}[/yellow]",
+            f"  Pass Rate    : [{color}][bold]{rate}%[/bold][/]",
+            "",
+            f"[bold]── Pipeline Steps ──[/bold]",
+            f"  Transformed  : {transformed:>5d}/{total}",
+            f"  Reviewed     : {reviewed:>5d}/{total}",
+            f"  Validated    : {validated:>5d}/{total}",
+            f"  Tested       : {tested:>5d}/{total}",
             "",
         ]
 
         step_counts = get_step_counts()
         if step_counts and total > 0:
+            lines.append(f"[bold]── Current Step Distribution ──[/bold]")
             for sn in ["pending", "transform", "review", "validate", "merge", "test", "completed"]:
                 cnt = step_counts.get(sn, 0)
-                bl = int(cnt / total * 8) if total > 0 else 0
-                bar = "█" * bl + "░" * (8 - bl)
-                lines.append(f"{sn:10s}{bar}{cnt:>5d}")
+                pct = round(cnt / total * 100) if total > 0 else 0
+                bl = int(cnt / total * 20) if total > 0 else 0
+                bar = "█" * bl + "░" * (20 - bl)
+                lines.append(f"  {sn:10s} {bar} {cnt:>5d} ({pct:>2d}%)")
         else:
-            lines.append("[dim]No data[/dim]")
+            lines.append("[dim]  No data — run analyze first[/dim]")
 
         lines.append("")
-        lines.append("[bold]── Pipeline ──[/bold]")
+        lines.append(f"[bold]── Controls ──[/bold]")
         for name, label, _cmd, _req in STEPS:
             if name == self.running_step:
                 icon = "🔄"
             else:
                 done_map = {
                     "analyze": total > 0,
-                    "transform": stats.get("transformed", 0) == total and total > 0,
-                    "review": stats.get("reviewed", 0) == total and total > 0,
-                    "validate": stats.get("validated", 0) == total and total > 0,
+                    "transform": transformed == total and total > 0,
+                    "review": reviewed == total and total > 0,
+                    "validate": validated == total and total > 0,
                     "merge": False,
-                    "test": stats.get("tested", 0) == total and total > 0,
+                    "test": tested == total and total > 0,
                 }
                 icon = "✅" if done_map.get(name, False) else "⏳"
-            opt = "" if _req else "[dim]*[/dim]"
-            lines.append(f" {icon} [bold]{name[0].upper()}[/bold] {label}{opt}")
+            opt = "" if _req else " [dim](opt)[/dim]"
+            lines.append(f"  {icon} [{name[0].upper()}] {label}{opt}")
 
         lines.append("")
-        lines.append("[dim]1-6[/dim]:step [dim]R[/dim]:all [dim]S[/dim]:sql [dim]F[/dim]:fail [dim]Q[/dim]:quit")
+        lines.append("[dim]1-6:step  R:all  S:sql  F:fail  Q:quit[/dim]")
 
         self.query_one("#dash-content", Static).update("\n".join(lines))
 
@@ -216,12 +233,13 @@ class OmaTuiApp(App):
         layout: horizontal;
     }
     DashboardPanel {
-        width: 32;
+        width: 1fr;
         border: solid $primary;
         padding: 1 1;
+        max-width: 60;
     }
     #right-panel {
-        width: 1fr;
+        width: 2fr;
     }
     ConsolePanel {
         height: 1fr;
