@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import PROJECT_ROOT, DB_PATH, MERGE_DIR
 from core.pipeline_logger import PipelineLogger
-from core.db_migrate import ensure_current_step_column
+from core.db_migrate import ensure_schema
 from agents.sql_transform.tools.assemble_mapper import assemble_mapper
 
 
@@ -20,7 +20,7 @@ def run():
 
     logger = PipelineLogger(step='merge')
     start_time = time.time()
-    ensure_current_step_column()
+    ensure_schema()
 
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
@@ -67,6 +67,8 @@ def run():
     duration_ms = int((time.time() - start_time) * 1000)
     logger.log_summary(merged=merged, skipped=skipped, total_files=merge_count, duration_ms=duration_ms)
     logger.generate_summary_md()
+    from core.html_report import generate_html_report
+    generate_html_report()
 
     print(f"\n{'='*60}", flush=True)
     print(f"📦 Merged: {merged} mappers ({merge_count} files)", flush=True)

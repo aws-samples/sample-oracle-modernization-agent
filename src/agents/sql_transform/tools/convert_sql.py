@@ -3,7 +3,8 @@ import sqlite3
 import time
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH
+from utils.project_paths import PROJECT_ROOT, DB_PATH, MODEL_ID
+from core import history_writer as _hw
 
 _current_step = "transform"
 
@@ -190,6 +191,39 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
             conn2.commit()
 
     _db_execute_with_retry(_update_db)
+
+    # Append-only transform history (non-fatal on failure)
+    try:
+        with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
+            n_prior = hist_conn.execute(
+                "SELECT COUNT(*) FROM transform_history WHERE mapper_file=? AND sql_id=?",
+                (mapper_file, sql_id),
+            ).fetchone()[0]
+        attempt_no = int(n_prior or 0) + 1
+    except Exception:
+        attempt_no = 1
+
+    original_sql_body = ""
+    try:
+        if source_path.exists():
+            original_sql_body = source_path.read_text(encoding='utf-8')
+    except Exception:
+        pass
+
+    single_tag_sql = (
+        f'<{sql_type} id="{sql_id}"{tag_attrs}>\n{converted_sql}\n</{sql_type}>'
+    )
+    _hw.record_transform(
+        mapper_file=mapper_file,
+        sql_id=sql_id,
+        attempt_no=attempt_no,
+        original_sql=original_sql_body,
+        transformed_sql=single_tag_sql,
+        transform_log=notes,
+        model_id=MODEL_ID,
+        status='success',
+        mapper_path=_hw.resolve_mapper_path(mapper_file),
+    )
 
     # Emit progress event via thread-safe queue
     from core.progress import emit_progress

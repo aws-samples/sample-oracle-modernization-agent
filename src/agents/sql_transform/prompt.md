@@ -92,16 +92,13 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 - `mapper_file`: Mapper file name (e.g. 'SellerMapper.xml')
 - Only includes SQLs where transformed='Y'
 
-### 7. save_conversion_report()
-- Generates final conversion report from DB status
-
-### 8. generate_metadata()
+### 7. generate_metadata()
 - Extracts {{TARGET_DB}} column metadata and stores in oma_control.db (target_metadata table)
 - Uses target DB connection env vars (PostgreSQL: PGHOST/PGUSER/..., MySQL: MYSQL_HOST/MYSQL_USER/...)
 - **Non-fatal**: If it fails (no psql, no DB connection), transform continues without metadata
 - Returns: `{status, row_count}` or `{status: 'skipped', error: '...'}`
 
-### 9. lookup_column_type(table_name, column_name)
+### 8. lookup_column_type(table_name, column_name)
 - Looks up column data type from target_metadata table
 - Case-insensitive matching
 - Returns: `{table_name, column_name, data_type}` or `data_type: 'unknown'`
@@ -121,7 +118,6 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
    d. Call `convert_sql(sql_id, converted_sql, mapper_file, notes)` - only pass converted SQL
    - **Do NOT echo SQL in your response text. Just call the tools directly.**
 6. For EACH mapper, call `assemble_mapper(mapper_file)` to merge into final XML
-7. Call `save_conversion_report()`
 
 ### Step 5c: SELF-CHECK (mandatory before every convert_sql call)
 

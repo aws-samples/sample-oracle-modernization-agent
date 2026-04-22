@@ -11,10 +11,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import DB_PATH, LOGS_DIR
 from core.pipeline_logger import PipelineLogger
-from core.db_migrate import ensure_current_step_column
+from core.db_migrate import ensure_schema
 from agents.sql_review.perspectives import run_multi_perspective_review
 from agents.sql_review.tools.review_tools import get_pending_reviews, set_reviewed
 from agents.sql_transform.tools.convert_sql import set_step
+from core import history_writer as _hw
 
 _log_dir = LOGS_DIR / "review"
 _pipeline_logger = None
@@ -72,6 +73,9 @@ def review_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, total
 
             for s in group:
                 console(s['sql_id'], "🔍 리뷰중")
+
+            # Arm the review lap timer so set_reviewed.record_review() gets per-SQL duration_ms.
+            _hw.start_timer("review")
 
             # Run multi-perspective review (Syntax + Equivalence in parallel)
             result = run_multi_perspective_review(mapper_file, ids_str)
@@ -242,7 +246,7 @@ def run(max_workers=8, max_rounds=3):
     _pipeline_logger = PipelineLogger(step='review')
     start_time = time.time()
     set_step("review")
-    ensure_current_step_column()
+    ensure_schema()
 
     # Reset previous FAIL items so they get re-reviewed on re-run
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
@@ -332,6 +336,8 @@ def run(max_workers=8, max_rounds=3):
     duration_ms = int((time.time() - start_time) * 1000)
     _pipeline_logger.log_summary(total=total, pass_=passed, fail=failed, skip=skipped, duration_ms=duration_ms)
     _pipeline_logger.generate_summary_md()
+    from core.html_report import generate_html_report
+    generate_html_report()
 
 
 if __name__ == "__main__":

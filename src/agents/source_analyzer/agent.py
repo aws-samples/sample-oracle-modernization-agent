@@ -10,7 +10,6 @@ from .tools.db_manager import get_java_source_folder, save_xml_list
 from .tools.file_scanner import scan_mybatis_mappers, scan_java_files
 from .tools.framework_analyzer import analyze_framework
 from .tools.sql_extractor import analyze_sql_complexity
-from .tools.report_generator import generate_markdown_report
 
 # Import tools - strategy generation
 from .tools.pattern_analyzer import analyze_sql_patterns
@@ -38,7 +37,6 @@ def create_source_analyzer_agent() -> Agent:
             scan_java_files,
             analyze_framework,
             analyze_sql_complexity,
-            generate_markdown_report,
             save_xml_list,
             # Strategy tools
             analyze_sql_patterns,
@@ -55,7 +53,7 @@ def run_analysis():
     agent = create_source_analyzer_agent()
 
     result = agent(
-        "Analyze Java source code: scan mappers, analyze complexity, generate report, save to DB. "
+        "Analyze Java source code: scan mappers, analyze complexity, save to DB. "
         "Then generate transform strategy: call analyze_sql_patterns(), generate_strategy(), write_strategy_file()."
     )
 

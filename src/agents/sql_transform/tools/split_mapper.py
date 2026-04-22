@@ -12,6 +12,7 @@ import sqlite3
 from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH, ORIGIN_DIR, EXTRACT_DIR, TRANSFORM_DIR
+from core import history_writer as _hw
 
 
 def _extract_level1_elements(xml_content: str):
@@ -184,7 +185,9 @@ def split_mapper(file_path: str) -> dict:
         # 1. Copy original to output/origin/
         origin_dir = ORIGIN_DIR / sub_dir if sub_dir else ORIGIN_DIR
         origin_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(path), str(origin_dir / path.name))
+        dest = origin_dir / path.name
+        if path.resolve() != dest.resolve():
+            shutil.copy2(str(path), str(dest))
 
         # 2. Extract each SQL ID to output/extract/
         sql_ids = []
@@ -230,6 +233,20 @@ def split_mapper(file_path: str) -> dict:
                 'id': elem['id'], 'type': elem['type'], 'seq_no': seq,
                 'line_count': elem['line_count'],
             })
+
+            # Append-only extract history (non-fatal on failure)
+            # Reuse the current transaction's connection so concurrent split_mapper
+            # workers don't contend on separate writer connections.
+            _hw.record_extract(
+                mapper_file=mapper_key,
+                sql_id=elem['id'],
+                sql_type=elem['type'],
+                namespace=namespace,
+                seq_no=seq,
+                original_sql=elem['full_tag'],
+                mapper_path=_hw.resolve_mapper_path(mapper_key, absolute_path=str(path)),
+                conn=conn,
+            )
 
         conn.commit()
     finally:

@@ -107,29 +107,6 @@ def write_strategy_file(output_file: str, content: str, reference_rules: str = N
         for warning in validation_result['warnings']:
             result += f"  - {warning}\n"
 
-    # Update strategy section in source_analysis.md
-    try:
-        from agents.source_analyzer.tools.report_generator import _generate_strategy_section
-        from utils.project_paths import REPORTS_DIR
-        import re as _re
-        analysis_report = REPORTS_DIR / "source_analysis.md"
-        if analysis_report.exists():
-            report_content = analysis_report.read_text(encoding='utf-8')
-            new_section = _generate_strategy_section()
-            strategy_marker = "## 3.5 Migration Strategy"
-            if strategy_marker in report_content:
-                before = report_content[:report_content.index(strategy_marker)]
-                # Preserve sections after strategy (## 4. Recommendations, etc.)
-                after_match = _re.search(r'\n(## 4\. )', report_content[report_content.index(strategy_marker):])
-                after = ""
-                if after_match:
-                    after_start = report_content.index(strategy_marker) + after_match.start()
-                    after = "\n" + report_content[after_start:]
-                analysis_report.write_text(before + new_section + after, encoding='utf-8')
-                result += "✅ source_analysis.md 전략 섹션 업데이트 완료\n"
-    except Exception as e:
-        result += f"⚠️ source_analysis.md 업데이트 실패: {e}\n"
-
     return result
 
 
