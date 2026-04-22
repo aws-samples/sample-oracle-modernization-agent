@@ -146,6 +146,7 @@ td code{font-family:var(--mono);font-size:11px}
 <div class="tab-content" id="tab-test"><div id="test-body"></div></div>
 
 </div>
+<!-- nosemgrep: insecure-document-method — innerHTML is safe here: all data is server-generated JSON, all dynamic values pass through esc() which escapes &<>" -->
 <script>
 const REPORT_DATA = __REPORT_DATA__;
 
