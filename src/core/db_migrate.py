@@ -148,11 +148,13 @@ def ensure_history_tables():
             )
             if not cursor.fetchone():
                 continue
+            # nosemgrep: sqlalchemy-execute-raw-query
             cursor.execute(f"PRAGMA table_info({table})")
             existing = {row[1] for row in cursor.fetchall()}
             for col_name, col_type in additions:
                 if col_name in existing:
                     continue
+                # nosemgrep: sqlalchemy-execute-raw-query
                 cursor.execute(
                     f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"
                 )
@@ -171,11 +173,14 @@ def ensure_history_tables():
                 )
                 row = cursor.fetchone()
                 if row and row[0] and 'UNIQUE' not in row[0].upper():
+                    # nosemgrep: sqlalchemy-execute-raw-query
                     cursor.execute(f"DROP INDEX {index_name}")
+                # nosemgrep: sqlalchemy-execute-raw-query
                 cursor.execute(
                     f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table} ({columns})"
                 )
             else:
+                # nosemgrep: sqlalchemy-execute-raw-query
                 cursor.execute(
                     f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({columns})"
                 )

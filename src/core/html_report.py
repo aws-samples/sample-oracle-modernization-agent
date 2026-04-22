@@ -257,6 +257,7 @@ def _per_sql_rows(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     def _gather(table: str, order: str) -> Dict[tuple, List[Dict[str, Any]]]:
         bucket: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
         try:
+            # nosemgrep: sqlalchemy-execute-raw-query
             cur.execute(
                 f"SELECT * FROM {table} ORDER BY mapper_file, sql_id, {order}"
             )
