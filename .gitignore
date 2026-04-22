@@ -23,6 +23,15 @@ venv/
 .kiro/
 .bkit/
 
+# Internal working docs (plan/design/analysis/report/archive/template)
+# Keep only: docs/*.md (top-level), docs/agents/, docs/demo.gif
+docs/01-plan/
+docs/02-design/
+docs/03-analysis/
+docs/04-report/
+docs/archive/
+docs/template/
+
 # Project specific
 output/
 example/output/

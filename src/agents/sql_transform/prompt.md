@@ -25,7 +25,7 @@ Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions
 - **Comments**: ALL SQL comments (`--`, `/* */`) must be preserved exactly as-is
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
-- **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.kns.framework.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
+- **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.example.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
 - **`<include refid="..."/>`**: SQL fragment references must be preserved **exactly as-is** — both the tag AND the refid value. Do NOT:
   - Change the refid value (e.g., `refid="sql_tOrderMstAdcdUnion"` must NOT become `refid="sql_tOrderCtgDiv"`)
   - Inline/expand the referenced SQL

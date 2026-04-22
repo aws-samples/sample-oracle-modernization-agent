@@ -302,4 +302,4 @@ MIT
 ## 참고
 
 - [Strands Agents Documentation](https://strandsagents.com)
-- [기존 프로그램 참조](/Users/changik/workspace/oma-origin/bin/application/)
+- [기존 프로그램 참조](/path/to/original/bin/application/)
