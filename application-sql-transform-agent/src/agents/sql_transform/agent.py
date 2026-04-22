@@ -9,7 +9,6 @@ from .tools.load_mapper_list import load_mapper_list, get_pending_transforms, re
 from .tools.split_mapper import split_mapper
 from .tools.convert_sql import convert_sql
 from .tools.assemble_mapper import assemble_mapper
-from .tools.save_conversion import save_conversion_report
 from .tools.metadata import generate_metadata, lookup_column_type
 
 
@@ -63,7 +62,7 @@ def create_sql_transform_agent(*, suppress_streaming: bool = False) -> Agent:
         "model": model,
         "system_prompt": _load_system_prompt(),
         "tools": [load_mapper_list, get_pending_transforms, read_sql_source, split_mapper,
-                  convert_sql, assemble_mapper, save_conversion_report,
+                  convert_sql, assemble_mapper,
                   generate_metadata, lookup_column_type],
     }
     if suppress_streaming:

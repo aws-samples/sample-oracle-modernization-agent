@@ -9,6 +9,15 @@ from pathlib import Path
 from strands import tool
 from utils.project_paths import PROJECT_ROOT, DB_PATH, TRANSFORM_DIR, MERGE_DIR, get_target_dbms, get_target_db_display_name
 from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
+from core import history_writer as _hw
+
+_logger = None
+
+
+def set_logger(logger):
+    """Inject PipelineLogger from runner."""
+    global _logger
+    _logger = logger
 
 
 REFERENCE_DIR = PROJECT_ROOT / "src" / "reference"
@@ -141,6 +150,9 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
         sql_type, sql_body = extracted
 
         try:
+            # Arm the test lap timer so _record_test_history gets per-SQL execution_time_ms.
+            _hw.start_timer("test")
+
             # SQL via stdin, connection via env vars — cmd is static
             run_env = {**os.environ, **db_env}
             if dbms == 'mysql':
@@ -163,9 +175,15 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
             if result.returncode == 0:
                 passed += 1
                 _update_tested(mapper_file, sql_id)
+                _record_test_history(mapper_file, sql_id, 'phase0_explain',
+                                     result='PASS', tested_sql=sql_body)
             else:
                 error_msg = result.stderr.strip().split('\n')[0] if result.stderr else 'Unknown error'
                 _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
+                _record_test_history(mapper_file, sql_id, 'phase0_explain',
+                                     result='FAIL', error=error_msg[:500],
+                                     sql_state=_extract_sql_state(error_msg),
+                                     tested_sql=sql_body)
                 failed += 1
                 failures.append({
                     'mapper_file': mapper_file,
@@ -174,6 +192,9 @@ def explain_dml_batch(dml_items: list[dict]) -> dict:
                 })
         except subprocess.TimeoutExpired:
             _update_tested(mapper_file, sql_id, result="FAIL", error="EXPLAIN timeout (15s)")
+            _record_test_history(mapper_file, sql_id, 'phase0_explain',
+                                 result='FAIL', error='EXPLAIN timeout (15s)',
+                                 tested_sql=sql_body)
             failed += 1
             failures.append({
                 'mapper_file': mapper_file,
@@ -458,6 +479,30 @@ def run_bulk_test(test_folder: str = "") -> dict:
             """, (test_result_val, sql_id))
             return cursor.rowcount
 
+        # Load bind parameters once (used for all items in this bulk run)
+        bind_params_dict = None
+        try:
+            params_path = Path(tmpdir) / "parameters.properties"
+            if params_path.exists():
+                bind_params_dict = {}
+                for line in params_path.read_text(encoding='utf-8').splitlines():
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        bind_params_dict[k.strip()] = v.strip()
+        except Exception:
+            bind_params_dict = None
+
+        def _resolve_mapper_file(cursor, sql_id: str, xml_file: str) -> str:
+            cursor.execute(
+                "SELECT mapper_file FROM transform_target_list WHERE sql_id = ? LIMIT 1",
+                (sql_id,),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else xml_file
+
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             cursor = conn.cursor()
 
@@ -471,6 +516,12 @@ def run_bulk_test(test_folder: str = "") -> dict:
                         success_count += 1
                         if success_count <= 5:
                             print(f"    ✅ {xml_file}:{sql_id}", flush=True)
+                        try:
+                            mapper_file_name = _resolve_mapper_file(cursor, sql_id, xml_file)
+                            _record_test_history(mapper_file_name, sql_id, 'phase1_java',
+                                                 result='PASS', bind_parameters=bind_params_dict)
+                        except Exception:
+                            pass
                     else:
                         no_match_count += 1
                 else:
@@ -478,9 +529,16 @@ def run_bulk_test(test_folder: str = "") -> dict:
                     _update_db_by_sql_id(cursor, sql_id, xml_file, error[:500] if error else 'FAIL')
 
                     # Get mapper_file for failure reporting
-                    cursor.execute("SELECT mapper_file FROM transform_target_list WHERE sql_id = ? LIMIT 1", (sql_id,))
-                    row = cursor.fetchone()
-                    mapper_file_name = row[0] if row else xml_file
+                    mapper_file_name = _resolve_mapper_file(cursor, sql_id, xml_file)
+
+                    try:
+                        _record_test_history(mapper_file_name, sql_id, 'phase1_java',
+                                             result='FAIL',
+                                             error=(error[:500] if error else 'FAIL'),
+                                             sql_state=_extract_sql_state(error or ""),
+                                             bind_parameters=bind_params_dict)
+                    except Exception:
+                        pass
 
                     fail_count += 1
                     failures.append({
@@ -566,6 +624,9 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
         shutil.copy2(src_path, dst_path)
 
         try:
+            # Arm the test lap timer so _record_test_history gets per-SQL execution_time_ms
+            _hw.start_timer("test")
+
             # Run bulk test on this single file
             result = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit — fixed command list, no shell=True
                 ['bash', test_script, tmpdir],
@@ -582,28 +643,68 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
             progress_pattern = rf'Progress:.*?{re.escape(sql_id)}\s+(❌ Failed:|✅ Passed|Target execution)'
             match = re.search(progress_pattern, output)
             
+            # Load bind parameters if generated
+            bind_params_dict = None
+            try:
+                params_path = Path(tmpdir) / "parameters.properties"
+                if params_path.exists():
+                    bind_params_dict = {}
+                    for line in params_path.read_text(encoding='utf-8').splitlines():
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        if '=' in line:
+                            k, v = line.split('=', 1)
+                            bind_params_dict[k.strip()] = v.strip()
+            except Exception:
+                bind_params_dict = None
+
             if match and '❌ Failed:' in match.group(0):
                 # Extract error after "Failed:"
                 error_pattern = rf'{re.escape(sql_id)}.*?❌ Failed:(.*?)(?=\n\rProgress:|\n  |\Z)'
                 error_match = re.search(error_pattern, output, re.DOTALL)
                 error_msg = error_match.group(1).strip() if error_match else "Unknown error"
                 _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
+                try:
+                    _record_test_history(mapper_file, sql_id, 'phase1_java',
+                                         result='FAIL', error=error_msg[:500],
+                                         sql_state=_extract_sql_state(error_msg),
+                                         bind_parameters=bind_params_dict)
+                except Exception:
+                    pass
                 return {'status': 'FAIL', 'sql_id': sql_id, 'error': error_msg}
             elif match or f'{sql_id}' in output:
                 # Check final summary line for this file
                 # Pattern: filename.xml: 1/1 (100.0%) [skipped: 0]
                 if '(100.0%)' in output or '✅ Passed' in output:
                     _update_tested(mapper_file, sql_id)
+                    try:
+                        _record_test_history(mapper_file, sql_id, 'phase1_java',
+                                             result='PASS', bind_parameters=bind_params_dict)
+                    except Exception:
+                        pass
                     return {'status': 'SUCCESS', 'sql_id': sql_id}
                 elif 'Error' in output or 'Exception' in output:
                     # Extract error
                     error_lines = [line for line in output.split('\n') if 'Error' in line or 'Exception' in line]
                     error_msg = '\n'.join(error_lines[-5:]) if error_lines else output[-1000:]
                     _update_tested(mapper_file, sql_id, result="FAIL", error=error_msg[:500])
+                    try:
+                        _record_test_history(mapper_file, sql_id, 'phase1_java',
+                                             result='FAIL', error=error_msg[:500],
+                                             sql_state=_extract_sql_state(error_msg),
+                                             bind_parameters=bind_params_dict)
+                    except Exception:
+                        pass
                     return {'status': 'FAIL', 'sql_id': sql_id, 'error': error_msg}
-            
+
             # Default: assume success if no error found
             _update_tested(mapper_file, sql_id)
+            try:
+                _record_test_history(mapper_file, sql_id, 'phase1_java',
+                                     result='PASS', bind_parameters=bind_params_dict)
+            except Exception:
+                pass
             return {'status': 'SUCCESS', 'sql_id': sql_id}
 
         except subprocess.TimeoutExpired:
@@ -644,22 +745,83 @@ def get_test_failures() -> dict:
     return {'total': total, 'mappers_count': len(pending), 'pending': pending}
 
 
+def _record_test_history(mapper_file: str, sql_id: str, phase: str, result: str,
+                          error: str = "", sql_state: str = "",
+                          execution_time_ms: int | None = None,
+                          rows_affected: int | None = None,
+                          tested_sql: str = "", bind_parameters=None):
+    """Compute attempt_no from prior test_history for this phase and record."""
+    try:
+        with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
+            n_prior = hist_conn.execute(
+                "SELECT COUNT(*) FROM test_history WHERE mapper_file=? AND sql_id=? AND phase=?",
+                (mapper_file, sql_id, phase),
+            ).fetchone()[0]
+        attempt_no = int(n_prior or 0) + 1
+    except Exception:
+        attempt_no = 1
+
+    # If tested_sql not provided, try to read from target_file
+    if not tested_sql:
+        try:
+            with sqlite3.connect(str(DB_PATH), timeout=5) as tgt_conn:
+                from utils.db_utils import query_by_mapper
+                row = query_by_mapper(
+                    tgt_conn.cursor(),
+                    "SELECT target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id,
+                )
+            if row and Path(row[0]).exists():
+                tested_sql = Path(row[0]).read_text(encoding='utf-8')
+        except Exception:
+            pass
+
+    _hw.record_test(
+        mapper_file=mapper_file,
+        sql_id=sql_id,
+        phase=phase,
+        attempt_no=attempt_no,
+        tested_sql=tested_sql,
+        bind_parameters=bind_parameters,
+        test_result=result,
+        execution_log=None,
+        sql_state=sql_state or None,
+        error_message=error or None,
+        execution_time_ms=execution_time_ms,
+        rows_affected=rows_affected,
+        mapper_path=_hw.resolve_mapper_path(mapper_file),
+    )
+
+
+def _extract_sql_state(error_msg: str) -> str:
+    """Extract JDBC SQLState code from error message (e.g., '42P01', '42S02')."""
+    if not error_msg:
+        return ""
+    m = re.search(r'SQLState:\s*([0-9A-Z]{5})', error_msg)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b([0-9]{5})\b', error_msg)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b(42[A-Z0-9]{3})\b', error_msg)
+    return m.group(1) if m else ""
+
+
 def _update_tested(mapper_file: str, sql_id: str, result: str = "PASS", error: str = ""):
     for i in range(5):
         try:
             with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                # Store result and notes separately
-                test_result_val = result  # PASS, FAIL, SKIP, FIXED
+                test_result_val = result
                 test_notes_val = error if result != "PASS" else ""
                 if result == "FAIL":
                     test_result_val = "FAIL"
                     test_notes_val = error[:500] if error else "Unknown error"
+                next_step = 'completed' if result == 'PASS' else 'test'
                 from utils.db_utils import update_by_mapper
                 update_by_mapper(conn,
-                    "UPDATE transform_target_list SET tested='Y', test_result=?, test_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-                    mapper_file, sql_id, extra_params=(test_result_val, test_notes_val))
+                    "UPDATE transform_target_list SET tested='Y', test_result=?, test_notes=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+                    mapper_file, sql_id, extra_params=(test_result_val, test_notes_val, next_step))
                 conn.commit()
-            # Emit progress event via thread-safe queue
             from core.progress import emit_progress
             emit_progress(mapper_file, sql_id, result)
             return

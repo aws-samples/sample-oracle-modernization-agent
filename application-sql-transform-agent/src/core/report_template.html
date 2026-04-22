@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMA Pipeline Report</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--card2:#283548;--border:#334155;--text:#e2e8f0;--dim:#94a3b8;--accent:#3b82f6;--accent2:#60a5fa;--success:#22c55e;--warn:#eab308;--fail:#ef4444;--orange:#f97316;--purple:#a855f7;--mono:'SF Mono','Fira Code','Cascadia Code',monospace;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.6}
+.container{max-width:1400px;margin:0 auto;padding:12px 20px}
+.hdr{text-align:center;padding:20px 0 12px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.hdr h1{font-size:24px;font-weight:700}
+.hdr .sub{color:var(--dim);font-size:12px;margin-top:4px}
+.tabs{display:flex;gap:2px;background:var(--card);border-radius:10px 10px 0 0;padding:4px 4px 0;border:1px solid var(--border);border-bottom:none;flex-wrap:wrap}
+.tab-btn{padding:10px 20px;background:transparent;border:none;color:var(--dim);font-size:13px;font-weight:600;cursor:pointer;border-radius:8px 8px 0 0;transition:all .2s}
+.tab-btn:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.tab-btn.active{color:var(--accent2);background:var(--bg);border-bottom:2px solid var(--accent)}
+.tab-content{display:none;padding:20px;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;min-height:400px}
+.tab-content.active{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card .lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.card .val{font-size:26px;font-weight:700;margin-top:2px}
+.card .det{font-size:11px;color:var(--dim);margin-top:2px}
+.val.ok{color:var(--success)}.val.wn{color:var(--warn)}.val.fl{color:var(--fail)}
+.sec{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px}
+.sec h2{font-size:16px;font-weight:600;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.sec h3{font-size:13px;font-weight:600;margin:12px 0 6px;color:var(--accent2)}
+.phase-row{display:flex;align-items:center;margin-bottom:8px;padding:8px 12px;background:var(--card2);border-radius:8px}
+.phase-name{width:120px;font-size:13px;font-weight:600;flex-shrink:0}
+.phase-bar{flex:1;height:22px;background:rgba(255,255,255,.05);border-radius:4px;margin:0 12px;overflow:hidden;position:relative}
+.phase-fill{height:100%;border-radius:4px;transition:width .5s}
+.phase-fill.done{background:var(--success)}.phase-fill.running{background:var(--accent)}
+.phase-fill.fail{background:var(--fail)}
+.phase-fill.pending{background:var(--border)}
+.phase-info{width:220px;font-size:12px;color:var(--dim);text-align:right}
+.phase-badge{display:inline-block;padding:1px 8px;border-radius:4px;font-size:10px;font-weight:700;margin-left:6px}
+.badge-done{background:rgba(34,197,94,.15);color:var(--success)}
+.badge-fail{background:rgba(239,68,68,.15);color:var(--fail)}
+.badge-pending{background:rgba(148,163,184,.1);color:var(--dim)}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.cols2{grid-template-columns:1fr}}
+.bar-row{display:flex;align-items:center;margin-bottom:5px}
+.bar-lbl{width:180px;font-size:12px;font-family:var(--mono);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{flex:1;height:18px;background:rgba(255,255,255,.05);border-radius:4px;margin:0 10px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px}
+.bar-val{width:70px;text-align:right;font-size:12px;font-family:var(--mono);color:var(--dim)}
+table{width:100%;border-collapse:collapse;margin-top:6px}
+th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:12px;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em;background:var(--card2)}
+td code{font-family:var(--mono);font-size:11px}
+.file-item{border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.file-hdr{display:flex;align-items:center;padding:10px 14px;cursor:pointer;background:var(--card);transition:background .2s;gap:10px}
+.file-hdr:hover{background:var(--card2)}
+.file-arrow{font-size:10px;color:var(--dim);transition:transform .2s;width:16px}
+.file-item.open .file-arrow{transform:rotate(90deg)}
+.file-name{font-family:var(--mono);font-size:13px;font-weight:600;flex:1;word-break:break-all}
+.file-stats{display:flex;gap:8px;font-size:11px}
+.file-stats span{padding:2px 8px;border-radius:4px;font-weight:600}
+.file-body{display:none;padding:0 14px 14px;background:var(--bg)}
+.file-item.open .file-body{display:block}
+.q-item{border:1px solid var(--border);border-radius:6px;margin-top:8px;overflow:hidden}
+.q-hdr{display:flex;align-items:center;padding:8px 12px;cursor:pointer;background:var(--card2);gap:8px;font-size:12px}
+.q-hdr:hover{background:rgba(255,255,255,.05)}
+.q-arrow{font-size:9px;color:var(--dim);transition:transform .2s;width:14px}
+.q-item.open .q-arrow{transform:rotate(90deg)}
+.q-id{font-family:var(--mono);font-weight:600;flex:1;word-break:break-all}
+.q-badge{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700}
+.q-body{display:none;padding:10px 12px;background:var(--bg);font-size:12px}
+.q-item.open .q-body{display:block}
+.sql-container{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+@media(max-width:768px){.sql-container{grid-template-columns:1fr}}
+.sql-block{background:#0c1222;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.sql-block-hdr{padding:4px 10px;background:var(--card2);font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.sql-block pre{padding:10px;font-family:var(--mono);font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;overflow-x:auto;max-height:300px;overflow-y:auto}
+.diff-wrap{margin:8px 0;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#0c1222}
+.diff-hdr{display:flex;padding:4px 10px;background:var(--card2);font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;gap:12px;align-items:center}
+.diff-hdr .lbl{flex:1}
+.diff-hdr .stat{font-weight:600}
+.diff-hdr .stat .add{color:var(--success)}.diff-hdr .stat .del{color:var(--fail)}
+.diff-toggle{background:transparent;border:1px solid var(--border);color:var(--dim);font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer}
+.diff-toggle:hover{color:var(--text);border-color:var(--accent)}
+.diff-body{max-height:400px;overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.55}
+.diff-row{display:flex}
+.diff-row .gutter{flex:0 0 40px;padding:0 6px;text-align:right;color:var(--dim);background:rgba(0,0,0,.2);user-select:none;font-size:10px;border-right:1px solid var(--border)}
+.diff-row .line{flex:1;padding:0 10px;white-space:pre-wrap;word-break:break-all}
+.diff-row.add{background:rgba(34,197,94,.08)}
+.diff-row.add .line{border-left:3px solid var(--success)}
+.diff-row.del{background:rgba(239,68,68,.10)}
+.diff-row.del .line{border-left:3px solid var(--fail)}
+.diff-row.eq .line{border-left:3px solid transparent;color:var(--dim)}
+.diff-row .marker{flex:0 0 16px;text-align:center;color:var(--dim);font-weight:700}
+.diff-row.add .marker{color:var(--success)}
+.diff-row.del .marker{color:var(--fail)}
+.diff-split{display:grid;grid-template-columns:1fr 1fr;gap:0;background:var(--border)}
+.diff-split-col{background:#0c1222;min-height:40px}
+.diff-split-hdr{padding:4px 10px;background:var(--card2);font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;border-bottom:1px solid var(--border)}
+.diff-raw{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
+.diff-raw-col{background:#0c1222;min-height:40px}
+.diff-raw-col pre{margin:0;padding:10px;font-family:var(--mono);font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all;overflow:auto;max-height:400px}
+.diff-btn-group{display:flex;gap:0;margin-left:auto}
+.diff-btn-group button{background:var(--card2);border:1px solid var(--border);color:var(--dim);padding:2px 10px;font-size:11px;cursor:pointer;transition:all .15s}
+.diff-btn-group button:first-child{border-radius:4px 0 0 4px}
+.diff-btn-group button:last-child{border-radius:0 4px 4px 0}
+.diff-btn-group button:not(:first-child){border-left:0}
+.diff-btn-group button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.kw{color:#60a5fa}.fn{color:#34d399}.str{color:#fb923c}.num{color:#c084fc}.cm{color:#64748b;font-style:italic}
+.st-pass{color:var(--success)}.st-fail{color:var(--fail)}.st-skip{color:var(--dim)}
+.st-warn{color:var(--warn)}.st-fixed{color:var(--accent2)}
+.filter-bar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.filter-bar input,.filter-bar select{padding:6px 10px;background:var(--card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+.filter-bar input{flex:1;min-width:200px}
+.empty{padding:20px;text-align:center;color:var(--dim);font-size:13px}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600}
+.pill-ok{background:rgba(34,197,94,.15);color:var(--success)}
+.pill-fail{background:rgba(239,68,68,.15);color:var(--fail)}
+.pill-skip{background:rgba(148,163,184,.15);color:var(--dim)}
+.pill-warn{background:rgba(234,179,8,.15);color:var(--warn)}
+.pill-info{background:rgba(96,165,250,.15);color:var(--accent2)}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="hdr">
+  <h1>OMA Pipeline Report</h1>
+  <div class="sub" id="gen-time"></div>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+  <button class="tab-btn" data-tab="analyze">Analyze</button>
+  <button class="tab-btn" data-tab="transform">Transform</button>
+  <button class="tab-btn" data-tab="review">Review</button>
+  <button class="tab-btn" data-tab="validate">Validate</button>
+  <button class="tab-btn" data-tab="merge">Merge</button>
+  <button class="tab-btn" data-tab="test">Test</button>
+</div>
+
+<div class="tab-content active" id="tab-dashboard"><div id="dashboard-body"></div></div>
+<div class="tab-content" id="tab-analyze"><div id="analyze-body"></div></div>
+<div class="tab-content" id="tab-transform"><div id="transform-body"></div></div>
+<div class="tab-content" id="tab-review"><div id="review-body"></div></div>
+<div class="tab-content" id="tab-validate"><div id="validate-body"></div></div>
+<div class="tab-content" id="tab-merge"><div id="merge-body"></div></div>
+<div class="tab-content" id="tab-test"><div id="test-body"></div></div>
+
+</div>
+<!-- nosemgrep: insecure-document-method — innerHTML is safe here: all data is server-generated JSON, all dynamic values pass through esc() which escapes &<>" -->
+<script>
+const REPORT_DATA = __REPORT_DATA__;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtMs(n){if(n==null)return '-';n=Number(n);if(!isFinite(n))return '-';if(n<1000)return n+'ms';return (n/1000).toFixed(2)+'s';}
+function fmtBytes(n){if(n==null)return '-';n=Number(n);if(n<1024)return n+'B';if(n<1024*1024)return (n/1024).toFixed(1)+'KB';return (n/1024/1024).toFixed(1)+'MB';}
+function pct(a,b){if(!b)return 0;return Math.round(a/b*100);}
+function statusPill(v){
+  if(!v)return '<span class="pill pill-skip">-</span>';
+  const V=String(v).toUpperCase();
+  if(V==='PASS'||V==='Y')return '<span class="pill pill-ok">'+esc(V)+'</span>';
+  if(V==='FAIL'||V==='F')return '<span class="pill pill-fail">'+esc(V)+'</span>';
+  if(V==='SKIP'||V==='N')return '<span class="pill pill-skip">'+esc(V)+'</span>';
+  if(V==='FIXED')return '<span class="pill pill-info">'+esc(V)+'</span>';
+  if(V.indexOf('WARN')>=0)return '<span class="pill pill-warn">'+esc(V)+'</span>';
+  return '<span class="pill">'+esc(V)+'</span>';
+}
+const SQL_KW=/\b(SELECT|FROM|WHERE|AND|OR|NOT|INSERT|INTO|VALUES|UPDATE|SET|DELETE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|USING|GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|AS|CASE|WHEN|THEN|ELSE|END|UNION|ALL|DISTINCT|WITH|RECURSIVE|RETURNING|ASC|DESC|IS|NULL|IN|LIKE|BETWEEN|EXISTS|CREATE|TABLE|VIEW|INDEX|DROP|ALTER|ADD|CONSTRAINT|PRIMARY|KEY|FOREIGN|REFERENCES)\b/gi;
+// Decode HTML entities that came from the source XML (e.g. &#39; &lt; &amp;)
+// so the rendered SQL shows actual characters, not raw entity codes.
+function decodeEntities(s){
+  if(!s)return '';
+  return String(s)
+    .replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(parseInt(n,10)))
+    .replace(/&#x([0-9a-fA-F]+);/g,(_,n)=>String.fromCharCode(parseInt(n,16)))
+    .replace(/&apos;/g,"'").replace(/&quot;/g,'"')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/&nbsp;/g,' ')
+    .replace(/&amp;/g,'&');
+}
+function hiliteSQL(s){
+  if(!s)return '';
+  let h=esc(decodeEntities(s));
+  h=h.replace(/(--[^\n]*)/g,'<span class="cm">$1</span>');
+  h=h.replace(/('[^']*')/g,'<span class="str">$1</span>');
+  h=h.replace(SQL_KW,'<span class="kw">$&</span>');
+  h=h.replace(/\b(\d+\.?\d*)\b/g,'<span class="num">$1</span>');
+  return h;
+}
+
+// Line-level diff between two SQL strings using LCS (Longest Common Subsequence).
+// Returns array of {type: 'eq'|'add'|'del', line: string, ln1: number|null, ln2: number|null}
+function diffLines(aText, bText){
+  const a=decodeEntities(aText||'').split('\n');
+  const b=decodeEntities(bText||'').split('\n');
+  const n=a.length, m=b.length;
+  // LCS DP (OK for the usual <=200 lines; we cap at 500 each for safety).
+  const A=n>500?a.slice(0,500):a;
+  const B=m>500?b.slice(0,500):b;
+  const N=A.length, M=B.length;
+  const dp=Array.from({length:N+1},()=>new Int32Array(M+1));
+  for(let i=N-1;i>=0;i--){
+    for(let j=M-1;j>=0;j--){
+      if(A[i]===B[j]) dp[i][j]=dp[i+1][j+1]+1;
+      else dp[i][j]=Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  const out=[]; let i=0,j=0,li=1,lj=1;
+  while(i<N && j<M){
+    if(A[i]===B[j]){ out.push({type:'eq',line:A[i],ln1:li++,ln2:lj++}); i++; j++; }
+    else if(dp[i+1][j] >= dp[i][j+1]){ out.push({type:'del',line:A[i],ln1:li++,ln2:null}); i++; }
+    else { out.push({type:'add',line:B[j],ln1:null,ln2:lj++}); j++; }
+  }
+  while(i<N){ out.push({type:'del',line:A[i],ln1:li++,ln2:null}); i++; }
+  while(j<M){ out.push({type:'add',line:B[j],ln1:null,ln2:lj++}); j++; }
+  return out;
+}
+
+let _diffSeq=0;
+function renderDiff(oracleSql, targetSql, label){
+  const rows=diffLines(oracleSql, targetSql);
+  const adds=rows.filter(r=>r.type==='add').length;
+  const dels=rows.filter(r=>r.type==='del').length;
+  const id='diff-'+(++_diffSeq);
+  const marker=t=>t==='add'?'+':t==='del'?'-':' ';
+  const target=esc(label||'target');
+  let unified='';
+  for(const r of rows){
+    const g1=r.ln1==null?'':r.ln1;
+    const g2=r.ln2==null?'':r.ln2;
+    unified+=`<div class="diff-row ${r.type}"><span class="gutter">${g1}</span><span class="gutter">${g2}</span><span class="marker">${marker(r.type)}</span><span class="line">${hiliteSQL(r.line)||'&nbsp;'}</span></div>`;
+  }
+  let split='';
+  const leftRows=[], rightRows=[];
+  for(const r of rows){
+    if(r.type==='eq'){ leftRows.push({t:'eq',line:r.line,ln:r.ln1}); rightRows.push({t:'eq',line:r.line,ln:r.ln2}); }
+    else if(r.type==='del'){ leftRows.push({t:'del',line:r.line,ln:r.ln1}); rightRows.push({t:'pad',line:'',ln:null}); }
+    else { leftRows.push({t:'pad',line:'',ln:null}); rightRows.push({t:'add',line:r.line,ln:r.ln2}); }
+  }
+  const side=arr=>arr.map(r=>{
+    const cls=r.t==='pad'?'eq':r.t;
+    return `<div class="diff-row ${cls}"><span class="gutter">${r.ln==null?'':r.ln}</span><span class="marker">${r.t==='pad'?' ':marker(r.t)}</span><span class="line">${hiliteSQL(r.line)||'&nbsp;'}</span></div>`;
+  }).join('');
+  split=`<div class="diff-split"><div class="diff-split-col"><div class="diff-split-hdr">Oracle (original)</div>${side(leftRows)}</div><div class="diff-split-col"><div class="diff-split-hdr">${target}</div>${side(rightRows)}</div></div>`;
+  const raw=`<div class="diff-raw"><div class="diff-raw-col"><div class="diff-split-hdr">Oracle (original)</div><pre>${hiliteSQL(oracleSql)||'<span style="color:var(--dim)">(empty)</span>'}</pre></div><div class="diff-raw-col"><div class="diff-split-hdr">${target}</div><pre>${hiliteSQL(targetSql)||'<span style="color:var(--dim)">(empty)</span>'}</pre></div></div>`;
+  return `<div class="diff-wrap" id="${id}" data-mode="unified">
+    <div class="diff-hdr">
+      <span class="stat"><span class="add">+${adds}</span> <span class="del">-${dels}</span></span>
+      <span style="color:var(--dim)">Oracle → ${target}</span>
+      <div class="diff-btn-group">
+        <button class="active" onclick="setDiffMode('${id}','unified')">Unified</button>
+        <button onclick="setDiffMode('${id}','split')">Split</button>
+        <button onclick="setDiffMode('${id}','raw')">Raw</button>
+      </div>
+    </div>
+    <div class="diff-body diff-unified">${unified}</div>
+    <div class="diff-body diff-splitview" style="display:none">${split}</div>
+    <div class="diff-body diff-rawview" style="display:none">${raw}</div>
+  </div>`;
+}
+
+function setDiffMode(id,mode){
+  const el=document.getElementById(id); if(!el)return;
+  el.setAttribute('data-mode',mode);
+  el.querySelector('.diff-unified').style.display=mode==='unified'?'':'none';
+  el.querySelector('.diff-splitview').style.display=mode==='split'?'':'none';
+  el.querySelector('.diff-rawview').style.display=mode==='raw'?'':'none';
+  el.querySelectorAll('.diff-btn-group button').forEach(b=>{
+    b.classList.toggle('active',b.textContent.toLowerCase()===mode);
+  });
+}
+// Review/Validate store the entire mapper XML (many SQLs); slice out the single
+// <select|insert|update|delete id="sqlId"> block so every stage compares at the
+// same granularity as extract_record / transform_history.
+function extractSingleSqlBlock(xml, sqlId){
+  if(!xml)return '';
+  const s=String(xml);
+  if(!sqlId)return s;
+  const esc=sqlId.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const re=new RegExp('<(select|insert|update|delete)\\b[^>]*\\bid="'+esc+'"[^>]*>[\\s\\S]*?<\\/\\1>','i');
+  const m=s.match(re);
+  return m?m[0]:s;
+}
+function toggle(el){const p=el.parentElement;p.classList.toggle('open');}
+
+function renderDashboard(){
+  const D=REPORT_DATA, s=D.summary||{};
+  let h='';
+  h+='<div class="cards">';
+  h+=`<div class="card"><div class="lbl">Total SQL</div><div class="val">${s.total||0}</div><div class="det">${esc(D.dbms||'')} target</div></div>`;
+  h+=`<div class="card"><div class="lbl">Extracted</div><div class="val">${s.extracted||0}</div></div>`;
+  h+=`<div class="card"><div class="lbl">Transformed</div><div class="val ok">${s.transformed||0}</div></div>`;
+  h+=`<div class="card"><div class="lbl">Reviewed</div><div class="val">${s.reviewed||0}<span style="font-size:14px;color:var(--fail);margin-left:8px">${s.review_failed?'('+s.review_failed+' fail)':''}</span></div></div>`;
+  h+=`<div class="card"><div class="lbl">Validated</div><div class="val">${s.validated||0}</div></div>`;
+  h+=`<div class="card"><div class="lbl">Merged Files</div><div class="val">${s.merged||0}</div></div>`;
+  h+=`<div class="card"><div class="lbl">Tested</div><div class="val">${s.tested||0}</div><div class="det">${(s.tested||0)-(s.test_failed||0)-(s.test_skipped||0)} pass / ${s.test_failed||0} fail / ${s.test_skipped||0} skip</div></div>`;
+  h+='</div>';
+
+  h+='<div class="sec"><h2>Pipeline Progress</h2>';
+  const total=s.total||s.extracted||0;
+  const steps=[
+    {name:'Analyze',  done:s.extracted||0, total:total, fail:0},
+    {name:'Transform',done:s.transformed||0, total:total, fail:0},
+    {name:'Review',   done:s.reviewed||0, total:s.transformed||0, fail:s.review_failed||0},
+    {name:'Validate', done:s.validated||0, total:s.reviewed||0, fail:s.validate_failed||0},
+    {name:'Merge',    done:s.merged||0, total:s.merged||0, fail:0},
+    {name:'Test',     done:s.tested||0, total:s.testable_total||0, fail:s.test_failed||0}
+  ];
+  for(const st of steps){
+    const p=pct(st.done, st.total);
+    const cls=st.total===0?'pending':(st.done>=st.total?'done':(st.fail>0?'fail':'running'));
+    const badge=cls==='done'?'<span class="phase-badge badge-done">DONE</span>':
+                cls==='fail'?'<span class="phase-badge badge-fail">FAIL</span>':
+                '<span class="phase-badge badge-pending">PENDING</span>';
+    h+=`<div class="phase-row"><div class="phase-name">${st.name}${badge}</div>`;
+    h+=`<div class="phase-bar"><div class="phase-fill ${cls}" style="width:${p}%"></div></div>`;
+    h+=`<div class="phase-info">${st.done} / ${st.total}${st.fail?' · '+st.fail+' fail':''}</div></div>`;
+  }
+  h+='</div>';
+  document.getElementById('dashboard-body').innerHTML=h;
+}
+
+function renderAnalyze(){
+  const a=(REPORT_DATA.stages||{}).analyze||{};
+  let h='';
+  h+='<div class="cards">';
+  h+=`<div class="card"><div class="lbl">Mapper XMLs</div><div class="val">${a.xml_count||0}</div></div>`;
+  h+=`<div class="card"><div class="lbl">SQL Entries</div><div class="val">${a.sql_count||0}</div></div>`;
+  h+='</div>';
+  const types=a.by_type||{};
+  if(Object.keys(types).length){
+    h+='<div class="sec"><h2>By SQL Type</h2>';
+    const max=Math.max(...Object.values(types),1);
+    for(const [k,v] of Object.entries(types)){
+      h+=`<div class="bar-row"><div class="bar-lbl">${esc(k)}</div><div class="bar-track"><div class="bar-fill" style="width:${v/max*100}%;background:var(--accent)"></div></div><div class="bar-val">${v}</div></div>`;
+    }
+    h+='</div>';
+  }
+  const mappers=a.by_mapper||[];
+  if(mappers.length){
+    h+='<div class="sec"><h2>By Mapper ('+mappers.length+')</h2>';
+    for(const m of mappers){
+      h+=`<div class="file-item"><div class="file-hdr" onclick="toggle(this)"><span class="file-arrow">▶</span><span class="file-name">${esc(m.mapper_file)}</span><div class="file-stats"><span class="pill pill-info">${m.sql_count||0} sqls</span></div></div>`;
+      h+='<div class="file-body">';
+      h+='<table><tr><th>SQL ID</th><th>Type</th><th>Namespace</th><th>Step</th></tr>';
+      for(const q of (m.sqls||[])){
+        h+=`<tr><td><code>${esc(q.sql_id)}</code></td><td>${esc(q.sql_type||'')}</td><td>${esc(q.namespace||'')}</td><td>${esc(q.current_step||'pending')}</td></tr>`;
+      }
+      h+='</table></div></div>';
+    }
+    h+='</div>';
+  }
+  if(!Object.keys(types).length && !mappers.length) h+='<div class="empty">Analyze 단계 결과 없음</div>';
+  document.getElementById('analyze-body').innerHTML=h;
+}
+
+function renderSqlStage(stage,containerId,historyKey,sortCol){
+  const st=(REPORT_DATA.stages||{})[stage]||{};
+  const sqls=(REPORT_DATA.sqls||[]).filter(s=>(s[historyKey]||[]).length>0);
+  let h='';
+  h+='<div class="cards">';
+  for(const [k,v] of Object.entries(st)){
+    if(typeof v==='number') h+=`<div class="card"><div class="lbl">${esc(k)}</div><div class="val">${v}</div></div>`;
+  }
+  h+='</div>';
+  h+=`<div class="sec"><h2>Per-SQL (${sqls.length})</h2>`;
+  if(!sqls.length){ h+='<div class="empty">기록 없음</div></div>'; document.getElementById(containerId).innerHTML=h; return; }
+  h+='<div class="filter-bar"><input type="text" placeholder="필터: mapper/sql_id" oninput="filterSqls(this,\''+containerId+'\')"></div>';
+  h+='<div class="sql-list">';
+  for(const s of sqls){
+    const rows=s[historyKey]||[];
+    const last=rows[rows.length-1]||{};
+    const verdict=last.status||last.facilitator_verdict||last.verdict||last.test_result||'';
+    h+=`<div class="q-item" data-key="${esc(s.mapper_file+' '+s.sql_id)}"><div class="q-hdr" onclick="toggle(this)"><span class="q-arrow">▶</span>`;
+    h+=`<span class="q-id">${esc(s.mapper_file)}<span style="color:var(--dim)"> · </span>${esc(s.sql_id)}</span>`;
+    h+=`<span>${statusPill(verdict)}</span><span style="color:var(--dim);font-size:11px">${rows.length} ${historyKey==='tests'?'attempt':'round'}${rows.length>1?'s':''}</span></div>`;
+    h+='<div class="q-body">';
+    const originalSql = s.original_sql || '';
+    let rawLatest = (historyKey==='transforms'&&last.transformed_sql)||(historyKey==='reviews'&&last.reviewed_sql)||(historyKey==='validations'&&last.validated_sql)||(historyKey==='tests'&&last.tested_sql)||'';
+    // Review/Validate store whole-mapper XML — slice to this sql_id block.
+    const latestSql = (historyKey==='reviews'||historyKey==='validations') ? extractSingleSqlBlock(rawLatest, s.sql_id) : rawLatest;
+    if(originalSql || latestSql){
+      h+=renderDiff(originalSql, latestSql, REPORT_DATA.dbms||'target');
+    }
+    h+='<table>';
+    if(historyKey==='transforms'){
+      h+='<tr><th>#</th><th>Status</th><th>Model</th><th>Duration</th><th>Log</th><th>Error</th></tr>';
+      for(const r of rows){
+        h+=`<tr><td>${r.attempt_no||''}</td><td>${statusPill(r.status)}</td><td style="font-family:var(--mono);font-size:11px">${esc(r.model_id||'')}</td>`;
+        h+=`<td>${fmtMs(r.duration_ms)}</td><td style="max-width:300px">${esc((r.transform_log||'').slice(0,300))}</td>`;
+        h+=`<td style="color:var(--fail)">${esc((r.error_message||'').slice(0,200))}</td></tr>`;
+      }
+    } else if(historyKey==='reviews'){
+      h+='<tr><th>#</th><th>Verdict</th><th>Duration</th><th>Log</th></tr>';
+      for(const r of rows){
+        h+=`<tr><td>${r.round_no||''}</td><td>${statusPill(r.facilitator_verdict)}</td>`;
+        h+=`<td>${fmtMs(r.duration_ms)}</td><td style="max-width:500px">${esc((r.review_log||'').slice(0,500))}</td></tr>`;
+      }
+    } else if(historyKey==='validations'){
+      h+='<tr><th>#</th><th>Verdict</th><th>Duration</th><th>Log</th><th>Issues</th></tr>';
+      for(const r of rows){
+        h+=`<tr><td>${r.round_no||''}</td><td>${statusPill(r.verdict)}</td><td>${fmtMs(r.duration_ms)}</td>`;
+        h+=`<td style="max-width:400px">${esc((r.validation_log||'').slice(0,400))}</td>`;
+        h+=`<td style="max-width:200px;font-size:10px">${esc((r.issues_found||'').slice(0,200))}</td></tr>`;
+      }
+    } else if(historyKey==='tests'){
+      h+='<tr><th>Phase</th><th>#</th><th>Result</th><th>SQLState</th><th>Duration</th><th>Rows</th><th>Error</th><th>Binds</th></tr>';
+      for(const r of rows){
+        h+=`<tr><td>${esc(r.phase||'')}</td><td>${r.attempt_no||''}</td><td>${statusPill(r.test_result)}</td>`;
+        h+=`<td><code>${esc(r.sql_state||'')}</code></td><td>${fmtMs(r.execution_time_ms)}</td><td>${r.rows_affected==null?'-':r.rows_affected}</td>`;
+        h+=`<td style="max-width:250px;color:var(--fail)">${esc((r.error_message||'').slice(0,200))}</td>`;
+        h+=`<td style="max-width:150px;font-size:10px">${esc((r.bind_parameters||'').slice(0,150))}</td></tr>`;
+      }
+    }
+    h+='</table></div></div>';
+  }
+  h+='</div></div>';
+  document.getElementById(containerId).innerHTML=h;
+}
+
+function filterSqls(inp,containerId){
+  const q=inp.value.toLowerCase();
+  const items=document.querySelectorAll('#'+containerId+' .q-item');
+  items.forEach(it=>{
+    const k=(it.getAttribute('data-key')||'').toLowerCase();
+    it.style.display = (!q||k.indexOf(q)>=0) ? '' : 'none';
+  });
+}
+
+function renderMerge(){
+  const m=(REPORT_DATA.stages||{}).merge||{};
+  const files=m.files_written||[];
+  let h='<div class="cards">';
+  h+=`<div class="card"><div class="lbl">Files Written</div><div class="val">${files.length}</div></div>`;
+  h+=`<div class="card"><div class="lbl">Mappers Covered</div><div class="val">${m.mappers_covered||0}</div></div>`;
+  h+='</div>';
+  if(!files.length){ h+='<div class="empty">Merge 단계 결과 없음</div>'; document.getElementById('merge-body').innerHTML=h; return; }
+  h+='<div class="sec"><h2>Output Files</h2><table><tr><th>Path</th><th>Size</th></tr>';
+  for(const f of files){
+    h+=`<tr><td style="font-family:var(--mono);font-size:11px">${esc(f.path)}</td><td>${fmtBytes(f.size)}</td></tr>`;
+  }
+  h+='</table></div>';
+  document.getElementById('merge-body').innerHTML=h;
+}
+
+function renderTest(){
+  const t=(REPORT_DATA.stages||{}).test||{};
+  let h='<div class="cards">';
+  h+=`<div class="card"><div class="lbl">Phase 0 (EXPLAIN)</div><div class="val">${(t.phase0||{}).total||0}</div><div class="det">${(t.phase0||{}).pass||0} pass / ${(t.phase0||{}).fail||0} fail</div></div>`;
+  h+=`<div class="card"><div class="lbl">Phase 1 (Java)</div><div class="val">${(t.phase1||{}).total||0}</div><div class="det">${(t.phase1||{}).pass||0} pass / ${(t.phase1||{}).fail||0} fail</div></div>`;
+  h+=`<div class="card"><div class="lbl">Phase 2 (Fix)</div><div class="val">${(t.phase2||{}).total||0}</div><div class="det">${(t.phase2||{}).fixed||0} fixed</div></div>`;
+  h+='</div>';
+  const cat=t.failures_by_category||{};
+  if(Object.keys(cat).length){
+    h+='<div class="sec"><h2>Failure Categories</h2><table><tr><th>Category</th><th>Count</th></tr>';
+    for(const [k,v] of Object.entries(cat).sort((a,b)=>b[1]-a[1])){
+      h+=`<tr><td>${esc(k)}</td><td>${v}</td></tr>`;
+    }
+    h+='</table></div>';
+  }
+  document.getElementById('test-body').innerHTML=h;
+  // also render per-SQL test history in same tab
+  const sqls=(REPORT_DATA.sqls||[]).filter(s=>(s.tests||[]).length>0);
+  if(sqls.length){
+    const tmpId='test-body-sqls';
+    document.getElementById('test-body').insertAdjacentHTML('beforeend','<div id="'+tmpId+'"></div>');
+    renderSqlStage('test', tmpId, 'tests', 'attempt_no');
+  }
+}
+
+function initTabs(){
+  document.querySelectorAll('.tab-btn').forEach(btn=>{
+    btn.onclick=()=>{
+      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+    };
+  });
+}
+
+try{
+  document.getElementById('gen-time').textContent='Generated: '+(REPORT_DATA.generated_at||'-')+' · Target: '+(REPORT_DATA.dbms||'-').toUpperCase();
+  initTabs();
+  renderDashboard();
+  renderAnalyze();
+  renderSqlStage('transform','transform-body','transforms');
+  renderSqlStage('review','review-body','reviews');
+  renderSqlStage('validate','validate-body','validations');
+  renderMerge();
+  renderTest();
+}catch(e){console.error(e);document.body.insertAdjacentHTML('beforeend','<pre style="color:red;padding:20px">'+esc(e.stack||e.message)+'</pre>');}
+</script>
+</body>
+</html>

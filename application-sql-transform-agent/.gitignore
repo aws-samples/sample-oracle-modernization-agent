@@ -23,12 +23,22 @@ venv/
 .kiro/
 .bkit/
 
+# Internal working docs (plan/design/analysis/report/archive/template)
+# Keep only: docs/*.md (top-level), docs/agents/, docs/demo.gif
+docs/01-plan/
+docs/02-design/
+docs/03-analysis/
+docs/04-report/
+docs/archive/
+docs/template/
+
 # Project specific
 output/
 example/output/
 example/.mcp.json
 example/AGENT.md
 example/skills
+example2/
 GITHUB_PUSH_GUIDE.md
 push-github.sh
 src/config/
@@ -36,3 +46,5 @@ src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
 src/reference/lib/backup/
 deliverables/
+dashboard/node_modules/
+dashboard/.next/

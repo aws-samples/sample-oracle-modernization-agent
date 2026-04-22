@@ -82,6 +82,16 @@ def test_and_fix_single_sql(mapper_file: str, sql_id: str) -> dict:
             "SELECT tested FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
             mapper_file, sql_id)
 
+    # Record phase2_fix history (non-fatal)
+    try:
+        from .test_tools import _record_test_history, _extract_sql_state
+        fix_result = 'FIXED' if (row and row[0] == 'Y') else 'FAIL'
+        _record_test_history(mapper_file, sql_id, 'phase2_fix',
+                             result=fix_result, error=error_msg[:500] if error_msg else "",
+                             sql_state=_extract_sql_state(error_msg or ""))
+    except Exception:
+        pass
+
     if row and row[0] == 'Y':
         return {
             'status': 'FIXED',

@@ -16,11 +16,7 @@ source .venv/bin/activate
 # Configure (interactive — creates OUTPUT_DIR/oma_control.db)
 cd src && PYTHONPATH=. python3 run_setup.py
 
-# Run — Kiro CLI (recommended) or Claude Code
-cd src && kiro-cli    # or: claude
-# /oma-setup → /oma-run all → /oma-status
-
-# Run — Orchestrator CLI (legacy)
+# Run — main REPL orchestrator (Strands Agent, 21 tools, natural language)
 cd src && PYTHONPATH=. python3 run_orchestrator.py
 
 # Run example (self-contained demo with 3 mapper XMLs, 42 SQLs)

@@ -3,7 +3,16 @@ import sqlite3
 import time
 from pathlib import Path
 from strands import tool
-from utils.project_paths import PROJECT_ROOT, DB_PATH
+from utils.project_paths import PROJECT_ROOT, DB_PATH, MODEL_ID
+from core import history_writer as _hw
+
+_current_step = "transform"
+
+
+def set_step(step: str):
+    """Runner calls this before Agent creation to set the current pipeline step."""
+    global _current_step
+    _current_step = step
 
 
 def _db_execute_with_retry(func, max_retries=5):
@@ -27,7 +36,7 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
     stem = f"{Path(mapper_file).stem}_{sql_id}"
     existing = list(fix_dir.glob(f"{stem}_v*.log"))
     ver = len(existing) + 1
-    log_path = fix_dir / f"{stem}_v{ver}.log"
+    log_path = fix_dir / f"{stem}_v{ver}_{_current_step}.log"
     old_sql = target_path.read_text(encoding='utf-8')
 
     # Read original Oracle SQL for reference
@@ -46,7 +55,7 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
         pass
 
     content = (
-        f"=== FIX v{ver} | {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
+        f"=== FIX v{ver} [{_current_step}] | {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
         f"Notes: {notes}\n\n"
     )
     if original:
@@ -120,14 +129,40 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
     # Sanitize: remove <> from SQL comments to prevent XML parsing errors
     import re
     def _sanitize_sql_comments(sql: str) -> str:
-        """Remove angle brackets from /* ... */ comments to prevent SAXParseException."""
-        def _clean_comment(m):
-            comment = m.group(0)
-            # Replace < and > inside comment with empty string
-            inner = comment[2:-2]  # strip /* and */
-            inner = inner.replace('<', '[').replace('>', ']')
-            return f"/*{inner}*/"
-        return re.sub(r'/\*.*?\*/', _clean_comment, sql, flags=re.DOTALL)
+        """Remove angle brackets and nested comments from SQL to prevent parse errors.
+
+        Handles nested /* */ by stripping inner delimiters before outer comment closes.
+        e.g., /* [OMA] selectInvnList - /* 재고조회 */ NVL→COALESCE */ → single comment
+        """
+        # First pass: flatten nested comments
+        # Find outermost /* ... */ allowing nested ones
+        result = []
+        i = 0
+        while i < len(sql):
+            if sql[i:i+2] == '/*':
+                depth = 1
+                start = i
+                i += 2
+                while i < len(sql) and depth > 0:
+                    if sql[i:i+2] == '/*':
+                        depth += 1
+                        i += 2
+                    elif sql[i:i+2] == '*/':
+                        depth -= 1
+                        if depth == 0:
+                            i += 2
+                            break
+                        i += 2
+                    else:
+                        i += 1
+                inner = sql[start+2:i-2]
+                inner = inner.replace('/*', '').replace('*/', '')
+                inner = inner.replace('<', '[').replace('>', ']')
+                result.append(f"/*{inner}*/")
+            else:
+                result.append(sql[i])
+                i += 1
+        return ''.join(result)
 
     converted_sql = _sanitize_sql_comments(converted_sql)
 
@@ -150,12 +185,45 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn2:
             conn2.execute("""
                 UPDATE transform_target_list
-                SET transformed = 'Y', updated_at = CURRENT_TIMESTAMP
+                SET transformed = 'Y', current_step = 'review', updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (record_id,))
             conn2.commit()
 
     _db_execute_with_retry(_update_db)
+
+    # Append-only transform history (non-fatal on failure)
+    try:
+        with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
+            n_prior = hist_conn.execute(
+                "SELECT COUNT(*) FROM transform_history WHERE mapper_file=? AND sql_id=?",
+                (mapper_file, sql_id),
+            ).fetchone()[0]
+        attempt_no = int(n_prior or 0) + 1
+    except Exception:
+        attempt_no = 1
+
+    original_sql_body = ""
+    try:
+        if source_path.exists():
+            original_sql_body = source_path.read_text(encoding='utf-8')
+    except Exception:
+        pass
+
+    single_tag_sql = (
+        f'<{sql_type} id="{sql_id}"{tag_attrs}>\n{converted_sql}\n</{sql_type}>'
+    )
+    _hw.record_transform(
+        mapper_file=mapper_file,
+        sql_id=sql_id,
+        attempt_no=attempt_no,
+        original_sql=original_sql_body,
+        transformed_sql=single_tag_sql,
+        transform_log=notes,
+        model_id=MODEL_ID,
+        status='success',
+        mapper_path=_hw.resolve_mapper_path(mapper_file),
+    )
 
     # Emit progress event via thread-safe queue
     from core.progress import emit_progress

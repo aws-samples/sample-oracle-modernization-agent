@@ -11,14 +11,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
-from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, OUTPUT_DIR, MODEL_ID, get_rules_path, get_target_db_display_name, load_prompt_text
+from utils.project_paths import DB_PATH, LOGS_DIR, OUTPUT_DIR, MODEL_ID, get_rules_path, get_target_db_display_name, load_prompt_text
 from core.progress import drain_progress
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_schema
 
 from agents.sql_transform.tools.load_mapper_list import load_mapper_list, get_pending_transforms, read_sql_source
 from agents.sql_transform.tools.split_mapper import split_mapper
 from agents.sql_transform.tools.convert_sql import convert_sql
-from agents.sql_transform.tools.save_conversion import save_conversion_report
 from agents.sql_transform.tools.metadata import generate_metadata, lookup_column_type
+from core import history_writer as _hw
+from core.html_report import generate_html_report
 
 _prompt_cache = None
 _model_profiles = [MODEL_ID]
@@ -118,6 +121,8 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
             log(f"   SQL IDs: {ids_str}")
 
             # Run agent (callback_handler=None suppresses streaming output)
+            # Arm the transform lap timer so convert_sql.record_transform() gets per-SQL duration_ms.
+            _hw.start_timer("transform")
             try:
                 agent = create_agent()
                 agent(
@@ -130,6 +135,7 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
                     log(f"⚠️  Context overflow in group {g_num}, processing individually...")
                     for s in group:
                         try:
+                            _hw.start_timer("transform")
                             single_agent = create_agent()
                             single_agent(
                                 f"{mapper_file}의 {s['sql_id']}를 {get_target_db_display_name()}로 변환해줘.\n"
@@ -156,6 +162,10 @@ def run(max_workers=8, sample=0):
     label = f" [cyan](sample={sample})[/cyan]" if sample > 0 else ""
     console_err.print(f"[bold]SQL Transform Agent[/bold]{label}")
 
+    logger = PipelineLogger(step='transform')
+    start_time = time.time()
+    ensure_schema()
+
     # 1. 전처리 (extract 파일이 없으면 실행)
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
@@ -174,8 +184,8 @@ def run(max_workers=8, sample=0):
                 conn.commit()
                 print(f"🔧 Fixed {null_count} rows with NULL status flags", flush=True)
 
-    # Check if extract files exist
-    extract_exists = (PROJECT_ROOT / "output" / "extract").exists()
+    # Check if extract files exist (under OMA_OUTPUT_DIR — not hardcoded project root)
+    extract_exists = (OUTPUT_DIR / "extract").exists()
 
     if not table_exists or not extract_exists:
         print("📂 전처리: Extract + Metadata (1회)...", flush=True)
@@ -189,7 +199,7 @@ def run(max_workers=8, sample=0):
     pending = get_pending_transforms(sample=sample)
     if pending['total'] == 0:
         print("✅ 모든 SQL이 이미 변환 완료!", flush=True)
-        save_conversion_report()
+        generate_html_report()
         return
 
     mapper_list = list(pending['pending'].items())
@@ -213,9 +223,18 @@ def run(max_workers=8, sample=0):
             for future in as_completed(futures):
                 results.append(future.result())
 
-    # 4. Generate report
-    print(f"\n📊 Generating report...", flush=True)
-    save_conversion_report()
+    # 4. Log SQL-level results from DB
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        for mapper_file, sql_ids in mapper_list:
+            for s in sql_ids:
+                cursor.execute(
+                    "SELECT transformed FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                    (mapper_file, s['sql_id'])
+                )
+                row = cursor.fetchone()
+                status = 'success' if row and row[0] == 'Y' else 'fail'
+                logger.log_sql_result(mapper_file, s['sql_id'], status)
 
     # 최종 완료 판단: DB 기준
     with sqlite3.connect(str(DB_PATH)) as conn:
@@ -226,6 +245,11 @@ def run(max_workers=8, sample=0):
         done = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE transformed='N'")
         remaining = cursor.fetchone()[0]
+
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.log_summary(total=total, pass_=done, fail=remaining, duration_ms=duration_ms)
+    logger.generate_summary_md()
+    generate_html_report()
 
     from core.display import print_step_result
 
@@ -242,6 +266,7 @@ def run(max_workers=8, sample=0):
             rows.append(("Failed", f"[red]{r['mapper']}: {r.get('error', 'unknown')}[/red]"))
 
     rows.append(("Logs", str(_log_dir)))
+    rows.append(("JSON Log", str(logger.log_path)))
     print_step_result("Transform Result", rows)
 
 

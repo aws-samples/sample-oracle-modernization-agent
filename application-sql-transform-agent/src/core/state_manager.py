@@ -63,7 +63,8 @@ class StateManager:
                     # Static DDL — no user input, table/column names are hardcoded above
                     import sqlite3
                     with sqlite3.connect(str(self.db_path), timeout=10) as conn:
-                        conn.execute(  # nosemgrep: no-user-input-in-sql
+                        # nosemgrep: sqlalchemy-execute-raw-query
+                        conn.execute(
                             f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
                         )
                         conn.commit()

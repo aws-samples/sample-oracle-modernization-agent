@@ -190,84 +190,51 @@ export AWS_DEFAULT_REGION="us-east-1"
 python3 src/run_setup.py
 ```
 
-### Step 2 — Run Pipeline (Automated)
+### Step 2 — Run Pipeline
 
-Control the entire pipeline with conversational Orchestrator:
+Launch the built-in orchestrator REPL. It loads a Strands Agent with 21 tools and
+drives the whole pipeline from natural-language prompts. See `src/AGENT.md` for the
+full tool list and workflow rules.
 
 ```bash
-python3 src/run_orchestrator.py
+cd src && PYTHONPATH=. python3 run_orchestrator.py
+# ⚛️  > 파이프라인 현황 알려줘
+# ⚛️  > transform 샘플 3개 실행
+# ⚛️  > test fail 분류하고 보고서 만들어
+# ⚛️  > quit     # or exit / q
 ```
 
-```
-⚛️  > Run the entire pipeline
+Want a visual report alongside the REPL? Each pipeline stage regenerates
+`output/reports/oma_report.html` — a self-contained single-file report with
+7 tabs (Dashboard/Analyze/Transform/Review/Validate/Merge/Test). Open it in
+any browser — no server required.
 
-🤖 > Checking setup...
-     ✅ Java path: /usr/lib/jvm/java-11
-     ✅ Target DB connection: OK
-     
-     Step 1: Starting source analysis...
-     ✅ Scanned 11 Mappers
-     ✅ Extracted 127 SQL IDs
-     ✅ Generated conversion strategy
-     
-     Step 2: Starting SQL transformation (8 parallel workers)...
-     [  5%] [UserMapper] selectUserList - 🔄 Converting
-     [ 12%] [UserMapper] selectUserList - ✅ Done
-     ...
-     ✅ Converted 127 SQLs
-     
-     Step 3: Rule compliance review...
-     ✅ 125 PASS, 2 re-converted → PASS
-     
-     Step 4: Functional equivalence validation...
-     ✅ 127 validated
-     
-     Step 5: DB execution test...
-     ✅ 120 PASS, 7 auto-fixed → PASS
-     
-     Step 6: XML reassembly...
-     ✅ Final Mapper XML generated
-     
-     🎉 Pipeline completed!
+```bash
+# macOS
+open output/reports/oma_report.html
+
+# Linux
+xdg-open output/reports/oma_report.html
 ```
 
-<details>
-<summary><b>한글 대화 예시 보기</b></summary>
+Or run each stage directly — see [Pipeline Architecture](#pipeline-architecture) below.
 
+#### Control DB Location
+
+The orchestrator and every `run_*.py` runner read the same SQLite file
+(`oma_control.db`), resolved from env vars:
+
+| Env Var | Purpose | Default |
+|---------|---------|---------|
+| `OMA_OUTPUT_DIR` | Working directory (DB + all output) | `<repo-root>/output/` |
+
+`DB_PATH = $OMA_OUTPUT_DIR/oma_control.db`
+(see `src/utils/project_paths.py:21-22`). To run against the `example/` DB:
+
+```bash
+export OMA_OUTPUT_DIR=/path/to/repo/example/output
+cd src && PYTHONPATH=. python3 run_orchestrator.py
 ```
-⚛️  > 전체 파이프라인 실행해줘
-
-� > Setup 확인 중...
-     ✅ Java 경로: /usr/lib/jvm/java-11
-     ✅ 타겟 DB 접속: 정상
-     
-     Step 1: 소스 분석 시작...
-     ✅ 11개 Mapper 스캔 완료
-     ✅ 127개 SQL ID 추출
-     ✅ 변환 전략 생성 완료
-     
-     Step 2: SQL 변환 시작 (병렬 8개)...
-     [  5%] [UserMapper] selectUserList - 🔄 변환중
-     [ 12%] [UserMapper] selectUserList - ✅ 완료
-     ...
-     ✅ 127개 SQL 변환 완료
-     
-     Step 3: 규칙 준수 리뷰...
-     ✅ 125개 PASS, 2개 재변환 → PASS
-     
-     Step 4: 기능 동등성 검증...
-     ✅ 127개 검증 완료
-     
-     Step 5: DB 실행 테스트...
-     ✅ 120개 PASS, 7개 자동 수정 → PASS
-     
-     Step 6: XML 재조립...
-     ✅ 최종 Mapper XML 생성 완료
-     
-     🎉 전체 파이프라인 완료!
-```
-
-</details>
 
 ### Step 3 — Generated Assets
 
@@ -355,6 +322,47 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md#파이프라인-워크�
 | **Merge** | - | XML 재조립 | 최종 Mapper |
 
 </details>
+
+## Data Model
+
+All pipeline state is persisted in a single SQLite file (`oma_control.db`).
+Tables split into **3 semantic categories**, all joinable by `(mapper_file, sql_id)`:
+
+| Category | Tables | Write Semantics |
+|---|---|---|
+| **State** (current) | `transform_target_list` | UPDATE — one row per SQL, flags + `current_step` |
+| **Master Record** (latest) | `extract_record`, `source_xml_list`, `target_metadata`, `properties` | UPSERT — one row per key (e.g. `UNIQUE(mapper_file, sql_id)`) |
+| **History Log** (audit) | `transform_history`, `review_history`, `validation_history`, `test_history` | INSERT-only — every attempt/round preserved |
+
+### Information Flow — 3 Lanes
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  IN  (원본)  │ ──→ │  WORK (상태) │ ──→ │ OUT (결과물) │
+└──────────────┘     └──────────────┘     └──────────────┘
+ source_xml_list      transform_target     파일:
+ extract_record       _list (State)         output/merge/
+ target_metadata      + 4 history tables    output/reports/
+                                             oma_report.html
+```
+
+Each pipeline stage follows a **read → process → write** shape:
+
+- **Analyze** — reads disk XML + DB metadata → writes state row + master extract + file list
+- **Transform** — reads `extract_record` + strategy → writes `transform_history` (append) + state flag
+- **Review** — reads latest `transformed_sql` → writes `review_history` (append, round_no++) + state flag; FAIL loops back to Transform (≤3 rounds)
+- **Validate** — reads latest `reviewed_sql` → writes `validation_history` (append) + state flag
+- **Merge** — reads state + snippets → writes `output/merge/*.xml` on disk (**no DB write**)
+- **Test** — reads merged XML → writes `test_history` (append, phase + attempt_no) + state `test_result`
+
+Key invariants:
+
+1. **Append-only audit** — every retry/round is preserved → full debuggability + metrics
+2. **One state, one master** — HTML report and Orchestrator tools read `transform_target_list` for a fast snapshot; `extract_record` holds the one current original SQL per key (UPSERT)
+3. **Universal join** — `(mapper_file, sql_id)` works across all 9 pipeline tables
+4. **Best-effort write** — history inserts are try/except wrapped; a logging failure never breaks the pipeline
+
+See [Database Schema Documentation](docs/db-schema.md) for the full ASCII relationship diagram, per-stage data contracts, and read-path (HTML report / Orchestrator) details.
 
 ## Key Features
 

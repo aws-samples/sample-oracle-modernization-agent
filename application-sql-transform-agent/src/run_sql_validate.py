@@ -10,9 +10,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR
 from core.progress import drain_progress
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_schema
+from agents.sql_transform.tools.convert_sql import set_step
 
 from agents.sql_validate.agent import create_sql_validate_agent
 from agents.sql_validate.tools.validate_tools import get_pending_validations
+from core import history_writer as _hw
 
 _log_dir = LOGS_DIR / "validate"
 
@@ -66,6 +70,11 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
             log(f"📦 Group {g_num}/{len(groups)}: {len(group)} SQLs")
             log(f"   SQL IDs: {ids_str}")
 
+            # Arm the validate lap timer so set_validated.record_validate() gets per-SQL duration_ms.
+            # Also arm the transform timer because the validate agent may call convert_sql for fixes.
+            _hw.start_timer("validate")
+            _hw.start_timer("transform")
+
             # Run agent (callback_handler=None suppresses streaming output)
             agent = create_agent()
             agent(
@@ -100,6 +109,11 @@ def run(max_workers=8):
     from core.display import console_err
     console_err.print("[bold]SQL Validate Agent[/bold]")
 
+    logger = PipelineLogger(step='validate')
+    start_time = time.time()
+    set_step("validate")
+    ensure_schema()
+
     pending = get_pending_validations()
     if pending['total'] == 0:
         print("✅ 모든 SQL이 이미 검증 완료!", flush=True)
@@ -123,9 +137,22 @@ def run(max_workers=8):
             for future in as_completed(futures):
                 results.append(future.result())
 
-    # 결과
+    # 결과 — SQL-level logging from DB
     with sqlite3.connect(str(DB_PATH)) as conn:
         cursor = conn.cursor()
+        for mapper_file, sql_ids in mapper_list:
+            for s in sql_ids:
+                cursor.execute(
+                    "SELECT validated, validation_result FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                    (mapper_file, s['sql_id'])
+                )
+                row = cursor.fetchone()
+                if row and row[0] == 'Y':
+                    status = 'success' if row[1] == 'PASS' else 'fail'
+                else:
+                    status = 'skip'
+                logger.log_sql_result(mapper_file, s['sql_id'], status)
+
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND validation_result='PASS'")
         passed = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE validated='Y' AND validation_result IS NOT NULL AND validation_result != 'PASS'")
@@ -134,6 +161,12 @@ def run(max_workers=8):
         skipped = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE reviewed='Y'")
         total = cursor.fetchone()[0]
+
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.log_summary(total=total, pass_=passed, fail=val_failed, skip=skipped, duration_ms=duration_ms)
+    logger.generate_summary_md()
+    from core.html_report import generate_html_report
+    generate_html_report()
 
     from core.display import print_step_result
 
@@ -166,6 +199,7 @@ def run(max_workers=8):
             _suggest_compaction()
 
     rows.append(("Logs", str(_log_dir)))
+    rows.append(("JSON Log", str(logger.log_path)))
     print_step_result("Validate Result", rows)
 
 

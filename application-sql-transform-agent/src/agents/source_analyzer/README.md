@@ -10,8 +10,7 @@ Java 애플리케이션 소스 코드를 분석하여 Oracle 마이그레이션 
 - SQL 복잡도 자동 평가 (4단계 분류)
 - Oracle 패턴 탐지 (28개 패턴)
 - 프레임워크 및 기술 스택 식별
-- 상세 분석 보고서 자동 생성
-- 분석 결과 데이터베이스 저장
+- 분석 결과 데이터베이스 저장 (HTML 보고서는 파이프라인이 자동 생성: `output/reports/oma_report.html`)
 - **프로젝트별 변환 전략 생성** (Top 10 복잡 SQL 분석 → 전략 파일)
 
 ## 아키텍처
@@ -33,7 +32,8 @@ Java 애플리케이션 소스 코드를 분석하여 Oracle 마이그레이션 
 │  - framework_analyzer               │
 │  - sql_extractor                    │
 │  - db_manager                       │
-│  - report_generator                 │
+│  - pattern_analyzer (DB 기반)        │
+│  - strategy_generator               │
 └─────────────────────────────────────┘
 ```
 
@@ -48,7 +48,8 @@ src/agents/source_analyzer/
     ├── framework_analyzer.py   # 프레임워크 분석
     ├── sql_extractor.py        # SQL 복잡도 분석
     ├── db_manager.py           # DB 조회/저장
-    └── report_generator.py     # 마크다운 보고서 생성
+    ├── pattern_analyzer.py     # SQL 패턴 분석 (DB 기반)
+    └── strategy_generator.py   # 프로젝트 특화 전략 생성
 ```
 
 ## 주요 기능
@@ -79,8 +80,8 @@ src/agents/source_analyzer/
 - 프레임워크 패턴 탐지 (Spring MVC, JPA, Servlet 등)
 
 ### 4. 보고서 생성
-- 마크다운 형식의 상세 보고서
-- 섹션별 구조화 (Executive Summary, Framework, SQL 복잡도 등)
+- **HTML 보고서** (`output/reports/oma_report.html`): 파이프라인 단계 종료 시 자동 재생성 — 7개 탭 (Dashboard/Analyze/Transform/Review/Validate/Merge/Test)
+- 섹션별 구조화 (KPI, Framework, SQL 복잡도 분포 등)
 - 테이블 및 통계 시각화
 - 고복잡도 쿼리 Top 10 리스트
 
@@ -179,7 +180,7 @@ oma/
   * Complex: 18 (20.93%)
   * Very Complex: 8 (9.30%)
 
-📄 보고서: /path/to/reports/source_analysis.md
+📄 HTML 보고서: output/reports/oma_report.html (자동 생성)
 
 주요 발견사항:
 1. Spring Framework 기반의 애플리케이션으로, MyBatis ORM을 사용중입니다.
@@ -187,13 +188,12 @@ oma/
 3. PaymentMapper.xml의 'selectPaymentMethodPerformanceAnalysis' 쿼리가 가장 복잡한 것으로 분석되었습니다 (복잡도 점수: 65).
 ```
 
-### 2. 마크다운 보고서
+### 2. HTML 보고서
 
-`./reports/source_analysis.md` 파일 생성:
-- Executive Summary
-- Framework Analysis
-- MyBatis Mapper Analysis
-- SQL Complexity Analysis (통계, 분포, Top 10)
+`output/reports/oma_report.html` — 파이프라인 단계 종료 시 자동 재생성 (브라우저로 열기):
+- **Dashboard** 탭: KPI 카드, 단계별 진행률
+- **Analyze** 탭: Framework, Mapper, SQL 복잡도 분포
+- **Transform/Review/Validate/Merge/Test** 탭: 단계별 상세
 
 ### 3. 데이터베이스
 
@@ -226,10 +226,6 @@ CREATE TABLE source_xml_list (
 ### analyze_sql_complexity(mapper_files)
 - SQL 복잡도 계산 및 통계 생성
 - 반환: `{'average': float, 'max': int, 'distribution': dict, 'details': list}`
-
-### generate_markdown_report(analysis_data, output_filename)
-- 마크다운 보고서 생성
-- 반환: 보고서 파일 경로 (str)
 
 ### save_xml_list(xml_files)
 - XML 파일 목록을 DB에 저장
@@ -306,4 +302,4 @@ MIT
 ## 참고
 
 - [Strands Agents Documentation](https://strandsagents.com)
-- [기존 프로그램 참조](/Users/changik/workspace/oma-origin/bin/application/)
+- [기존 프로그램 참조](/path/to/original/bin/application/)

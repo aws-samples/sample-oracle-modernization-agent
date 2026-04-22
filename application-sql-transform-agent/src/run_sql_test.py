@@ -10,11 +10,37 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.project_paths import PROJECT_ROOT, DB_PATH, LOGS_DIR, TRANSFORM_DIR, TEST_DIR, OUTPUT_DIR, get_target_dbms, get_target_db_display_name
 from core.progress import drain_progress
+from core.pipeline_logger import PipelineLogger
+from core.db_migrate import ensure_schema
 
-from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested
+from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested, set_logger
+from agents.sql_transform.tools.convert_sql import set_step
 from agents.sql_test.agent import create_sql_test_agent
+from core import history_writer as _hw
+from core.html_report import generate_html_report
 
 _log_dir = LOGS_DIR / "test"
+
+
+def _classify_error(error_msg: str) -> str:
+    """Classify error message into a FAIL category."""
+    if not error_msg:
+        return 'unknown'
+    e = error_msg.lower()
+
+    if any(p in e for p in ['invalid input syntax', 'operator does not exist',
+                             'type mismatch', 'cannot cast']):
+        return 'parameter'
+    if any(p in e for p in ['syntax error', 'unexpected token', 'near "',
+                             'missing keyword']):
+        return 'sql_syntax'
+    if any(p in e for p in ['relation "', 'does not exist', 'column "',
+                             'table "', 'unknown column']):
+        return 'schema'
+    if any(p in e for p in ['classnotfound', 'connection refused', 'timeout',
+                             'could not connect', 'java.lang.']):
+        return 'infra'
+    return 'other'
 
 
 def create_agent():
@@ -91,6 +117,11 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             for f in sql_errors
         )
 
+        # Arm the test lap timer so test_tools.run_single_test.record_test() gets per-SQL execution_time_ms.
+        # Also arm transform timer because Phase 2 fix loop calls convert_sql.
+        _hw.start_timer("test")
+        _hw.start_timer("transform")
+
         # Run agent (callback_handler=None suppresses streaming output)
         agent = create_agent()
         agent(
@@ -131,6 +162,13 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
 def run(max_workers=8, auto_fix=False):
     from core.display import console_err
     console_err.print("[bold]SQL Test Agent[/bold]")
+
+    ensure_schema()
+    set_step("test")
+
+    logger = PipelineLogger(step='test')
+    set_logger(logger)
+    start_time = time.time()
 
     TRANSFORM_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -234,6 +272,17 @@ def run(max_workers=8, auto_fix=False):
                 log_and_print(f"    ❌ {f['mapper_file']}/{f['sql_id']}: {f['error'][:100]}")
             if explain_result['failed'] > 5:
                 log_and_print(f"    ... and {explain_result['failed'] - 5} more")
+            # Phase 0 JSON logging
+            fail_set = {(f['mapper_file'], f['sql_id']) for f in explain_result.get('failures', [])}
+            for item in dml_items:
+                key = (item['mapper_file'], item['sql_id'])
+                if key in fail_set:
+                    fail_info = next(f for f in explain_result['failures'] if (f['mapper_file'], f['sql_id']) == key)
+                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'fail',
+                                          phase=0, fail_category='sql_syntax',
+                                          error=fail_info.get('error', ''))
+                else:
+                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'success', phase=0)
         elif explain_result.get('status') == 'skipped':
             log_and_print(f"  ⚠️  DML EXPLAIN skipped: {explain_result.get('error', '')}")
     else:
@@ -257,6 +306,15 @@ def run(max_workers=8, auto_fix=False):
     failures = bulk_result.get('failures', [])
     log_and_print(f"  ✅ Passed: {passed}")
     log_and_print(f"  ❌ Failed: {failed}")
+
+    # Phase 1 JSON logging for failures
+    for f in failures:
+        err = f.get('error', '')
+        logger.log_sql_result(
+            f['mapper_file'], f['sql_id'], 'fail',
+            phase=1, fail_category=_classify_error(err),
+            error=err,
+        )
 
     if not failures:
         with sqlite3.connect(str(DB_PATH)) as conn:
@@ -303,9 +361,10 @@ def run(max_workers=8, auto_fix=False):
             rows.append(("Status", "[green]All tests passed[/green]"))
 
         rows.append(("Log", str(test_log_file)))
+        rows.append(("JSON Log", str(logger.log_path)))
         print_step_result("Test Result", rows)
         _print_sql_type_distribution()
-        _generate_test_result_report()
+        _finalize_logger(logger, start_time)
         return
 
     # Phase 2: Agent fixes failures (opt-in only)
@@ -344,9 +403,10 @@ def run(max_workers=8, auto_fix=False):
                 rows.append(("Failure Report", str(report_path)))
         rows.append(("Logs", str(_log_dir)))
         rows.append(("Execution log", str(test_log_file)))
+        rows.append(("JSON Log", str(logger.log_path)))
         print_step_result("Test Result", rows)
         _print_sql_type_distribution()
-        _generate_test_result_report()
+        _finalize_logger(logger, start_time)
         return
 
     log_and_print(f"\nPhase 2: {len(failures)}건 실패 SQL 수정 (Agent)...\n")
@@ -420,11 +480,30 @@ def run(max_workers=8, auto_fix=False):
 
     rows.append(("Logs", str(_log_dir)))
     rows.append(("Execution log", str(test_log_file)))
+    rows.append(("JSON Log", str(logger.log_path)))
     print_step_result("Test Result", rows)
 
     # Show SQL type distribution table
     _print_sql_type_distribution()
-    _generate_test_result_report()  # Combined Failed + Skip report
+    _finalize_logger(logger, start_time)
+
+
+def _finalize_logger(logger, start_time):
+    """Write run summary and generate summary.md."""
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
+        p = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')")
+        f = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE test_result='SKIP'")
+        s = cursor.fetchone()[0]
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.log_summary(total=p + f + s, pass_=p, fail=f, skip=s, duration_ms=duration_ms)
+    summary_path = logger.generate_summary_md()
+    generate_html_report()
+    print(f"📊 JSON Log: {logger.log_path}", flush=True)
+    print(f"📊 Summary: {summary_path}", flush=True)
 
 
 def _print_sql_type_distribution():
@@ -522,213 +601,6 @@ def _pre_mark_skips(log_fn=print) -> int:
         log_fn(f"\n⏭️  Pre-skip: {total_marked}개 (non-testable types)")
 
     return total_marked
-
-
-def _generate_test_result_report():
-    """Generate combined test result report (Pass/Fail/Skip summary + details)."""
-    from datetime import datetime
-
-    with sqlite3.connect(str(DB_PATH)) as conn:
-        cursor = conn.cursor()
-
-        # Counts
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='PASS'")
-        passed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='FIXED'")
-        fixed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result='SKIP'")
-        skipped = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')")
-        failed = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list")
-        total = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM transform_target_list WHERE tested='N' AND LOWER(sql_type) IN ('select','insert','update','delete')")
-        untested = cursor.fetchone()[0]
-
-        # Failed details
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, test_result, test_notes
-            FROM transform_target_list
-            WHERE tested='Y' AND test_result NOT IN ('PASS','FIXED','SKIP')
-            ORDER BY mapper_file, seq_no
-        """)
-        fail_rows = cursor.fetchall()
-
-        # Skip details
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, test_notes
-            FROM transform_target_list
-            WHERE test_result = 'SKIP'
-            ORDER BY mapper_file, seq_no
-        """)
-        skip_rows = cursor.fetchall()
-
-    tested_total = passed + fixed + skipped + failed
-    pass_rate = ((passed + fixed) * 100 // tested_total) if tested_total else 0
-
-    def _pct(n):
-        return f"{n * 100 // total:.0f}%" if total else "0%"
-
-    lines = [
-        "# Test 종합 보고서",
-        f"\n**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"\n## Summary\n",
-        f"| 항목 | 건수 | 비율 |",
-        f"|------|:----:|:----:|",
-        f"| ✅ Pass | {passed} | {_pct(passed)} |",
-    ]
-    if fixed > 0:
-        lines.append(f"| ✅ Fixed | {fixed} | {_pct(fixed)} |")
-    lines.extend([
-        f"| ❌ Fail | {failed} | {_pct(failed)} |",
-        f"| ⏭️ Skip | {skipped} | {_pct(skipped)} |",
-    ])
-    if untested > 0:
-        lines.append(f"| ⏳ Not Tested | {untested} | {_pct(untested)} |")
-    lines.append(f"| **Total** | **{total}** | **Pass Rate: {pass_rate}%** |")
-
-    # Failed 분류
-    if fail_rows:
-        fail_categories = {}
-        for mapper, sql_id, sql_type, result, notes in fail_rows:
-            error = (notes or result or '').lower()
-            if 'does not exist' in error and 'function' in error:
-                cat = 'Missing Function'
-            elif 'does not exist' in error and ('relation' in error or 'table' in error):
-                cat = 'Missing Table'
-            elif 'does not exist' in error and 'column' in error:
-                cat = 'Missing Column'
-            elif 'syntax error' in error:
-                cat = 'Syntax Error'
-            elif 'type' in error and ('mismatch' in error or 'cast' in error or 'operator' in error):
-                cat = 'Type Mismatch'
-            elif 'saxparse' in error or 'xml' in error:
-                cat = 'XML Parse Error'
-            else:
-                cat = 'Other'
-            if cat not in fail_categories:
-                fail_categories[cat] = []
-            fail_categories[cat].append((mapper, sql_id, notes or result or ''))
-
-        lines.append(f"\n## ❌ Failed ({failed}건)\n")
-        for cat, items in sorted(fail_categories.items(), key=lambda x: -len(x[1])):
-            lines.append(f"### {cat} ({len(items)}건)\n")
-            lines.append("| XML | SQL ID | 오류 |")
-            lines.append("|-----|--------|------|")
-            for mapper, sql_id, error in items:
-                lines.append(f"| {mapper} | {sql_id} | {error[:80]} |")
-            lines.append("")
-
-    # Skip 분류
-    if skip_rows:
-        skip_categories = {}
-        for mapper, sql_id, sql_type, notes in skip_rows:
-            reason = notes or 'Unknown'
-            # Group by first part of reason
-            group = reason.split(' — ')[0] if ' — ' in reason else reason.split(':')[0] if ':' in reason else reason[:30]
-            if group not in skip_categories:
-                skip_categories[group] = []
-            skip_categories[group].append((mapper, sql_id, sql_type, reason))
-
-        lines.append(f"\n## ⏭️ Skip ({skipped}건)\n")
-        for group, items in sorted(skip_categories.items(), key=lambda x: -len(x[1])):
-            lines.append(f"### {group} ({len(items)}건)\n")
-            lines.append("| XML | SQL ID | Type | 사유 |")
-            lines.append("|-----|--------|------|------|")
-            for mapper, sql_id, sql_type, reason in items:
-                lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason[:80]} |")
-            lines.append("")
-
-    REPORTS_DIR = OUTPUT_DIR / "reports"
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = REPORTS_DIR / "test_result_report.md"
-    report_path.write_text('\n'.join(lines), encoding='utf-8')
-    print(f"📊 종합 보고서: {report_path}", flush=True)
-
-    # Generate skip_list.csv
-    if skip_rows:
-        import csv
-        csv_path = REPORTS_DIR / "skip_list.csv"
-        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-            w = csv.writer(f)
-            w.writerow(['No', 'XML', 'SQL ID', '사유'])
-            for i, (mapper, sql_id, sql_type, notes) in enumerate(skip_rows, 1):
-                w.writerow([i, mapper, sql_id, (notes or '').replace('\n', ' ')])
-        print(f"📋 Skip List: {csv_path} ({len(skip_rows)}건)", flush=True)
-
-    # Also generate individual reports for backward compatibility
-    _generate_test_failure_report()
-    _generate_test_skip_report()
-
-
-def _generate_test_skip_report():
-    """Generate test skip report from test_notes column."""
-    from datetime import datetime
-
-    with sqlite3.connect(str(DB_PATH)) as conn:
-        cursor = conn.cursor()
-
-        # All SKIP items with notes
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type, test_notes
-            FROM transform_target_list
-            WHERE test_result = 'SKIP'
-            ORDER BY mapper_file, seq_no
-        """)
-        skipped = cursor.fetchall()
-
-        # Untested (validated but not tested, testable types)
-        cursor.execute("""
-            SELECT mapper_file, sql_id, sql_type
-            FROM transform_target_list
-            WHERE validated = 'Y' AND tested = 'N'
-              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
-            ORDER BY mapper_file, seq_no
-        """)
-        untested = cursor.fetchall()
-
-    total = len(skipped) + len(untested)
-    if total == 0:
-        return
-
-    # Group by reason
-    by_reason = {}
-    for mapper, sql_id, sql_type, notes in skipped:
-        reason = notes or 'Unknown'
-        # Simplify reason for grouping (first sentence)
-        group_key = reason.split(' — ')[0] if ' — ' in reason else reason.split(':')[0] if ':' in reason else reason
-        if group_key not in by_reason:
-            by_reason[group_key] = []
-        by_reason[group_key].append((mapper, sql_id, sql_type, reason))
-
-    lines = [
-        "# Test Skip Report",
-        f"\n**Updated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"**Total Skipped**: {total}",
-    ]
-
-    # Skip items grouped by reason
-    for group_key, items in sorted(by_reason.items(), key=lambda x: -len(x[1])):
-        lines.append(f"\n## {group_key} ({len(items)}건)\n")
-        lines.append("| XML | SQL ID | Type | 상세 사유 |")
-        lines.append("|-----|--------|------|-----------|")
-        for mapper, sql_id, sql_type, reason in items:
-            lines.append(f"| {mapper} | {sql_id} | {sql_type} | {reason} |")
-
-    # Untested
-    if untested:
-        lines.append(f"\n## Not Tested ({len(untested)}건)\n")
-        lines.append("Validate 통과했지만 테스트 미수행.\n")
-        lines.append("| XML | SQL ID | Type |")
-        lines.append("|-----|--------|------|")
-        for mapper, sql_id, sql_type in untested:
-            lines.append(f"| {mapper} | {sql_id} | {sql_type} |")
-
-    REPORTS_DIR = OUTPUT_DIR / "reports"
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = REPORTS_DIR / "test_skip_report.md"
-    report_path.write_text('\n'.join(lines), encoding='utf-8')
-    print(f"📋 Skip Report: {report_path} ({total} skipped)", flush=True)
 
 
 def _generate_test_failure_report():

@@ -29,7 +29,6 @@ sql_transform/
     ├── split_mapper.py        # XML parsing and SQL extraction
     ├── convert_sql.py         # SQL conversion and storage
     ├── assemble_mapper.py     # Final XML assembly
-    ├── save_conversion.py     # Reporting and status
     └── metadata.py            # PostgreSQL metadata extraction
 ```
 
@@ -76,9 +75,6 @@ Extracts PostgreSQL column metadata via psql and stores in `oma_control.db` (`pg
 - **Environment:** Uses `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
 - **Behavior:** Non-fatal - continues without metadata if connection fails
 - **Returns:** `{status, row_count}` or `{status: 'skipped', error: '...'}`
-
-#### `save_conversion()`
-Generates final conversion report from database status.
 
 ## 4-Phase Conversion Rules Summary
 

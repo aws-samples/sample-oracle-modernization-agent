@@ -17,13 +17,15 @@ The Orchestrator Agent serves as the central control point for the OMA pipeline,
 orchestrator/
 ├── README.md                    # This documentation
 ├── __init__.py                  # Package initialization
-├── agent.py                     # Main agent implementation
-├── prompt.md                    # Agent system prompt
 ├── schemas.py                   # TypedDict schemas (9 schemas)
 └── tools/
     ├── __init__.py              # Tools package initialization
-    └── orchestrator_tools.py    # 14 tools (uses StateManager)
+    └── orchestrator_tools.py    # 21 tools (uses StateManager)
 ```
+
+> Phase 3-4 이후 `agent.py` / `prompt.md`는 제거되었다. 오케스트레이션은
+> 본 프로젝트 `src/AGENT.md`를 읽는 외부 CLI(Claude Code / Kiro CLI)가
+> 직접 수행하고, 이 디렉터리는 **Tool 집합만 제공**한다.
 
 ## Tools
 
@@ -178,59 +180,30 @@ The agent automatically checks pipeline status on startup and provides contextua
 "Generate full summary"
 ```
 
-## Run Command
+## How to Use
 
-Start the Orchestrator Agent with:
+파이프라인 제어는 `run_orchestrator.py`가 부트하는 Strands Agent(21 tools)가
+수행한다. `agent.py` / `prompt.md`는 이 에이전트를 구성하고, `tools/orchestrator_tools.py`
+의 `@tool` 함수가 실제 파이프라인 동작을 노출한다.
 
+**메인 REPL (recommended)**:
 ```bash
-python3 src/run_orchestrator.py
+cd src && PYTHONPATH=. python3 run_orchestrator.py
+# ⚛️  > 파이프라인 현황 알려줘
+# ⚛️  > transform 샘플 3개 실행
+# ⚛️  > quit
 ```
 
-### Interactive Session Example
-```
-──────────────────────── OMA Orchestrator ────────────────────────
-              Oracle → PostgreSQL Migration Pipeline
-
-  Category    Command
-  Pipeline    변환 수행 · 리뷰 수행 · 전체 수행 · 테스트 재수행
-  Sample      샘플 변환 5개 · 샘플 변환 10개
-  Compare     UserMapper selectUserList 비교
-  Status      진행 단계 확인 · 상태확인
-  Exit        quit · exit · q
-
-⚛️  >  샘플 변환 5개
-
-───────────── Running: transform ─────────────
-SQL Transform Agent (sample=5)
-  Pending: 5 SQL IDs / 3 mappers / workers=8
-Transform: UserMapper:updateUser ━━━━━━ 5/5 100.0% 0:00:31
-╭──────── Transform Result ────────╮
-│   Transformed    5/44 SQL IDs    │
-│   Remaining      39 SQL IDs      │
-╰──────────────────────────────────╯
-───────────── transform completed ────────────
-
-⚛️  >  진행 단계 확인
-
-         OMA Pipeline Summary
-┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┓
-┃ Step           ┃ Progress ┃ Status  ┃
-┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━┩
-│ Transform      │     5/44 │ In Prog │
-│ Review         │     0/44 │ Pending │
-│ ...            │          │         │
-└────────────────┴──────────┴─────────┘
-
-⚛️  >  quit
-👋 종료합니다.
+**HTML 보고서 (각 단계 종료 시 자동 재생성)**:
+```bash
+open output/reports/oma_report.html   # macOS
+# xdg-open output/reports/oma_report.html   # Linux
 ```
 
-## Exit Commands
-
-To exit the interactive session, use any of:
-- `quit` / `/quit`
-- `exit`
-- `q` / `/q`
-- `Ctrl+C`
-
-The agent will gracefully terminate and display a farewell message.
+**Direct tool call (Python, 디버그용)**:
+```bash
+cd src && PYTHONPATH=. python3 -c "
+from agents.orchestrator.tools.orchestrator_tools import check_step_status
+import json; print(json.dumps(check_step_status(), default=str, indent=2, ensure_ascii=False))
+"
+```

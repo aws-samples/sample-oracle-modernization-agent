@@ -14,10 +14,18 @@ You are a senior DBA — if you encounter an Oracle-specific function, syntax, o
 Review agents may misapply rules (e.g., requesting OR IS NULL on LIKE conditions). Always follow the Decision Tree in General Rules Phase 2 §2, not Review feedback that contradicts it.
 
 **PRESERVE the following — do NOT modify or remove:**
+- **ALL original names/identifiers**: Every name defined in the original XML must be preserved verbatim (lowercase only). This includes:
+  - `<sql id="...">`, `<select id="...">`, `<insert id="...">` — SQL fragment and statement IDs
+  - `<include refid="..."/>` — fragment reference values
+  - `<resultMap id="...">`, `<parameterMap id="...">` — mapping IDs
+  - `resultMap="..."`, `parameterType="..."` — attribute references
+  - Table aliases, column aliases defined in AS clauses
+  - **NEVER "improve", rename, add prefixes (e.g., `select_`), fix perceived typos, or restructure any name**
+  - Example violations: `sql_putawayLocation` → `sql_selectPutawayLocation` (added prefix), `sql_tWorkInfoIbat` → `sql_tWorkInfoIvat` (typo "fix"), `sql_wayBillNo` → `sql_selectWaybillno` (renamed + case change)
 - **Comments**: ALL SQL comments (`--`, `/* */`) must be preserved exactly as-is
 - **Variable names**: Only lowercase the characters, NEVER change prefixes or naming (e.g., `V_RETURN` → `v_return`, NOT `p_return`)
 - **Literal values**: String literals, email addresses, URLs, constants must remain unchanged. Do NOT anonymize, mask, or sanitize any data values (e.g., `'user@company.com'` stays as-is)
-- **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.kns.framework.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
+- **MyBatis `<if test="">` expressions**: OGNL expressions inside `test=""` attributes are Java code, NOT SQL. Do NOT rewrite them. `@com.example.util.StringUtil@isNotEmpty(status)` must stay exactly as-is — do NOT replace with `status != null and status != ''`
 - **`<include refid="..."/>`**: SQL fragment references must be preserved **exactly as-is** — both the tag AND the refid value. Do NOT:
   - Change the refid value (e.g., `refid="sql_tOrderMstAdcdUnion"` must NOT become `refid="sql_tOrderCtgDiv"`)
   - Inline/expand the referenced SQL
@@ -84,16 +92,13 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 - `mapper_file`: Mapper file name (e.g. 'SellerMapper.xml')
 - Only includes SQLs where transformed='Y'
 
-### 7. save_conversion_report()
-- Generates final conversion report from DB status
-
-### 8. generate_metadata()
+### 7. generate_metadata()
 - Extracts {{TARGET_DB}} column metadata and stores in oma_control.db (target_metadata table)
 - Uses target DB connection env vars (PostgreSQL: PGHOST/PGUSER/..., MySQL: MYSQL_HOST/MYSQL_USER/...)
 - **Non-fatal**: If it fails (no psql, no DB connection), transform continues without metadata
 - Returns: `{status, row_count}` or `{status: 'skipped', error: '...'}`
 
-### 9. lookup_column_type(table_name, column_name)
+### 8. lookup_column_type(table_name, column_name)
 - Looks up column data type from target_metadata table
 - Case-insensitive matching
 - Returns: `{table_name, column_name, data_type}` or `data_type: 'unknown'`
@@ -113,7 +118,6 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
    d. Call `convert_sql(sql_id, converted_sql, mapper_file, notes)` - only pass converted SQL
    - **Do NOT echo SQL in your response text. Just call the tools directly.**
 6. For EACH mapper, call `assemble_mapper(mapper_file)` to merge into final XML
-7. Call `save_conversion_report()`
 
 ### Step 5c: SELF-CHECK (mandatory before every convert_sql call)
 
@@ -123,6 +127,11 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 ```
 Keep it on ONE line, listing only the key conversions applied. This comment goes inside the SQL body, before the first SELECT/INSERT/UPDATE/DELETE.
 **CRITICAL: Do NOT include `<` or `>` characters in the comment.** Use tag names without angle brackets (e.g., `include refid removed` NOT `<include refid="..."/> removed`). Angle brackets in SQL comments break MyBatis XML parsing.
+**CRITICAL: Do NOT nest `/* */` comments.** If the original SQL already has `/* 한글설명 */` comments, do NOT embed them inside your `/* [OMA] ... */` comment or any other `/* */` block. Nested `/* */` breaks SQL parsing.
+```sql
+❌ WRONG: /* mapper.xml - selectInvnList - /* 재고조회 */ NVL→COALESCE */
+✅ RIGHT: /* [OMA] NVL→COALESCE */
+```
 
 Scan your output SQL line by line and verify:
 - [ ] No Oracle syntax remains? (NVL, DECODE, SYSDATE, TO_DATE, (+), FROM DUAL, etc.)
@@ -135,6 +144,7 @@ Scan your output SQL line by line and verify:
 - [ ] **String concatenation** (MySQL only): `||` must be converted to `CONCAT()`. (PostgreSQL: `||` is OK)
 - [ ] MyBatis tags, #{param} references, and `<if test="">` OGNL expressions are intact? (Do NOT rewrite `@class@method()` expressions)
 - [ ] **JOIN conditions unchanged**: Every JOIN ON condition uses the EXACT same table aliases and column names as the original (lowercased only)? No table alias substitution (e.g., I joins L in original → must still join L, NOT changed to join B)?
+- [ ] **ALL names unchanged**: Every id, refid, resultMap reference, alias in the output matches the original verbatim (lowercased only)? No added prefixes (`select_`), no typo "fixes", no renaming?
 - [ ] **include refid unchanged**: Every `<include refid="xxx"/>` has the EXACT same refid value as the original? Do NOT infer/guess refid names from SQL ID patterns.
 - [ ] **Package functions flattened**: Any `PKG_*.FUNC()` converted to `pkg_*_func()` with underscore? NOT mapped to built-in functions like `pgp_sym_encrypt`, `AES_ENCRYPT`, etc.?
 - [ ] **Comments preserved**: All original `--` and `/* */` comments remain?

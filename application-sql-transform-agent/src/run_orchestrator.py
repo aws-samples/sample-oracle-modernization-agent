@@ -39,7 +39,7 @@ def _print_banner():
     table.add_row("Single", "[white]selectUserList 재변환[/white]  ·  [white]재검증[/white]  ·  [white]재테스트[/white]")
     table.add_row("Report", "[white]전체 변환 리포트[/white]  ·  실패 목록  ·  통계")
     table.add_row("Strategy", "[white]전략 압축[/white]  ·  전략 보강")
-    table.add_row("Status", "[white]진행 단계 확인[/white]  ·  상태확인")
+    table.add_row("Status", "[white]status[/white]  ·  진행 단계 확인  ·  상태확인")
     table.add_row("Exit", "[dim]quit  ·  exit  ·  q[/dim]")
 
     c.print(table)
@@ -56,8 +56,13 @@ def run():
 
     agent = create_orchestrator_agent()
 
-    # 시작 시 상태 확인
-    agent("현재 파이프라인 상태를 확인해줘.")
+    # 시작 시 상태 확인 (tool이 rich 출력을 직접 표시)
+    agent(
+        "세션이 방금 시작됐어. `check_setup`과 `check_step_status`를 호출해줘. "
+        "두 tool이 이미 rich panel/table로 터미널에 결과를 표시하니 "
+        "**markdown 표나 체크리스트로 재렌더링하지 말고**, "
+        "다음 추천 action 1~2줄만 덧붙여줘. (예: \"Transform 완료. 다음은 Review입니다.\")"
+    )
 
     while True:
         try:

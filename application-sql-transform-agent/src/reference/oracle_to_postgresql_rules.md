@@ -48,25 +48,14 @@ Target PostgreSQL schemas are created with unquoted identifiers (all lowercase).
 #### 6. Stored Procedure / Package Function Conversion
 - `{call PROC()}` → `CALL PROC()`
 - `SCHEMA.PACKAGE.PROC()` → `PACKAGE_PROC()`
-- `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot notation to underscore)
+- `PACKAGE.FUNCTION(args)` → `package_function(args)` (flatten dot → underscore + lowercase)
 
-**Only Oracle standard packages (`DBMS_*`, `UTL_*`) get special handling** (see Phase 4 §7 PL/SQL Constructs).
-**ALL other packages are user-defined** — apply flattening unconditionally, regardless of the name.
-Do NOT interpret package names (e.g., CRYPTO, ENCRYPT, HTTP, MAIL) as functionality hints.
-Examples of user-defined packages:
+**Only `DBMS_*`, `UTL_*` are Oracle standard** (see Phase 4 §7). ALL others are user-defined — flatten unconditionally. Do NOT map to built-in functions (`pgcrypto`, `encrypt()`, etc.).
 ```sql
--- Oracle
-SELECT PKG_CRYPTO.ENCRYPT(col, 'key') FROM users
-WHERE PKG_UTIL.IS_VALID(status) = 'Y'
-
--- PostgreSQL
-SELECT pkg_crypto_encrypt(col, 'key') FROM users
-WHERE pkg_util_is_valid(status) = 'Y'
+-- Oracle → PostgreSQL
+PKG_CRYPTO.ENCRYPT(col, 'key')   →  pkg_crypto_encrypt(col, 'key')
+PKG_UTIL.IS_VALID(status)        →  pkg_util_is_valid(status)
 ```
-- `PKG_CRYPTO.ENCRYPT()` → `pkg_crypto_encrypt()` (dot → underscore + lowercase)
-- This rule applies to ALL package.function calls, not just Oracle standard packages
-- The actual function must exist in the target DB (created separately during migration)
-- **Crypto/encryption packages (PKG_CRYPTO, PKG_ENCRYPT, etc.) are user-defined packages** — apply the same flattening rule. Do NOT replace with target DB built-in crypto functions (e.g., `pgcrypto`, `encrypt()`, `digest()`). Do NOT flag as CRITICAL during review for "encryption equivalence" — the migrated function handles this.
 
 ---
 
@@ -168,30 +157,18 @@ WHERE F.CLOSDATE >= #{sysdate}
 **Rule**: Non-join conditions on outer-joined tables stay in WHERE, not ON. Only the join relationship (`A.key = F.key`) goes into the ON clause.
 
 #### 3. Multi-Column SET with Subquery (Oracle-specific)
-PostgreSQL does NOT support `SET (col1, col2) = (SELECT ...)`. Convert to UPDATE ... FROM pattern:
+`SET (col1, col2) = (SELECT ...)` → UPDATE ... FROM pattern. Move subquery to FROM, assign individually.
 ```sql
 -- Oracle
-UPDATE orders o
-SET (status, updated_at, updated_by) = (
-    SELECT s.new_status, SYSDATE, s.user_id
-    FROM status_changes s WHERE s.order_id = o.order_id
-)
+UPDATE orders o SET (status, updated_at, updated_by) = (
+    SELECT s.new_status, SYSDATE, s.user_id FROM status_changes s WHERE s.order_id = o.order_id)
 WHERE EXISTS (SELECT 1 FROM status_changes s WHERE s.order_id = o.order_id)
 
 -- PostgreSQL
-UPDATE orders o
-SET status = sub.new_status,
-    updated_at = CURRENT_TIMESTAMP,
-    updated_by = sub.user_id
-FROM (
-    SELECT order_id, new_status, user_id
-    FROM status_changes
-) sub
+UPDATE orders o SET status = sub.new_status, updated_at = CURRENT_TIMESTAMP, updated_by = sub.user_id
+FROM (SELECT order_id, new_status, user_id FROM status_changes) sub
 WHERE o.order_id = sub.order_id
 ```
-- Move subquery to `FROM` clause with alias
-- Assign each column individually: `SET col1 = sub.x, col2 = sub.y`
-- Convert the `WHERE EXISTS` or implicit join condition to `WHERE t.key = sub.key`
 
 #### 4. Subquery Alias (Mandatory in PostgreSQL)
 - `FROM (SELECT...)` → `FROM (SELECT...) AS sub1` (only when alias is missing)
@@ -204,22 +181,11 @@ WHERE o.order_id = sub.order_id
 Convert expression-level functions and operators.
 
 #### 1. String Concatenation
-**`||` works in PostgreSQL (SQL standard operator). Converting to `CONCAT()` is optional.**
-
-The only difference: `NULL || 'text'` returns `NULL` in PostgreSQL (Oracle returns `'text'`).
-Use `CONCAT()` only when NULL handling matters.
-
+`||` works in PostgreSQL (SQL standard). Use `CONCAT()` only for NULL safety (`NULL || 'text'` → `NULL`).
 ```sql
--- Both are valid in PostgreSQL:
 col1 || col2                          -- OK as-is
-CONCAT(col1, col2)                    -- also OK
-
--- LIKE pattern — both work:
 LIKE '%' || #{param} || '%'           -- OK as-is
-LIKE CONCAT('%', #{param}, '%')       -- also OK
-
--- Use CONCAT when NVL columns are involved (NULL safety):
-NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
+NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)  -- NULL safety
 ```
 
 #### 2. Basic Functions
@@ -244,20 +210,7 @@ NVL(col1,'') || col2 → CONCAT(COALESCE(col1,''), col2)
 | ROWID | **remove or replace with PK** — ctid changes after VACUUM, unsafe as identifier |
 | MINUS | EXCEPT |
 
-**INSTR with occurrence parameter** (4-arg form):
-```sql
--- Oracle: find 2nd occurrence of '_' starting from position 1
-INSTR('AB_CD_EF', '_', 1, 2)  -- returns 6
-
--- PostgreSQL: use array approach
--- Method 1: split and calculate
-(SELECT SUM(LENGTH(elem) + 1) FROM unnest(string_to_array(LEFT(s, POSITION('_' IN SUBSTRING(s FROM POSITION('_' IN s) + 1)) + POSITION('_' IN s)), '_')) WITH ORDINALITY AS t(elem, ord) WHERE ord <= 2)
-
--- Method 2 (simpler, recommended): use regexp
--- Find position of Nth occurrence of pattern
-(SELECT (m.match).start FROM (SELECT regexp_matches(s, '(_)', 'g') AS match, ROW_NUMBER() OVER() AS rn FROM regexp_matches(s, '_', 'g')) m WHERE m.rn = 2)
-```
-When INSTR is used with occurrence parameter, **flag as complex conversion** and add a note. Simple nested POSITION expressions often produce wrong results.
+**INSTR with occurrence parameter** (4-arg form): `INSTR(s, sub, start, occurrence)` — POSITION does not support occurrence. **Flag as complex conversion** and use regexp approach. Simple nested POSITION often produces wrong results.
 
 **NVL → COALESCE type mismatch:**
 Oracle NVL implicitly casts the second argument to match the first. PostgreSQL COALESCE requires matching types.
@@ -287,46 +240,25 @@ CASE status WHEN 'A' THEN '활성' WHEN 'I' THEN '비활성'
 | FETCH FIRST N ROWS ONLY | LIMIT N |
 | ROWNUM | ROW_NUMBER() OVER() or LIMIT (context-dependent) |
 
-**KEEP (DENSE_RANK FIRST/LAST) — CRITICAL: must preserve "one row per group" semantics:**
-
-Simple case (single value):
+**KEEP (DENSE_RANK FIRST/LAST)** = "one row per group" semantics. LAST=MAX, FIRST=MIN of ORDER BY column.
 ```sql
 -- Oracle
-MAX(col) KEEP (DENSE_RANK FIRST ORDER BY date_col)
+SELECT group_key, MAX(err_code) KEEP (DENSE_RANK LAST ORDER BY detail_key) as last_err
+FROM details GROUP BY group_key
 
--- PostgreSQL: use subquery approach
-(SELECT col FROM table ORDER BY date_col LIMIT 1)
--- Or DISTINCT ON when selecting full rows:
-SELECT DISTINCT ON (group_col) * FROM table ORDER BY group_col, date_col
-```
+-- ❌ WRONG: adding columns to GROUP BY → multiple rows per group
+SELECT group_key, err_code FROM details GROUP BY group_key, err_code
 
-With GROUP BY (aggregate context — most common in real code):
-```sql
--- Oracle: returns exactly ONE row per group_key
-SELECT group_key,
-       MAX(err_code) KEEP (DENSE_RANK LAST ORDER BY detail_key) as last_err
-FROM details
-GROUP BY group_key
+-- ✅ RIGHT: DISTINCT ON
+SELECT DISTINCT ON (group_key) group_key, err_code as last_err
+FROM details ORDER BY group_key, detail_key DESC
 
--- ❌ WRONG: GROUP BY with extra columns → multiple rows per group
-SELECT group_key, err_code FROM details
-GROUP BY group_key, err_code  -- produces MULTIPLE rows!
-
--- ✅ RIGHT: use DISTINCT ON to get one row per group
-SELECT DISTINCT ON (group_key)
-       group_key, err_code as last_err
-FROM details
-ORDER BY group_key, detail_key DESC
-
--- ✅ RIGHT (alternative): use ROW_NUMBER window function
+-- ✅ RIGHT: ROW_NUMBER
 SELECT group_key, err_code as last_err FROM (
-    SELECT group_key, err_code,
-           ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY detail_key DESC) as rn
+    SELECT group_key, err_code, ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY detail_key DESC) as rn
     FROM details
 ) sub WHERE rn = 1
 ```
-**KEEP DENSE_RANK LAST ORDER BY x** = "row with MAX x in each group"
-**KEEP DENSE_RANK FIRST ORDER BY x** = "row with MIN x in each group"
 Use `DISTINCT ON` or `ROW_NUMBER()` — NEVER just add columns to GROUP BY.
 
 #### 2-1a. Numeric TRUNC (NOT the same as ROUND)
@@ -377,32 +309,22 @@ ROUND(1.2345, 3) = 1.235    -- ❌ WRONG: different result!
 
 #### 4. Date/Timestamp Arithmetic (CRITICAL)
 
-**PostgreSQL returns DIFFERENT types depending on operand types:**
+| Operation | Return Type | Note |
+|-----------|-------------|------|
+| `date - date` | **integer** (days) | NEVER add `::interval` |
+| `timestamp - timestamp` | **interval** | Do NOT add `::interval` (redundant) |
+| `date - integer` | **date** | |
+| `timestamp - interval` | **timestamp** | |
 
-| Operation | Return Type | `::interval` cast |
-|-----------|-------------|-------------------|
-| `date - date` | **integer** (days) | Do NOT add — type mismatch |
-| `timestamp - timestamp` | **interval** | Do NOT add — already interval (redundant no-op) |
-| `date - integer` | **date** | N/A |
-| `timestamp - interval` | **timestamp** | N/A |
-
-**date - date → integer:**
-- `TRUNC(SYSDATE) - TRUNC(date_col)` → `(CURRENT_DATE - date_col::date)` — returns integer
-- `SYSDATE - date_col` → `(CURRENT_DATE - date_col::date)` — returns integer
-- `NVL(SYSDATE - date_col, default)` → `COALESCE((CURRENT_DATE - date_col::date), default)`
-- **NEVER use**: `(date - date)::interval` — unnecessary type conversion
-
-**timestamp - timestamp → interval:**
-- `SYSTIMESTAMP - created_at` → `(CURRENT_TIMESTAMP - created_at)` — already returns interval
-- Do NOT add `::interval` — it is redundant (no-op, harmless but unnecessary)
+```sql
+TRUNC(SYSDATE) - date_col      →  (CURRENT_DATE - date_col::date)       -- integer
+SYSTIMESTAMP - created_at       →  (CURRENT_TIMESTAMP - created_at)      -- interval
+```
 
 #### 5. EXTRACT with Date/Timestamp Arithmetic
-
-**Choose the right pattern based on operand type:**
-- `EXTRACT(DAY FROM timestamp1 - timestamp2)` → `EXTRACT(DAY FROM (timestamp1 - timestamp2))` — already interval, no cast needed
-- `EXTRACT(DAY FROM date1 - date2)` → `(date1 - date2)` — already integer days, EXTRACT not needed
-- `EXTRACT(HOUR FROM timestamp1 - timestamp2)` → `EXTRACT(HOUR FROM (timestamp1 - timestamp2))` — interval supports HOUR/MINUTE/SECOND
-- Always wrap arithmetic in parentheses for clarity
+- `EXTRACT(DAY FROM ts1 - ts2)` → `EXTRACT(DAY FROM (ts1 - ts2))` — already interval
+- `EXTRACT(DAY FROM date1 - date2)` → `(date1 - date2)` — already integer, EXTRACT unneeded
+- Always wrap arithmetic in parentheses
 
 #### 6. Interval Construction (PostgreSQL 9.4+)
 - `(#{param} || ' days')::interval` → `MAKE_INTERVAL(days => #{param}::integer)`
@@ -432,61 +354,26 @@ CONNECT BY PRIOR id = parent_id
 
 -- PostgreSQL
 WITH RECURSIVE hierarchy AS (
-  -- Base case: no CTE self-reference (START WITH → WHERE)
   SELECT id, parent_id, name, 1 as level
   FROM categories WHERE parent_id IS NULL
   UNION ALL
-  -- Recursive case: must reference CTE
   SELECT c.id, c.parent_id, c.name, h.level + 1
   FROM categories c JOIN hierarchy h ON c.parent_id = h.id
 )
 SELECT id, parent_id, name FROM hierarchy
 ```
 
-**Recursive CTE rules:**
-- Base case must NOT reference CTE name
-- Exactly one UNION ALL between base and recursive
-- Multiple UNION ALL inside recursive: wrap in parentheses
-- Enforce type consistency: cast recursive term to match base term types
-  - `CONCAT(...)::character varying` — when string grows in recursive term
+**Recursive CTE rules:** Base case must NOT reference CTE name. Exactly one UNION ALL. Cast recursive term types to match base (`CONCAT(...)::character varying`).
 
 **CONNECT BY related functions:**
 | Oracle | PostgreSQL (in WITH RECURSIVE) |
 |--------|-------------------------------|
-| LEVEL | Add `1 as level` in base, `h.level + 1` in recursive |
-| PRIOR col | Use JOIN condition: `c.parent_id = h.id` |
-| SYS_CONNECT_BY_PATH(col,'/') | Accumulate string: base `col::text as path`, recursive `h.path \|\| '/' \|\| c.col` |
-| CONNECT_BY_ROOT col | Carry from base case: `col as root_col`, recursive `h.root_col` |
+| LEVEL | `1 as level` in base, `h.level + 1` in recursive |
+| PRIOR col | JOIN condition: `c.parent_id = h.id` |
+| SYS_CONNECT_BY_PATH(col,'/') | base `col::text as path`, recursive `h.path \|\| '/' \|\| c.col` |
+| CONNECT_BY_ROOT col | base `col as root_col`, recursive `h.root_col` |
 | CONNECT_BY_ISLEAF | `CASE WHEN NOT EXISTS (SELECT 1 FROM t WHERE t.parent_id = h.id) THEN 1 ELSE 0 END` |
-| ORDER SIBLINGS BY col | `ORDER BY path` (use accumulated path column for sibling order) |
-
-```sql
--- Oracle (complex)
-SELECT LEVEL, SYS_CONNECT_BY_PATH(name, '/'), CONNECT_BY_ISLEAF
-FROM categories
-START WITH parent_id IS NULL
-CONNECT BY PRIOR id = parent_id
-ORDER SIBLINGS BY name
-
--- PostgreSQL
-WITH RECURSIVE h AS (
-  SELECT id, parent_id, name, 1 as level,
-         name::text as path,
-         name::text as root_name
-  FROM categories WHERE parent_id IS NULL
-  UNION ALL
-  SELECT c.id, c.parent_id, c.name, h.level + 1,
-         (h.path || '/' || c.name)::character varying,
-         h.root_name
-  FROM categories c JOIN h ON c.parent_id = h.id
-)
-SELECT level, '/' || path as sys_path,
-       CASE WHEN NOT EXISTS (
-         SELECT 1 FROM categories x WHERE x.parent_id = h.id
-       ) THEN 1 ELSE 0 END as is_leaf
-FROM h
-ORDER BY path
-```
+| ORDER SIBLINGS BY col | `ORDER BY path` |
 
 #### 2. MERGE Statement
 
@@ -502,38 +389,23 @@ INSERT INTO target (key, col1) SELECT key, val1 FROM source
 ON CONFLICT (key) DO UPDATE SET col1 = EXCLUDED.val1
 ```
 
-**Complex MERGE** (subquery in ON clause, MAX, conditional logic):
+**Complex MERGE** (subquery in ON clause, MAX): Use atomic writable CTE. **Flag as MANUAL_REVIEW.**
 ```sql
--- Oracle: MERGE with MAX subquery — finds specific row to update
-MERGE INTO detail DT USING DUAL ON (
-    DT.DTKEY = (SELECT MAX(DTKEY) FROM detail WHERE CTKEY=#{ctkey} AND QTY>0)
-)
+-- Oracle
+MERGE INTO detail DT USING DUAL ON (DT.DTKEY = (SELECT MAX(DTKEY) FROM detail WHERE CTKEY=#{ctkey} AND QTY>0))
 WHEN MATCHED THEN UPDATE SET QTY = QTY + #{qty}
 WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
-```
-Complex MERGE with subqueries in ON clause **cannot be simply converted to ON CONFLICT**. Must be atomic (single statement) for MyBatis and concurrency safety:
-```sql
--- PostgreSQL: single atomic CTE (writable CTE)
+
+-- PostgreSQL: atomic writable CTE (NEVER split into two statements)
 WITH target_row AS (
-    SELECT dtkey FROM detail
-    WHERE ctkey = #{ctkey}::varchar AND qty > 0
-    ORDER BY dtkey DESC LIMIT 1
+    SELECT dtkey FROM detail WHERE ctkey = #{ctkey}::varchar AND qty > 0 ORDER BY dtkey DESC LIMIT 1
 ),
 do_update AS (
-    UPDATE detail SET qty = qty + #{qty}::integer
-    WHERE dtkey = (SELECT dtkey FROM target_row)
-    RETURNING dtkey
+    UPDATE detail SET qty = qty + #{qty}::integer WHERE dtkey = (SELECT dtkey FROM target_row) RETURNING dtkey
 )
-INSERT INTO detail (ctkey, qty)
-SELECT #{ctkey}::varchar, #{qty}::integer
-WHERE NOT EXISTS (SELECT 1 FROM do_update)
-  AND NOT EXISTS (SELECT 1 FROM target_row)
+INSERT INTO detail (ctkey, qty) SELECT #{ctkey}::varchar, #{qty}::integer
+WHERE NOT EXISTS (SELECT 1 FROM do_update) AND NOT EXISTS (SELECT 1 FROM target_row)
 ```
-- **Single statement** — atomic, no race conditions (like Oracle MERGE)
-- Writable CTE: UPDATE in CTE, INSERT as main query
-- `WHERE NOT EXISTS (SELECT 1 FROM do_update)` ensures INSERT only when UPDATE didn't match
-- **NEVER split into two separate statements** — causes race conditions in concurrent environments
-- **Flag complex MERGE as MANUAL_REVIEW** when the ON clause contains subqueries or MAX/MIN
 
 #### 3. Pagination: ROWNUM → LIMIT/OFFSET
 ```sql
@@ -576,93 +448,47 @@ LIMIT 10
 | `XMLTYPE(string)` | `string::xml` or `XMLPARSE(DOCUMENT string)` |
 | `XMLELEMENT("name", value)` | `XMLELEMENT(NAME "name", value)` (add `NAME` keyword) |
 | `XMLAGG(xml ORDER BY col)` | `XMLAGG(xml ORDER BY col)` — same syntax |
-| `XMLFOREST(a AS "col1", b AS "col2")` | `XMLFOREST(a AS "col1", b AS "col2")` — same syntax |
+| `XMLFOREST(a AS "col1", b AS "col2")` | same syntax |
 | `col.EXTRACT('/path')` | `xpath('/path', col)` |
 | `EXISTSNODE(xml, '/path')` | `(xpath('/path', xml))[1] IS NOT NULL` |
 
+**CRITICAL: XMLAGG String Aggregation Idiom** — `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` is string aggregation, NOT XML. Convert to `STRING_AGG()`:
 ```sql
 -- Oracle
-SELECT XMLELEMENT("employee", XMLFOREST(name AS "name", dept AS "dept"))
-FROM employees
-
--- PostgreSQL
-SELECT XMLELEMENT(NAME "employee", XMLFOREST(name AS "name", dept AS "dept"))
-FROM employees
-```
-
-**CRITICAL: XMLAGG String Aggregation Idiom**
-Oracle commonly uses `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` as a string aggregation pattern. This MUST be converted to `STRING_AGG()`, NOT left as XML functions:
-```sql
--- Oracle (string aggregation idiom)
 SUBSTR(XMLAGG(XMLELEMENT(COL, ',', col_name) ORDER BY col_name).EXTRACT('//text()').GETSTRINGVAL(), 2) AS result
-
--- PostgreSQL
+-- PostgreSQL (SUBSTR not needed — STRING_AGG has no leading delimiter)
 STRING_AGG(col_name, ',' ORDER BY col_name) AS result
 ```
-- `XMLAGG(XMLELEMENT(...)).EXTRACT('//text()').GETSTRINGVAL()` → `STRING_AGG(col, delim ORDER BY ...)`
-- The `SUBSTR(..., 2)` removes the leading delimiter — `STRING_AGG` does not add a leading delimiter, so `SUBSTR` is not needed
 
 #### 7. PL/SQL Constructs in SQL
-These Oracle PL/SQL constructs may appear in MyBatis mappers (usually in `<select>` with stored procedure calls):
-
 | Oracle | PostgreSQL |
 |--------|-----------|
-| `BULK COLLECT INTO` | Remove — use plain `SELECT` (MyBatis handles result collection) |
-| `RETURNING ... INTO :var` | `RETURNING col1, col2` (remove `INTO :var`, MyBatis maps results) |
-| `%ROWTYPE` | Remove — use explicit column types |
-| `%TYPE` | Remove — use explicit types |
-| `UTL_HTTP.*` | **MANUAL_REVIEW** — requires project-specific replacement (e.g., `aws_lambda.invoke`, HTTP client) |
-| `UTL_SMTP.*` | **MANUAL_REVIEW** — requires project-specific mail service replacement |
-| `DBMS_PIPE.*` | **MANUAL_REVIEW** — requires project-specific messaging replacement |
+| `BULK COLLECT INTO` | Remove — use plain `SELECT` |
+| `RETURNING ... INTO :var` | `RETURNING col1, col2` (remove `INTO :var`) |
+| `%ROWTYPE`, `%TYPE` | Remove — use explicit types |
+| `UTL_HTTP.*`, `UTL_SMTP.*`, `DBMS_PIPE.*` | **MANUAL_REVIEW** |
 
 ```sql
--- Oracle: RETURNING INTO
-INSERT INTO orders (id, status) VALUES (seq.NEXTVAL, 'NEW')
-RETURNING id INTO :order_id
-
--- PostgreSQL
-INSERT INTO orders (id, status) VALUES (nextval('seq'), 'NEW')
-RETURNING id
+-- Oracle                                          -- PostgreSQL
+INSERT INTO orders VALUES (seq.NEXTVAL, 'NEW')     INSERT INTO orders VALUES (nextval('seq'), 'NEW')
+RETURNING id INTO :order_id                        RETURNING id
 ```
 
 ---
 
 ## XML Special Character Handling (MyBatis)
 
-**⚠️ Problem**: Using `<` operator outside CDATA causes XML parsing errors. (`>` is safe in XML.)
+Outside CDATA: `<` → `&lt;`, `<=` → `&lt;=`. (`>` `>=` are safe — no escaping needed.)
 
-**What MUST be escaped (outside CDATA):**
-- `<` → `&lt;`
-- `<=` → `&lt;=`
-
-**What does NOT need escaping:**
-- `>` and `>=` — safe in XML, keep as-is
-- Anything inside `<![CDATA[]]>` — keep as-is
-
-**Decision criteria during conversion:**
-
-1. **If original uses CDATA → keep CDATA**
-   ```xml
-   <![CDATA[ WHERE age <= 30 AND salary > 50000 ]]>
-   ```
-
-2. **If original uses entity escapes → keep escapes**
-   ```xml
-   WHERE age &lt;= #{maxAge}  →  WHERE age &lt;= #{maxAge}
-   ```
-
-3. **If conversion introduces `<` or `<=` → must escape or wrap in CDATA**
-   ```xml
-   WHERE qty &lt; 10 AND amount >= 1000
-   ```
+1. **Original uses CDATA → keep CDATA**: `<![CDATA[ WHERE age <= 30 ]]>`
+2. **Original uses entity escapes → keep**: `WHERE age &lt;= #{maxAge}`
+3. **Conversion introduces `<`/`<=` → must escape or CDATA**: `WHERE qty &lt; 10`
 
 ---
 
 ## Reference Rule: Parameter Casting (apply during each Phase)
 
-**Principle**: Cast parameters to match the compared column's data type.
-**With metadata (MANDATORY when available)**: Call `lookup_column_type(table_name, column_name)` to get the actual column type, then apply the exact cast. This is especially important when MyBatis XML does not specify `jdbcType` — Oracle handles implicit conversion but PostgreSQL requires explicit casts.
-**Without metadata**: Use context clues (column name patterns, SQL context). Skip if uncertain.
+Cast parameters to match column data type. Use `lookup_column_type()` when metadata available. Without metadata, use context clues; skip if uncertain.
 
 #### Casting Decision Rules
 ```
@@ -728,29 +554,14 @@ When converting comma JOINs to explicit JOINs with subqueries:
 
 These are frequently observed incorrect conversion patterns. Check your output against this list.
 
-### 1. Redundant OR IS NULL (see Decision Tree in Phase 2 §2)
+### 1. Redundant OR IS NULL
+**See Decision Tree in Phase 2 §2.** OR IS NULL is ONLY for direct equality on LEFT-joined columns. Never for LIKE, COALESCE, or INNER-joined.
 ```sql
--- ❌ WRONG: LIKE on outer-joined column — OR IS NULL changes semantics
-WHERE (UPPER(u.EMAIL) LIKE '%' || #{kw} || '%' OR u.EMAIL IS NULL)
-
--- ✅ RIGHT: NULL LIKE → NULL → falsy, identical in both DBs
-WHERE UPPER(u.EMAIL) LIKE '%' || #{kw} || '%'
-
--- ❌ WRONG: COALESCE already handles NULL
-WHERE COALESCE(addr.COUNTRY, 'UNKNOWN') = #{country} OR addr.COUNTRY IS NULL
-
--- ✅ RIGHT: COALESCE alone is sufficient
-WHERE COALESCE(addr.COUNTRY, 'UNKNOWN') = #{country}
-
--- ❌ WRONG: column from INNER-joined table — never NULL from join
-WHERE (u.EMAIL = #{email}::varchar OR u.EMAIL IS NULL)
--- (u is JOIN, not LEFT JOIN → u.EMAIL cannot be NULL from the join)
-
--- ✅ RIGHT: only for direct comparison on LEFT-joined column
-WHERE (addr.STATUS = #{status}::varchar OR addr.STATUS IS NULL)
--- (addr is LEFT JOIN → addr.STATUS can be NULL when no matching row)
+-- ❌ WRONG                                          -- ✅ RIGHT
+(UPPER(u.EMAIL) LIKE '%'||#{kw}||'%' OR u.EMAIL IS NULL)   UPPER(u.EMAIL) LIKE '%'||#{kw}||'%'
+(COALESCE(addr.COUNTRY,'UNKNOWN')=#{c} OR addr.COUNTRY IS NULL)  COALESCE(addr.COUNTRY,'UNKNOWN')=#{c}
+(u.EMAIL=#{email}::varchar OR u.EMAIL IS NULL) /*INNER*/    u.EMAIL=#{email}::varchar
 ```
-**Rule**: Follow the Decision Tree in Phase 2 §2. `OR col IS NULL` is ONLY needed for **direct equality comparison** on **outer-joined table** columns. Never for LIKE, COALESCE, or INNER-joined columns.
 
 ### 2. Redundant or Wrong ::interval Cast
 ```sql
@@ -824,24 +635,17 @@ TO_DATE(#{param}, 'YYYYMMDD')  →  to_date(#{param}, 'YYYYMMDD')
 ```
 
 ### 9. User-Defined Package Function Mapped to Built-in
+See Phase 1 §6. Flatten with underscore — NEVER map to built-in.
 ```sql
--- ❌ WRONG: PKG_CRYPTO is user-defined, NOT Oracle standard
-PKG_CRYPTO.ENCRYPT(col, key)  →  pgp_sym_encrypt(col, key)
-PKG_CRYPTO.DECRYPT(col, key)  →  pgp_sym_decrypt(col, key)
-
--- ✅ RIGHT: flatten with underscore
-PKG_CRYPTO.ENCRYPT(col, key)  →  pkg_crypto_encrypt(col, key)
-PKG_CRYPTO.DECRYPT(col, key)  →  pkg_crypto_decrypt(col, key)
+-- ❌ PKG_CRYPTO.ENCRYPT(col, key) → pgp_sym_encrypt(col, key)
+-- ✅ PKG_CRYPTO.ENCRYPT(col, key) → pkg_crypto_encrypt(col, key)
 ```
-**Only `DBMS_*` and `UTL_*` are Oracle standard.** All other `PACKAGE.FUNCTION()` calls must be flattened to `package_function()`. Never map to target DB built-in functions based on name similarity.
 
 ### 10. TRUNC(number) Converted to ROUND
+See Phase 3 §2-1a. TRUNC truncates, ROUND rounds — different results.
 ```sql
--- ❌ WRONG: ROUND rounds, TRUNC truncates — different results
-TRUNC(weight, 3)  →  ROUND(weight::numeric, 3)
-
--- ✅ RIGHT: keep as trunc
-TRUNC(weight, 3)  →  trunc(weight::numeric, 3)
+-- ❌ TRUNC(weight, 3) → ROUND(weight::numeric, 3)
+-- ✅ TRUNC(weight, 3) → trunc(weight::numeric, 3)
 ```
 
 ### 11. JOIN Condition Changed (Column Name "Correction")
@@ -854,15 +658,14 @@ A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldkey
 ```
 **NEVER change column names in JOIN conditions.** Only lowercase them. Even if it looks like a bug in the original, preserve the original logic.
 
-### 12. include refid Value Changed (Hallucination)
+### 12. Original Name/Identifier Changed (Hallucination)
+NEVER change ANY name. Copy verbatim (lowercase only). No prefixes, no typo "fixes", no renaming.
 ```sql
--- ❌ WRONG: refid inferred from SQL ID name (hallucination)
-<include refid="sql_tOrderCtgDiv"/>   -- LLM guessed from selectTOrderCtgDiv
-
--- ✅ RIGHT: original refid preserved exactly
-<include refid="sql_tOrderMstAdcdUnion"/>  -- this is what the original had
+-- ❌ sql_putawayLocation → sql_selectPutawayLocation (added prefix)
+-- ❌ sql_tOrderCtgDiv (refid guessed from SQL ID)
+-- ❌ sql_tWorkInfoIbat → sql_tWorkInfoIvat (typo "fix")
+-- ✅ sql_putawaylocation, sql_tordermstadcdunion, sql_tworkinfoibat (verbatim lowercase)
 ```
-**NEVER change `<include refid="..."/>` values.** Copy the refid from the original SQL verbatim. Do NOT infer/guess refid names based on the SQL ID or naming patterns.
 
 ---
 
@@ -877,3 +680,4 @@ A.UPLDSEQ = B.UPLDKEY  →  a.upldseq = b.upldkey
 8. **Add notes for complex conversions** — CONNECT BY, MERGE, complex patterns
 9. **Flag MANUAL_REVIEW** — when conversion accuracy is uncertain
 10. **NO optimization** — convert syntax only, do not change logic or structure
+11. **Preserve ALL original names** — sql id, refid, resultMap id, aliases must match the original verbatim (lowercase only). NEVER add prefixes, fix typos, or rename
