@@ -56,8 +56,8 @@ def extract_sql_from_xml(target_file: str, params: dict | None = None,
 
     Returns (sql_type, prepared_sql) or None.
     """
-    path = Path(target_file)
-    if not path.exists():
+    path = Path(target_file) if target_file else None
+    if not path or not path.is_file():
         return None
 
     content = path.read_text(encoding='utf-8')

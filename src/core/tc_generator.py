@@ -379,8 +379,8 @@ class TCGenerator:
     def generate_for_query(self, mapper_file: str, sql_id: str,
                            target_file: str) -> list[TestCase]:
         """Generate test cases for one SQL query."""
-        path = Path(target_file)
-        if not path.exists():
+        path = Path(target_file) if target_file else None
+        if not path or not path.is_file():
             return [TestCase(name='default', source='INFERENCE', params={'_dummy': '1'})]
 
         content = path.read_text(encoding='utf-8')
