@@ -282,13 +282,14 @@ def _llm_generate_tc(sql_body: str, param_names: list[str],
         if p.lower() in metadata:
             meta_hint += f"  {p}: {metadata[p.lower()]}\n"
 
+    meta_section = f"Column types:\n{meta_hint}\n" if meta_hint else ""
     prompt = (
         f"Generate realistic test parameter values for this SQL query.\n\n"
         f"SQL:\n{sql_body[:2000]}\n\n"
         f"Parameters: {', '.join(param_names[:20])}\n"
-        f"{('Column types:\n' + meta_hint) if meta_hint else ''}\n"
+        f"{meta_section}"
         f"Output ONLY a JSON object mapping parameter names to test values.\n"
-        f"Example: {{\"userId\": \"USR001\", \"status\": \"ACTIVE\", \"startDate\": \"20250101\"}}\n"
+        f'Example: {{"userId": "USR001", "status": "ACTIVE", "startDate": "20250101"}}\n'
         f"Use realistic values that would return rows. No explanation."
     )
 
