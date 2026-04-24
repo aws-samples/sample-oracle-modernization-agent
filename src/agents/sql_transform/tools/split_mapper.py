@@ -165,6 +165,26 @@ def split_mapper(file_path: str) -> dict:
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
     try:
         cursor = conn.cursor()
+
+        # Guard: only accept paths registered in source_xml_list.
+        # Reject WIP artifacts (output/xmls/origin|extract|transform|merge/...) that
+        # would otherwise be inserted as ghost rows with doubly-nested paths.
+        resolved = str(path.resolve())
+        cursor.execute(
+            "SELECT 1 FROM source_xml_list WHERE file_path IN (?, ?)",
+            (resolved, str(path))
+        )
+        if not cursor.fetchone():
+            return {
+                'error': (
+                    f'Not a registered source mapper: {file_path}. '
+                    f'split_mapper only accepts files listed in source_xml_list '
+                    f'(original MyBatis mappers under JAVA_SOURCE_FOLDER). '
+                    f'Do not pass WIP artifacts under output/xmls/.'
+                ),
+                'sql_ids': []
+            }
+
         sub_dir = _get_sub_dir(cursor, str(path))
 
         _init_table(conn)

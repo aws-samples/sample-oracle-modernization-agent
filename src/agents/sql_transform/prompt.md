@@ -71,55 +71,50 @@ Convert all Oracle SQL statements in MyBatis Mapper XML files to {{TARGET_DB}}, 
 - Gets SQL IDs where transformed='N' from transform_target_list
 - Returns: `{total, pending: {mapper_file: [{sql_id, sql_type, source_file, target_file}]}}`
 
-### 3. split_mapper(file_path)
-- Splits a Mapper XML into individual SQL IDs, saves to DB
-- **Input**: Full file path string
-- Returns: `{mapper, namespace, sql_ids: [{id, type, sql, full_tag}]}`
-
-### 4. read_sql_source(mapper_file, sql_id)
+### 3. read_sql_source(mapper_file, sql_id)
 - Reads the original SQL body from the extract/ file
 - Returns: `{sql_id, sql_type, sql_body}`
 - **Call this before converting each SQL ID to get the original SQL**
 
-### 5. convert_sql(sql_id, converted_sql, mapper_file, notes)
+### 4. convert_sql(sql_id, converted_sql, mapper_file, notes)
 - Saves YOUR conversion result to file and updates DB flag (transformed='Y')
 - **YOU perform the conversion** using the rules, then call this tool
 - Do NOT pass original_sql - only the converted {{TARGET_DB}} SQL
 - `notes`: Conversion notes — **REQUIRED**. Briefly describe what was converted (e.g., "NVL→COALESCE, (+)→LEFT JOIN, ||→CONCAT")
 
-### 6. assemble_mapper(mapper_file)
+### 5. assemble_mapper(mapper_file)
 - Reads origin/ file, replaces SQL bodies with transform/ results, saves to merge/
 - `mapper_file`: Mapper file name (e.g. 'SellerMapper.xml')
 - Only includes SQLs where transformed='Y'
 
-### 7. generate_metadata()
+### 6. generate_metadata()
 - Extracts {{TARGET_DB}} column metadata and stores in oma_control.db (target_metadata table)
 - Uses target DB connection env vars (PostgreSQL: PGHOST/PGUSER/..., MySQL: MYSQL_HOST/MYSQL_USER/...)
 - **Non-fatal**: If it fails (no psql, no DB connection), transform continues without metadata
 - Returns: `{status, row_count}` or `{status: 'skipped', error: '...'}`
 
-### 8. lookup_column_type(table_name, column_name)
+### 7. lookup_column_type(table_name, column_name)
 - Looks up column data type from target_metadata table
 - Case-insensitive matching
 - Returns: `{table_name, column_name, data_type}` or `data_type: 'unknown'`
 
+**Note on preprocessing**: Splitting mapper XMLs into per-SQL extract files and populating `transform_target_list` is handled by the pipeline runner (`run_sql_transform.py`) *before* this agent starts. Do NOT attempt to split mappers yourself — by the time you run, `get_pending_transforms()` already returns the pending SQL IDs.
+
 ## Workflow
 
-1. Call `load_mapper_list()` to get all mapper files
+1. Call `load_mapper_list()` to get all mapper files (informational)
 2. Call `generate_metadata()` to extract {{TARGET_DB}} metadata — if it fails (no DB connection), continue without metadata
-3. For EACH mapper file:
-   a. Call `split_mapper(file_path)` to extract SQL IDs and save to DB
-4. Call `get_pending_transforms()` to get SQL IDs where transformed='N'
-5. For EACH pending SQL ID:
+3. Call `get_pending_transforms()` to get SQL IDs where transformed='N'
+4. For EACH pending SQL ID:
    a. Call `read_sql_source(mapper_file, sql_id)` to get the original SQL
    b. **If metadata is available**: Call `lookup_column_type(table, column)` for columns used in WHERE/JOIN/parameter comparisons to determine correct `::type` casts
    c. Apply the conversion rules (General + Project-Specific) in phase order
-   c. **SELF-CHECK before saving** (see below)
-   d. Call `convert_sql(sql_id, converted_sql, mapper_file, notes)` - only pass converted SQL
+   d. **SELF-CHECK before saving** (see below)
+   e. Call `convert_sql(sql_id, converted_sql, mapper_file, notes)` - only pass converted SQL
    - **Do NOT echo SQL in your response text. Just call the tools directly.**
-6. For EACH mapper, call `assemble_mapper(mapper_file)` to merge into final XML
+5. For EACH mapper, call `assemble_mapper(mapper_file)` to merge into final XML
 
-### Step 5c: SELF-CHECK (mandatory before every convert_sql call)
+### Step 4d: SELF-CHECK (mandatory before every convert_sql call)
 
 **Add a conversion comment at the TOP of each converted SQL:**
 ```sql
