@@ -125,21 +125,24 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
 
         # Run agent (callback_handler=None suppresses streaming output)
         agent = create_agent()
-        agent(
-            f"Fix the following failed SQL IDs in {mapper_file}.\n\n"
-            f"=== Failed SQLs and Errors ===\n{errors_str}\n\n"
-            f"=== Fix Procedure ===\n"
-            f"For each SQL ID:\n"
-            f"1. read_sql_source() to get Oracle original\n"
-            f"2. read_transform() to get current converted SQL\n"
-            f"3. Analyze the error against both original and converted SQL, apply General Conversion Rules\n"
-            f"4. convert_sql() to save the fix\n"
-            f"5. explain_single() for quick syntax check\n"
-            f"6. convert_sql() to save the fix\n"
-            f"7. run_single_test() to verify execution\n"
-            f"8. compare_single() to verify results match Oracle\n"
-            f"9. If still fails after 3 attempts, skip with MANUAL_REVIEW note.\n"
-        )
+        try:
+            agent(
+                f"Fix the following failed SQL IDs in {mapper_file}.\n\n"
+                f"=== Failed SQLs and Errors ===\n{errors_str}\n\n"
+                f"=== Fix Procedure ===\n"
+                f"For each SQL ID:\n"
+                f"1. read_sql_source() to get Oracle original\n"
+                f"2. read_transform() to get current converted SQL\n"
+                f"3. Analyze the error against both original and converted SQL, apply General Conversion Rules\n"
+                f"4. convert_sql() to save the fix\n"
+                f"5. explain_single() for quick syntax check\n"
+                f"6. convert_sql() to save the fix\n"
+                f"7. run_single_test() to verify execution\n"
+                f"8. compare_single() to verify results match Oracle\n"
+                f"9. If still fails after 3 attempts, skip with MANUAL_REVIEW note.\n"
+            )
+        finally:
+            del agent
 
         # Drain queue and advance by total sql_errors count
         drain_progress()

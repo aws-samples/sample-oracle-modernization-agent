@@ -125,10 +125,13 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
             _hw.start_timer("transform")
             try:
                 agent = create_agent()
-                agent(
-                    f"{mapper_file}의 다음 SQL ID들을 {get_target_db_display_name()}로 변환해줘: {ids_str}\n"
-                    f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
-                )
+                try:
+                    agent(
+                        f"{mapper_file}의 다음 SQL ID들을 {get_target_db_display_name()}로 변환해줘: {ids_str}\n"
+                        f"각 SQL ID마다 read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
+                    )
+                finally:
+                    del agent
             except Exception as e:
                 error_str = str(e)
                 if "context window" in error_str.lower() or "overflow" in error_str.lower():
@@ -137,10 +140,13 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
                         try:
                             _hw.start_timer("transform")
                             single_agent = create_agent()
-                            single_agent(
-                                f"{mapper_file}의 {s['sql_id']}를 {get_target_db_display_name()}로 변환해줘.\n"
-                                f"read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
-                            )
+                            try:
+                                single_agent(
+                                    f"{mapper_file}의 {s['sql_id']}를 {get_target_db_display_name()}로 변환해줘.\n"
+                                    f"read_sql_source로 원본을 읽고, 변환 후 convert_sql로 저장해줘."
+                                )
+                            finally:
+                                del single_agent
                         except Exception as inner_e:
                             log(f"❌ {s['sql_id']}: {inner_e}")
                 else:

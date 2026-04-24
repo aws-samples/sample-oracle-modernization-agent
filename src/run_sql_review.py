@@ -202,13 +202,16 @@ def _retransform_failures():
         feedback_text = "\n".join(feedback_lines)
 
         agent = create_sql_transform_agent(suppress_streaming=True)
-        agent(
-            f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
-            f"These FAILED review. Here are the SPECIFIC issues found:\n"
-            f"{feedback_text}\n"
-            f"For each: fix the listed issues, apply ALL rules, "
-            f"read with read_sql_source, save with convert_sql."
-        )
+        try:
+            agent(
+                f"Re-transform the following SQL IDs in {mapper}: {ids_str}\n"
+                f"These FAILED review. Here are the SPECIFIC issues found:\n"
+                f"{feedback_text}\n"
+                f"For each: fix the listed issues, apply ALL rules, "
+                f"read with read_sql_source, save with convert_sql."
+            )
+        finally:
+            del agent
 
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] 🔄 Re-transform: {ids_str}\n")
