@@ -249,28 +249,37 @@ def run(max_workers=8, auto_fix=False):
 
     log_and_print(f"\n📋 테스트 대상: {len(all_items)}개 SQL")
 
-    # TC Generation — auto-generate test parameters
-    log_and_print("\n📝 TC 자동 생성 중...")
+    # TC Generation — load existing or auto-generate
     from core.tc_generator import TCGenerator
-    tc_gen = TCGenerator()
-    tc_map = tc_gen.generate_batch(all_items)
-    tc_path = tc_gen.save_tc_json(tc_map)
+    tc_path = OUTPUT_DIR / "test" / "test_cases.json"
+    existing_tcs = TCGenerator.load_tc_json(tc_path)
 
-    tc_total = sum(len(v) for v in tc_map.values())
-    sources = {}
-    for cases in tc_map.values():
-        for tc in cases:
-            sources[tc.source] = sources.get(tc.source, 0) + 1
-    source_str = ", ".join(f"{k}:{v}" for k, v in sorted(sources.items()))
-    log_and_print(f"  ✅ {tc_total}개 TC 생성 ({source_str})")
-    log_and_print(f"  📄 {tc_path}")
+    if existing_tcs:
+        log_and_print(f"\n📝 기존 TC 로드: {sum(len(v) for v in existing_tcs.values())}개 ({tc_path})")
+        tc_map_raw = existing_tcs
+    else:
+        log_and_print("\n📝 TC 자동 생성 중...")
+        tc_gen = TCGenerator()
+        tc_map_obj = tc_gen.generate_batch(all_items)
+        tc_path = tc_gen.save_tc_json(tc_map_obj)
+
+        tc_total = sum(len(v) for v in tc_map_obj.values())
+        sources = {}
+        for cases in tc_map_obj.values():
+            for tc in cases:
+                sources[tc.source] = sources.get(tc.source, 0) + 1
+        source_str = ", ".join(f"{k}:{v}" for k, v in sorted(sources.items()))
+        log_and_print(f"  ✅ {tc_total}개 TC 생성 ({source_str})")
+        log_and_print(f"  📄 {tc_path}")
+        tc_map_raw = {k: [{'params': tc.params} for tc in v] for k, v in tc_map_obj.items()}
 
     # Attach first TC params to items for execution
     for item in all_items:
         key = f"{item['mapper_file']}/{item['sql_id']}"
-        tcs = tc_map.get(key, [])
+        tcs = tc_map_raw.get(key, [])
         if tcs:
-            item['params'] = tcs[0].params
+            params = tcs[0].get('params') if isinstance(tcs[0], dict) else tcs[0].params
+            item['params'] = params
 
     # Phase 0: EXPLAIN — syntax check all types
     log_and_print("\nPhase 0: 구문 검증 (EXPLAIN)...")
