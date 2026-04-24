@@ -190,9 +190,15 @@ _DATE_FORMATS = {
 
 
 _COL_PARAM_BIND = re.compile(
-    r'(\w+)\s*=\s*#\{(\w+)',
+    r'(\w+)\s*(?:=|>=|<=|<>|!=|>|<|BETWEEN|LIKE|IN\s*\()\s*#\{(\w+)',
     re.IGNORECASE,
 )
+
+# ${param} context patterns
+_DOLLAR_ORDER_BY = re.compile(r'ORDER\s+BY\s+\$\{(\w+)\}', re.IGNORECASE)
+_DOLLAR_FROM = re.compile(r'FROM\s+\$\{(\w+)\}', re.IGNORECASE)
+_DOLLAR_SORT_DIR = re.compile(r'\$\{(\w*sort\w*value\w*|\w*sort\w*dir\w*|\w*asc\w*|\w*desc\w*)\}', re.IGNORECASE)
+_DOLLAR_PAGING = re.compile(r'\$\{(\w*paging\w*|\w*GRIDPAGING\w*|\w*rownum\w*)\}', re.IGNORECASE)
 
 
 def _build_param_to_column_map(sql_content: str) -> dict[str, str]:
@@ -209,9 +215,36 @@ def _build_param_to_column_map(sql_content: str) -> dict[str, str]:
     return param_to_col
 
 
-def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
-    """Infer param values from XML patterns + metadata. Returns {param: value}."""
-    values = {}
+def _infer_dollar_params(xml_content: str) -> dict[str, str]:
+    """Infer ${param} values from SQL context.
+
+    ${} params inject SQL structure (table/column names, sort direction, paging).
+    Unlike #{}, these become part of the SQL text, so wrong values cause syntax errors.
+    """
+    dollar_vals = {}
+
+    for m in _DOLLAR_PAGING.finditer(xml_content):
+        dollar_vals[m.group(1)] = ''  # paging wrappers → remove
+
+    for m in _DOLLAR_SORT_DIR.finditer(xml_content):
+        dollar_vals[m.group(1)] = 'ASC'
+
+    for m in _DOLLAR_ORDER_BY.finditer(xml_content):
+        dollar_vals[m.group(1)] = '1'  # ORDER BY 1 (positional, always valid)
+
+    for m in _DOLLAR_FROM.finditer(xml_content):
+        dollar_vals[m.group(1)] = 'DUAL'  # placeholder table (will fail but not syntax error)
+
+    return dollar_vals
+
+
+def _infer_params(xml_content: str, metadata: dict) -> list[dict[str, str]]:
+    """Infer param values from XML patterns + metadata.
+
+    Returns list of param dicts — typically 2:
+      [0] all <if> conditions activated (values filled)
+      [1] all <if> conditions deactivated (nullable params empty)
+    """
     nullable = set()
     conditionals = {}
     collections = set()
@@ -228,7 +261,25 @@ def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
         date_vals[m.group(1).strip()] = _DATE_FORMATS.get(fmt, '20250101')
 
     param_to_col = _build_param_to_column_map(xml_content)
+    dollar_vals = _infer_dollar_params(xml_content)
 
+    def _resolve_value(param: str, cast: str | None) -> str:
+        if param in collections:
+            return '1,2,3'
+        if param in conditionals:
+            return conditionals[param]
+        if param in date_vals:
+            return date_vals[param]
+        if param.lower() in metadata:
+            return _value_from_type(metadata[param.lower()])
+        if param in param_to_col and param_to_col[param] in metadata:
+            return _value_from_type(metadata[param_to_col[param]])
+        if cast:
+            return _value_from_cast(cast)
+        return '1'
+
+    # TC 1: all <if> activated — nullable params get real values
+    active = dict(dollar_vals)
     for m in _PARAM_WITH_CAST.finditer(xml_content):
         param = m.group(1).strip()
         cast = m.group(2)
@@ -236,25 +287,17 @@ def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
             param = param.split('.')[0].strip()
         if not param or param.startswith('_'):
             continue
+        active[param] = _resolve_value(param, cast)
 
-        if param in collections:
-            values[param] = '1,2,3'
-        elif param in nullable:
-            values[param] = ''
-        elif param in conditionals:
-            values[param] = conditionals[param]
-        elif param in date_vals:
-            values[param] = date_vals[param]
-        elif param.lower() in metadata:
-            values[param] = _value_from_type(metadata[param.lower()])
-        elif param in param_to_col and param_to_col[param] in metadata:
-            values[param] = _value_from_type(metadata[param_to_col[param]])
-        elif cast:
-            values[param] = _value_from_cast(cast)
-        else:
-            values[param] = '1'
+    if not nullable:
+        return [active]
 
-    return values
+    # TC 2: <if> deactivated — nullable params set empty
+    inactive = dict(active)
+    for param in nullable:
+        inactive[param] = ''
+
+    return [active, inactive]
 
 
 def _value_from_type(data_type: str) -> str:
@@ -466,10 +509,12 @@ class TCGenerator:
             if fk_params:
                 cases.append(TestCase(name='fk_sample', source='FK', params=fk_params))
 
-        # Source 6: Inference (always available)
-        inferred = _infer_params(content, self._metadata)
-        if inferred:
-            cases.append(TestCase(name='inferred', source='INFERENCE', params=inferred))
+        # Source 6: Inference (always available) — returns 2 sets: active + inactive <if>
+        inferred_list = _infer_params(content, self._metadata)
+        if inferred_list:
+            cases.append(TestCase(name='inferred_active', source='INFERENCE', params=inferred_list[0]))
+            if len(inferred_list) > 1:
+                cases.append(TestCase(name='inferred_inactive', source='INFERENCE', params=inferred_list[1]))
 
         # Source 7: LLM (if < 3 cases so far)
         if len(cases) < 3:
