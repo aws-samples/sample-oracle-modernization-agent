@@ -59,39 +59,40 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
     next_step = 'test' if result == 'PASS' else 'validate'
     for i in range(5):
         try:
-            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                from utils.db_utils import update_by_mapper
+            conn = sqlite3.connect(str(DB_PATH), timeout=10)
+            try:
+                from utils.db_utils import update_by_mapper, query_by_mapper
                 update_by_mapper(conn,
                     "UPDATE transform_target_list SET validated='Y', validation_result=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
                     mapper_file, sql_id, extra_params=(result, next_step))
                 conn.commit()
-            flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
-            print(f"  {flag} {mapper_file}/{sql_id} {notes}")
 
-            # Append-only validation history (non-fatal on failure)
-            try:
-                with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
-                    n_prior = hist_conn.execute(
+                round_no = 1
+                try:
+                    n_prior = conn.execute(
                         "SELECT COUNT(*) FROM validation_history WHERE mapper_file=? AND sql_id=?",
                         (mapper_file, sql_id),
                     ).fetchone()[0]
-                round_no = int(n_prior or 0) + 1
-            except Exception:
-                round_no = 1
+                    round_no = int(n_prior or 0) + 1
+                except Exception:
+                    pass
 
-            validated_sql_body = ""
-            try:
-                with sqlite3.connect(str(DB_PATH), timeout=5) as tgt_conn:
-                    from utils.db_utils import query_by_mapper
+                validated_sql_body = ""
+                try:
                     row = query_by_mapper(
-                        tgt_conn.cursor(),
+                        conn.cursor(),
                         "SELECT target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
                         mapper_file, sql_id,
                     )
-                if row and Path(row[0]).exists():
-                    validated_sql_body = Path(row[0]).read_text(encoding='utf-8')
-            except Exception:
-                pass
+                    if row and Path(row[0]).exists():
+                        validated_sql_body = Path(row[0]).read_text(encoding='utf-8')
+                except Exception:
+                    pass
+            finally:
+                conn.close()
+
+            flag = "✅ PASS" if result == 'PASS' else "🔄 FIXED"
+            print(f"  {flag} {mapper_file}/{sql_id} {notes}")
 
             _hw.record_validate(
                 mapper_file=mapper_file,
@@ -103,7 +104,6 @@ def set_validated(mapper_file: str, sql_id: str, result: str, notes: str = "") -
                 mapper_path=_hw.resolve_mapper_path(mapper_file),
             )
 
-            # Emit progress event via thread-safe queue
             from core.progress import emit_progress
             emit_progress(mapper_file, sql_id, result, notes)
             return {'status': 'ok', 'sql_id': sql_id, 'result': result}

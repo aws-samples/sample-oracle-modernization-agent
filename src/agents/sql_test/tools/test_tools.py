@@ -751,30 +751,29 @@ def _record_test_history(mapper_file: str, sql_id: str, phase: str, result: str,
                           rows_affected: int | None = None,
                           tested_sql: str = "", bind_parameters=None):
     """Compute attempt_no from prior test_history for this phase and record."""
+    attempt_no = 1
     try:
-        with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
-            n_prior = hist_conn.execute(
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
+            n_prior = conn.execute(
                 "SELECT COUNT(*) FROM test_history WHERE mapper_file=? AND sql_id=? AND phase=?",
                 (mapper_file, sql_id, phase),
             ).fetchone()[0]
-        attempt_no = int(n_prior or 0) + 1
-    except Exception:
-        attempt_no = 1
+            attempt_no = int(n_prior or 0) + 1
 
-    # If tested_sql not provided, try to read from target_file
-    if not tested_sql:
-        try:
-            with sqlite3.connect(str(DB_PATH), timeout=5) as tgt_conn:
+            if not tested_sql:
                 from utils.db_utils import query_by_mapper
                 row = query_by_mapper(
-                    tgt_conn.cursor(),
+                    conn.cursor(),
                     "SELECT target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
                     mapper_file, sql_id,
                 )
-            if row and Path(row[0]).exists():
-                tested_sql = Path(row[0]).read_text(encoding='utf-8')
-        except Exception:
-            pass
+                if row and Path(row[0]).exists():
+                    tested_sql = Path(row[0]).read_text(encoding='utf-8')
+        finally:
+            conn.close()
+    except Exception:
+        pass
 
     _hw.record_test(
         mapper_file=mapper_file,
