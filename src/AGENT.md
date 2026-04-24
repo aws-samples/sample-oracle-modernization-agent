@@ -14,6 +14,9 @@
   - Control DB 경로 = `$OMA_OUTPUT_DIR/oma_control.db` (`src/utils/project_paths.py:21-22`)
   - HTML 보고서: `$OMA_OUTPUT_DIR/reports/oma_report.html` — 각 단계 종료 시 자동 재생성
 - 모든 파이프라인 명령은 `src/`에서 `PYTHONPATH=.`로 실행
+- Test 단계에서 Oracle 접속 가능 시: TC 자동생성(V$SQL_BIND_CAPTURE 등) + Oracle-PG 결과 비교
+  - 필요 환경변수: `ORACLE_HOST`, `ORACLE_PORT`, `ORACLE_SID`, `ORACLE_USER`, `ORACLE_PASSWORD`
+  - Oracle 미접속 시: inference + LLM TC만 생성, 결과 비교 스킵 (PG 단독 검증)
 - 코드/프롬프트를 먼저 수정하지 말 것. 먼저 Tool(아래) 호출로 상태를 읽고 결정한다
 
 ## Pipeline Steps (순서 고정)
