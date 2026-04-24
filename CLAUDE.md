@@ -146,17 +146,9 @@ Agents use SystemContentBlock with cachePoints for cost optimization:
 | `OMA_LITE_MODEL_ID` | Bedrock model for Facilitator | Sonnet 4.6 |
 | `TARGET_DBMS_TYPE` | Target DB type (`postgresql` or `mysql`) | DB property or `postgresql` |
 | `AWS_DEFAULT_REGION` | AWS region | — |
-| **Oracle (TC생성 + Compare)** | | |
-| `ORACLE_HOST` | Oracle DB host | — |
-| `ORACLE_PORT` | Oracle DB port | `1521` |
-| `ORACLE_SID` | Oracle SID or Service Name | — |
-| `ORACLE_USER` | Oracle user | — |
-| `ORACLE_PASSWORD` | Oracle password | — |
-| `ORACLE_SCHEMA` | Oracle schema (dictionary queries) | `ORACLE_USER` |
-| `ORACLE_CONN_TYPE` | `service` (PDB) or `sid` (legacy) | `service` |
-| **Target DB** | | |
+| **Oracle + Target DB** | *run_setup.py에서 입력 → DB properties에 저장 → Test 시 자동 로드* | |
+| `ORACLE_HOST` | Oracle DB host (DB key: `ORACLE_HOST`) | — |
+| `ORACLE_SID` | Oracle Service Name (DB key: `ORACLE_SERVICE_NAME`) | — |
+| `ORACLE_USER` | Oracle user (DB key: `ORACLE_SVC_USER`) | — |
 | `PGHOST` / `MYSQL_HOST` | Target DB host | — |
-| `PGPORT` / `MYSQL_PORT` | Target DB port | `5432` / `3306` |
 | `PGDATABASE` / `MYSQL_DATABASE` | Target DB name | — |
-| `PGUSER` / `MYSQL_USER` | Target DB user | — |
-| `PGPASSWORD` / `MYSQL_PASSWORD` | Target DB password | — |

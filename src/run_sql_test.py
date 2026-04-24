@@ -194,7 +194,7 @@ def run(max_workers=8, auto_fix=False):
     TEST_DIR.mkdir(parents=True, exist_ok=True)
 
     # Set DB env vars from properties table
-    from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
+    from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars, _get_oracle_connection_vars
     conn_vars = _get_mysql_connection_vars() if dbms == 'mysql' else _get_pg_connection_vars()
     if not conn_vars:
         log_and_print(f"\nNo {display_name} connection info")
@@ -202,6 +202,14 @@ def run(max_workers=8, auto_fix=False):
         log_and_print(f"run_setup.py를 다시 실행하여 {display_name} 접속 정보를 설정하세요.")
         return
     os.environ.update(conn_vars)
+
+    # Load Oracle connection for TC generation + Compare (optional)
+    oracle_vars = _get_oracle_connection_vars()
+    if oracle_vars:
+        os.environ.update(oracle_vars)
+        log_and_print(f"  ✅ Oracle 접속 정보 로드 (TC 생성 + Compare 활성화)")
+    else:
+        log_and_print(f"  ℹ️  Oracle 미접속 — TC는 inference+LLM, Compare 스킵")
 
     from core.sql_executor import check_cli_available
     ok, cli_msg = check_cli_available()

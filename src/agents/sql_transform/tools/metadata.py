@@ -83,6 +83,57 @@ def _get_mysql_connection_vars() -> dict:
         return {}
 
 
+# --- Oracle (source DB for TC generation + Compare) ---
+_ORACLE_PROP_MAP = {
+    'ORACLE_HOST': 'ORACLE_HOST',
+    'ORACLE_PORT': 'ORACLE_PORT',
+    'ORACLE_SID': 'ORACLE_SERVICE_NAME',
+    'ORACLE_USER': 'ORACLE_SVC_USER',
+    'ORACLE_PASSWORD': 'ORACLE_SVC_PASSWORD',
+}
+
+
+def _get_oracle_connection_vars() -> dict:
+    """Get Oracle connection vars from env or DB properties.
+
+    Maps DB property keys (from run_setup.py) to env var keys expected by
+    tc_generator/result_comparator: ORACLE_SERVICE_NAME → ORACLE_SID, etc.
+    """
+    required = ['ORACLE_HOST', 'ORACLE_SID', 'ORACLE_USER']
+    if all(os.environ.get(v) for v in required):
+        return {k: os.environ[k] for k in _ORACLE_PROP_MAP if os.environ.get(k)}
+
+    # Load from DB properties table
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(str(DB_PATH), timeout=10)
+            try:
+                props = {}
+                for row in conn.execute("SELECT key, value FROM properties WHERE key LIKE 'ORACLE%'"):
+                    props[row[0]] = row[1]
+            finally:
+                conn.close()
+
+            if not props:
+                return {}
+
+            oracle_vars = {}
+            for env_key, prop_key in _ORACLE_PROP_MAP.items():
+                val = props.get(prop_key, '')
+                if val:
+                    oracle_vars[env_key] = val
+
+            # ORACLE_CONN_TYPE: always 'service' (run_setup uses SERVICE_NAME)
+            oracle_vars['ORACLE_CONN_TYPE'] = 'service'
+
+            if all(oracle_vars.get(v) for v in required):
+                return oracle_vars
+        except Exception:
+            pass
+
+    return {}
+
+
 def _init_metadata_table(conn):
     """Create target_metadata table if not exists. Migrate from legacy pg_metadata if found."""
     conn.execute("""
