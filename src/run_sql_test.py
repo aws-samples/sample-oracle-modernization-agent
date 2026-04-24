@@ -1,4 +1,5 @@
-"""Run SQL Test - Phase 1: Java bulk test, Phase 2: Agent fixes failures"""
+"""Run SQL Test — Phase 0: EXPLAIN, Phase 1: Execute, Phase 2: Agent fix"""
+import os
 import sys
 import sqlite3
 import threading
@@ -13,7 +14,7 @@ from core.progress import drain_progress
 from core.pipeline_logger import PipelineLogger
 from core.db_migrate import ensure_schema
 
-from agents.sql_test.tools.test_tools import run_bulk_test, explain_dml_batch, _update_tested, set_logger
+from agents.sql_test.tools.test_tools import explain_batch, execute_batch, _update_tested, set_logger
 from agents.sql_transform.tools.convert_sql import set_step
 from agents.sql_test.agent import create_sql_test_agent
 from core import history_writer as _hw
@@ -184,41 +185,12 @@ def run(max_workers=8, auto_fix=False):
     log_and_print(f"🧪 SQL Test 시작... [{time.strftime('%Y-%m-%d %H:%M:%S')}]")
     log_and_print("")
 
-    # Generate connection properties from DB based on TARGET_DBMS_TYPE
     dbms = get_target_dbms()
     display_name = get_target_db_display_name(dbms)
 
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-        cursor = conn.cursor()
-        if dbms == 'mysql':
-            cursor.execute("SELECT key, value FROM properties WHERE key LIKE 'MYSQL%'")
-        else:
-            cursor.execute("SELECT key, value FROM properties WHERE key LIKE 'PG%'")
-        db_props = dict(cursor.fetchall())
-
     TEST_DIR.mkdir(parents=True, exist_ok=True)
 
-    if dbms == 'mysql':
-        props_file = PROJECT_ROOT / "src" / "reference" / "mysql_connection.properties"
-        with open(props_file, 'w', encoding='utf-8') as f:
-            f.write(f"# Auto-generated MySQL connection parameters\n")
-            f.write(f"MYSQL_HOST={db_props.get('MYSQL_HOST', '')}\n")
-            f.write(f"MYSQL_PORT={db_props.get('MYSQL_PORT', '3306')}\n")
-            f.write(f"MYSQL_DATABASE={db_props.get('MYSQL_DATABASE', '')}\n")
-            f.write(f"MYSQL_USER={db_props.get('MYSQL_USER', '')}\n")
-            f.write(f"MYSQL_PASSWORD={db_props.get('MYSQL_PASSWORD', '')}\n")
-    else:
-        props_file = PROJECT_ROOT / "src" / "reference" / "pg_connection.properties"
-        with open(props_file, 'w', encoding='utf-8') as f:
-            f.write(f"# Auto-generated PostgreSQL connection parameters\n")
-            f.write(f"PGHOST={db_props.get('PGHOST', '')}\n")
-            f.write(f"PGPORT={db_props.get('PGPORT', '5432')}\n")
-            f.write(f"PGDATABASE={db_props.get('PGDATABASE', '')}\n")
-            f.write(f"PGUSER={db_props.get('PGUSER', '')}\n")
-            f.write(f"PGPASSWORD={db_props.get('PGPASSWORD', '')}\n")
-    log_and_print(f"Generated {props_file}")
-
-    # Pre-check: DB connection available?
+    # Set DB env vars from properties table
     from agents.sql_transform.tools.metadata import _get_pg_connection_vars, _get_mysql_connection_vars
     conn_vars = _get_mysql_connection_vars() if dbms == 'mysql' else _get_pg_connection_vars()
     if not conn_vars:
@@ -226,95 +198,116 @@ def run(max_workers=8, auto_fix=False):
         log_and_print("Test 단계를 수행하려면 DB 접속 정보가 필요합니다.")
         log_and_print(f"run_setup.py를 다시 실행하여 {display_name} 접속 정보를 설정하세요.")
         return
+    os.environ.update(conn_vars)
 
-    # Auto-generate parameters.properties if not exists
-    params_file = TRANSFORM_DIR / "parameters.properties"
-    if not params_file.exists():
-        log_and_print("\n📝 parameters.properties 자동 생성 중...")
-        from agents.sql_test.tools.generate_parameters import generate_parameters_file
-        gen_result = generate_parameters_file(str(params_file))
-        if gen_result.get('status') == 'success':
-            log_and_print(f"  ✅ {gen_result['param_count']}개 파라미터 생성 (metadata: {gen_result['matched_count']})")
-        else:
-            log_and_print("  ⚠️  파라미터 생성 실패 — Java 기본값 사용")
-    else:
-        log_and_print(f"\n📝 parameters.properties 존재 ({params_file})")
+    from core.sql_executor import check_cli_available
+    ok, cli_msg = check_cli_available()
+    if not ok:
+        log_and_print(f"\n❌ {cli_msg}")
+        log_and_print(f"psql 또는 mysql CLI가 PATH에 있어야 합니다.")
+        return
+    log_and_print(f"  ✅ CLI: {cli_msg}")
 
     # Pre-skip: mark non-testable items before test phases
     skip_count = _pre_mark_skips(log_and_print)
 
-    # Phase 0: EXPLAIN-based DML validation (no execution needed for DML test)
-    # SELECT is tested in Phase 1 via Java executor (actual DB execution)
-    log_and_print("\nPhase 0: DML 구문 검증 (EXPLAIN)...")
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    # Gather all testable items
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, target_file
             FROM transform_target_list
             WHERE validated = 'Y' AND tested = 'N'
-              AND LOWER(sql_type) IN ('insert', 'update', 'delete')
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
             ORDER BY mapper_file, seq_no
         """)
-        dml_rows = cursor.fetchall()
+        all_rows = cursor.fetchall()
+    finally:
+        conn.close()
 
-    if dml_rows:
-        dml_items = [
-            {'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2], 'target_file': r[3]}
-            for r in dml_rows
-        ]
-        log_and_print(f"  📋 DML 대상: {len(dml_items)}개 (INSERT/UPDATE/DELETE)")
-        explain_result = explain_dml_batch(dml_items)
+    all_items = [
+        {'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2], 'target_file': r[3]}
+        for r in all_rows
+    ]
 
-        if explain_result.get('status') == 'completed':
-            log_and_print(f"  ✅ EXPLAIN PASS: {explain_result['passed']}")
-            log_and_print(f"  ❌ EXPLAIN FAIL: {explain_result['failed']}")
-            for f in explain_result.get('failures', [])[:5]:
-                log_and_print(f"    ❌ {f['mapper_file']}/{f['sql_id']}: {f['error'][:100]}")
-            if explain_result['failed'] > 5:
-                log_and_print(f"    ... and {explain_result['failed'] - 5} more")
-            # Phase 0 JSON logging
-            fail_set = {(f['mapper_file'], f['sql_id']) for f in explain_result.get('failures', [])}
-            for item in dml_items:
-                key = (item['mapper_file'], item['sql_id'])
-                if key in fail_set:
-                    fail_info = next(f for f in explain_result['failures'] if (f['mapper_file'], f['sql_id']) == key)
-                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'fail',
-                                          phase=0, fail_category='sql_syntax',
-                                          error=fail_info.get('error', ''))
-                else:
-                    logger.log_sql_result(item['mapper_file'], item['sql_id'], 'success', phase=0)
-        elif explain_result.get('status') == 'skipped':
-            log_and_print(f"  ⚠️  DML EXPLAIN skipped: {explain_result.get('error', '')}")
+    if not all_items:
+        log_and_print("\n  ℹ️  테스트 대상 없음")
+        _finalize_logger(logger, start_time)
+        return
+
+    log_and_print(f"\n📋 테스트 대상: {len(all_items)}개 SQL")
+
+    # Phase 0: EXPLAIN — syntax check all types
+    log_and_print("\nPhase 0: 구문 검증 (EXPLAIN)...")
+    explain_result = explain_batch(all_items)
+
+    if explain_result.get('status') == 'skipped':
+        log_and_print(f"⚠️  EXPLAIN skipped: {explain_result.get('error', '')}")
+        log_and_print(f"{display_name} 접속 정보를 설정하세요")
+        return
+
+    explain_passed = explain_result.get('passed', 0)
+    explain_failed = explain_result.get('failed', 0)
+    log_and_print(f"  ✅ EXPLAIN PASS: {explain_passed}")
+    log_and_print(f"  ❌ EXPLAIN FAIL: {explain_failed}")
+    for f in explain_result.get('failures', [])[:5]:
+        log_and_print(f"    ❌ {f['mapper_file']}/{f['sql_id']}: {f['error'][:100]}")
+    if explain_failed > 5:
+        log_and_print(f"    ... and {explain_failed - 5} more")
+
+    # Phase 0 JSON logging
+    fail_set = {(f['mapper_file'], f['sql_id']) for f in explain_result.get('failures', [])}
+    for item in all_items:
+        key = (item['mapper_file'], item['sql_id'])
+        if key in fail_set:
+            fail_info = next(f for f in explain_result['failures'] if (f['mapper_file'], f['sql_id']) == key)
+            logger.log_sql_result(item['mapper_file'], item['sql_id'], 'fail',
+                                  phase=0, fail_category='sql_syntax',
+                                  error=fail_info.get('error', ''))
+        else:
+            logger.log_sql_result(item['mapper_file'], item['sql_id'], 'success', phase=0)
+
+    # Phase 1: Execute — EXPLAIN 통과한 항목만 실제 실행
+    # Reset EXPLAIN-passed items for execute phase
+    explain_passed_items = [item for item in all_items if (item['mapper_file'], item['sql_id']) not in fail_set]
+
+    if explain_passed_items:
+        # Reset tested flag for execute phase (EXPLAIN already marked them PASS)
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
+            for item in explain_passed_items:
+                from utils.db_utils import update_by_mapper
+                update_by_mapper(conn,
+                    "UPDATE transform_target_list SET tested='N', test_result=NULL WHERE mapper_file=? AND sql_id=?",
+                    item['mapper_file'], item['sql_id'])
+            conn.commit()
+        finally:
+            conn.close()
+
+        log_and_print(f"\nPhase 1: 실행 테스트 ({len(explain_passed_items)}개)...")
+        exec_result = execute_batch(explain_passed_items)
+
+        if exec_result.get('status') == 'completed':
+            passed = exec_result.get('passed', 0)
+            failed = exec_result.get('failed', 0)
+            failures = exec_result.get('failures', [])
+            log_and_print(f"  ✅ Passed: {passed}")
+            log_and_print(f"  ❌ Failed: {failed}")
+
+            for f in failures:
+                err = f.get('error', '')
+                logger.log_sql_result(
+                    f['mapper_file'], f['sql_id'], 'fail',
+                    phase=1, fail_category=_classify_error(err),
+                    error=err,
+                )
+        else:
+            log_and_print(f"  ⚠️  Execute skipped: {exec_result.get('error', '')}")
+            failures = []
     else:
-        log_and_print("  ℹ️  DML 대상 없음")
-
-    # Phase 1: Java bulk test (SELECT + remaining untested)
-    log_and_print("\nPhase 1: Java 일괄 테스트 실행...")
-    bulk_result = run_bulk_test()
-
-    if bulk_result.get('status') == 'skipped':
-        log_and_print(f"⚠️  {bulk_result['error']}")
-        log_and_print(f"{display_name} 접속 정보를 설정하세요 (env vars 또는 Parameter Store)")
-        return
-
-    if bulk_result.get('status') == 'error':
-        log_and_print(f"❌ Bulk test error: {bulk_result['error']}")
-        return
-
-    passed = bulk_result.get('passed', 0)
-    failed = bulk_result.get('failed', 0)
-    failures = bulk_result.get('failures', [])
-    log_and_print(f"  ✅ Passed: {passed}")
-    log_and_print(f"  ❌ Failed: {failed}")
-
-    # Phase 1 JSON logging for failures
-    for f in failures:
-        err = f.get('error', '')
-        logger.log_sql_result(
-            f['mapper_file'], f['sql_id'], 'fail',
-            phase=1, fail_category=_classify_error(err),
-            error=err,
-        )
+        log_and_print("\n  ℹ️  EXPLAIN 통과 항목 없음 — 실행 테스트 스킵")
+        failures = explain_result.get('failures', [])
 
     if not failures:
         with sqlite3.connect(str(DB_PATH)) as conn:
@@ -526,10 +519,10 @@ def _print_sql_type_distribution():
         type_rows = cursor.fetchall()
 
     test_methods = {
-        'select': 'Phase 1: Java 실행 (DB 직접 실행)',
-        'insert': 'Phase 0: EXPLAIN 검증',
-        'update': 'Phase 0: EXPLAIN 검증',
-        'delete': 'Phase 0: EXPLAIN 검증',
+        'select': 'EXPLAIN + Execute (LIMIT 100)',
+        'insert': 'EXPLAIN + Execute (BEGIN/ROLLBACK)',
+        'update': 'EXPLAIN + Execute (BEGIN/ROLLBACK)',
+        'delete': 'EXPLAIN + Execute (BEGIN/ROLLBACK)',
         'sql': '테스트 대상 아님 (SQL fragment)',
         'resultMap': '테스트 대상 아님',
     }
