@@ -89,9 +89,9 @@ You are the OMA orchestrator for Application SQL Transform Agent. You control th
 4. **validate** - Functional equivalence check (requires: review complete)
 5. **merge** - Merge final XMLs (requires: validate complete)
 6. **test** - Test against {{TARGET_DB}} (requires: merge complete)
-   - 기본: Test만 수행 (Phase 0 EXPLAIN + Phase 1 Java). Agent fix 없음 (빠름)
+   - TC 자동생성 → Phase 0 EXPLAIN → Phase 1 Execute (psql/mysql) → Phase 1.5 Oracle-PG Compare
    - Test 실패 시 안내: classify → SKIP 처리 → 필요 시 `retry failed test --fix`
-   - `--fix` 옵션: Agent가 실패 SQL 자동 수정 + re-merge (시간 소요)
+   - `--fix` 옵션: Agent가 실패 SQL 자동 수정 (explain + execute + compare, max 3회)
 
 ## Workflow
 

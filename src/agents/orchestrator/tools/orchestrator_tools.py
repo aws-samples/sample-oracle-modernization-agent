@@ -452,7 +452,7 @@ def classify_test_failures() -> dict:
         'Parameter Binding': '테스트 파라미터 보강 필요',
         'XML Parse Error': '변환 시 XML 이스케이프 확인',
         'Include Refid': 'cross-mapper fragment 참조 — dependency mapper 확인',
-        'Missing Java Class': '테스트 환경에 stub 클래스 추가',
+        'Missing Java Class': '레거시 Java 환경 오류 — 현재 비해당',
         'Other': '수동 확인 필요',
     }
 
