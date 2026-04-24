@@ -23,21 +23,34 @@ cd example
 
 ### After setup
 
-In the orchestrator, type commands like:
+CLI(Claude Code / Kiro)에서 자연어로 명령합니다:
 
-| Command | Description |
-|---------|-------------|
-| `전체 수행` | Run full pipeline (Analyze → Transform → Review → Validate → Merge) |
-| `분석 수행` | Analyze only — scan mappers, extract SQLs, generate strategy |
-| `변환 수행` | Transform only — Oracle → PostgreSQL conversion |
-| `샘플 변환 5개` | Sample transform — 5 representative SQLs first |
-| `리뷰 수행` | Review only — multi-perspective rule compliance check |
-| `검증 수행` | Validate only — functional equivalence verification |
-| `병합 수행` | Merge only — reassemble final mapper XMLs |
-| `진행 단계 확인` | Check pipeline status |
-| `종료` | Exit |
+| 명령 예시 | 동작 |
+|---------|------|
+| `파이프라인 현황 알려줘` | `check_setup` + `check_step_status` 호출 |
+| `전체 수행` | Analyze → Transform → Review → Validate → Merge 순차 실행 |
+| `변환 수행` | Transform 단계만 실행 |
+| `샘플 변환 3개` | 3개 대표 SQL만 변환 (전체 reset 없음) |
+| `selectUserList 재변환` | 특정 SQL 검색 → reset → 재변환 |
+| `test fail 분류하고 보고서 만들어` | `classify_test_failures` + `generate_test_report` |
+| `parameter 카테고리 전부 SKIP` | 인프라 실패 일괄 SKIP 처리 |
 
-> Test step is automatically skipped when no DB is configured. All other steps work without a database.
+> Test step requires DB connection (PG/MySQL). Without DB, test is skipped.
+> With Oracle DB, TC auto-generation + Oracle-PG result comparison enabled.
+
+### Pipeline Steps
+
+```
+Analyze → Transform → Review → Validate → Merge → Test
+                        ↓ FAIL
+                  Re-transform (max 3 rounds)
+
+Test: TC Gen → EXPLAIN (all) → Execute (SELECT) → Compare (if Oracle) → Agent fix
+```
+
+### Reports
+
+각 단계 종료 시 `output/reports/oma_report.html` 자동 재생성 — 브라우저에서 7개 탭 확인.
 
 ## What's included
 
@@ -53,5 +66,7 @@ In the orchestrator, type commands like:
 
 After running, check `example/output/`:
 - `example/output/xmls/transform/` — converted PostgreSQL mapper XMLs
-- `example/output/reports/` — diff reports (original vs converted)
+- `example/output/xmls/merge/` — final reassembled mapper XMLs
+- `example/output/reports/oma_report.html` — 통합 HTML 보고서 (7 tabs)
+- `example/output/test/test_cases.json` — auto-generated test parameters
 - `example/output/strategy/` — learned conversion patterns
