@@ -12,7 +12,7 @@ The SQL Validate Agent focuses exclusively on functional equivalence between ori
 - Maintaining MyBatis XML integrity
 - Prerequisite: only processes SQL where `reviewed='Y'` (Review passed)
 
-**Model**: Claude Sonnet 4.5 (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`)
+**Model**: Claude Opus 4.6 (`global.anthropic.claude-opus-4-6-v1`)
 
 ## Directory Structure
 

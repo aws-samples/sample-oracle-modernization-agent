@@ -127,7 +127,7 @@ Pipeline Steps:
 
 ## Model Configuration
 
-- **Model**: Claude Sonnet 4.5 (via Bedrock)
+- **Model**: Claude Opus 4.6 (via Bedrock)
 - **Max Tokens**: 16000 (sufficient for SQL diffs)
 - **Prompt Caching**: Enabled (caches prompt.md)
 

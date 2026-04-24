@@ -207,7 +207,7 @@ python3 src/run_sql_transform.py --workers 4
 
 ## Model Configuration
 
-- **Model:** Claude Sonnet 4.5 (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`)
+- **Model:** Claude Opus 4.6 (`global.anthropic.claude-opus-4-6-v1`)
 - **Max Tokens:** 64,000
 - **Prompt Caching:** Enabled for performance optimization
 - **Parallel Agents:** Multiple model instances for concurrent processing
