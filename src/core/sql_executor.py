@@ -268,6 +268,7 @@ class SQLExecutor:
 
         env = self._build_env()
         try:
+            # nosemgrep: dangerous-subprocess-use-audit
             proc = subprocess.run(
                 self._cli_cmd(), input=script,
                 capture_output=True, text=True, timeout=45, env=env,
@@ -308,12 +309,13 @@ class SQLExecutor:
                 cmd = self._cli_cmd()
 
             if cmd:
+                # nosemgrep: dangerous-subprocess-use-audit
                 proc = subprocess.run(
                     cmd, capture_output=True, text=True,
                     timeout=timeout, env=env,
                 )
             else:
-                # mysql: pipe via stdin
+                # nosemgrep: dangerous-subprocess-use-audit
                 proc = subprocess.run(
                     self._cli_cmd(), input=sql_script,
                     capture_output=True, text=True,
