@@ -96,18 +96,21 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
     Extracts text from AgentResult via str().
     """
     agent = agent_factory()
-    result = agent(
-        f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
-        f"For each: read_sql_source for original, read_transform for converted, "
-        f"then check according to your review checklist. "
-        f"Output your results as the specified JSON format."
-    )
-    output = str(result)
+    try:
+        result = agent(
+            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
+            f"For each: read_sql_source for original, read_transform for converted, "
+            f"then check according to your review checklist. "
+            f"Output your results as the specified JSON format."
+        )
+        output = str(result)
+    finally:
+        del agent  # release boto3 HTTP connections
+
     parsed = _extract_json(output)
     if parsed and "results" in parsed:
         return parsed
 
-    # Fallback: return FAIL with raw output as context
     return {
         "perspective": perspective_name,
         "results": {},
@@ -168,8 +171,11 @@ def _llm_validate_criticals(critical_issues: list[dict]) -> list[str]:
             system_prompt=_FACILITATOR_PROMPT,
             callback_handler=None,
         )
-        result = agent(f"Evaluate these CRITICAL findings:\n\n{findings_text}")
-        output_text = str(result).strip()
+        try:
+            result = agent(f"Evaluate these CRITICAL findings:\n\n{findings_text}")
+            output_text = str(result).strip()
+        finally:
+            del agent
         # Extract JSON array — try raw parse, then fence extraction
         parsed = None
         try:

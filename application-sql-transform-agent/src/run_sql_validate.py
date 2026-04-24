@@ -77,11 +77,14 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
 
             # Run agent (callback_handler=None suppresses streaming output)
             agent = create_agent()
-            agent(
-                f"Validate the following SQL IDs in {mapper_file}: {ids_str}\n"
-                f"For each SQL ID: read_sql_source for original, read_transform for converted, compare and validate.\n"
-                f"If PASS: call set_validated. If FAIL: fix with convert_sql then call set_validated."
-            )
+            try:
+                agent(
+                    f"Validate the following SQL IDs in {mapper_file}: {ids_str}\n"
+                    f"For each SQL ID: read_sql_source for original, read_transform for converted, compare and validate.\n"
+                    f"If PASS: call set_validated. If FAIL: fix with convert_sql then call set_validated."
+                )
+            finally:
+                del agent  # release boto3 HTTP connections
 
             # Drain queue (best-effort) but advance by group size regardless
             drain_progress()

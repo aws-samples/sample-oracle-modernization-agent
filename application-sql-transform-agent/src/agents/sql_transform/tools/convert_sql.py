@@ -42,15 +42,16 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
     # Read original Oracle SQL for reference
     original = ""
     try:
-        with sqlite3.connect(str(DB_PATH), timeout=5) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        _conn = sqlite3.connect(str(DB_PATH), timeout=5)
+        try:
+            _row = _conn.execute(
                 "SELECT source_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
                 (mapper_file, sql_id)
-            )
-            row = cursor.fetchone()
-        if row and Path(row[0]).exists():
-            original = Path(row[0]).read_text(encoding='utf-8')
+            ).fetchone()
+        finally:
+            _conn.close()
+        if _row and Path(_row[0]).exists():
+            original = Path(_row[0]).read_text(encoding='utf-8')
     except Exception:
         pass
 
@@ -77,16 +78,16 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
         mapper_file: Source mapper file name
         notes: Conversion notes (e.g. 'MANUAL_REVIEW')
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-        cursor = conn.cursor()
-
-        # Get target_file and source info from DB
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         from utils.db_utils import query_by_mapper
         row = query_by_mapper(
-            cursor,
+            conn.cursor(),
             "SELECT id, target_file, source_file, namespace, sql_type, seq_no FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
             mapper_file, sql_id
         )
+    finally:
+        conn.close()
 
     if not row:
         return {'status': 'error', 'message': f'Not found in DB: {mapper_file}/{sql_id}'}
@@ -182,13 +183,16 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
 
     # Update DB flag
     def _update_db():
-        with sqlite3.connect(str(DB_PATH), timeout=10) as conn2:
+        conn2 = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
             conn2.execute("""
                 UPDATE transform_target_list
                 SET transformed = 'Y', current_step = 'review', updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (record_id,))
             conn2.commit()
+        finally:
+            conn2.close()
 
     _db_execute_with_retry(_update_db)
 
