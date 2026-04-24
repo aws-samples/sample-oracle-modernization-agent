@@ -10,3 +10,9 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "rich>=13.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-timeout>=2.4.0",
+]

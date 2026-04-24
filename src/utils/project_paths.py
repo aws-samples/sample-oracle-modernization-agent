@@ -34,13 +34,11 @@ MERGE_DIR = XMLS_DIR / "merge"
 TEST_DIR = OUTPUT_DIR / "test"
 
 # Model configuration
-# ⚠️ Prompt Caching 미지원 모델 사용 시 API 비용 5~10배 증가 주의
-DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-# DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"  # 캐싱 미지원 (2026-02-21)
-# DEFAULT_MODEL_ID = "global.anthropic.claude-opus-4-6-v1[1m]"  # 캐싱 미지원 (2026-03-04)
+DEFAULT_MODEL_ID = "global.anthropic.claude-opus-4-6-v1"
+# DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"  # 저비용 (Prompt Caching 지원)
 
 # Lite model — 경량 판단용 (Facilitator, 요약 등)
-DEFAULT_LITE_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+DEFAULT_LITE_MODEL_ID = "global.anthropic.claude-sonnet-4-6-v1:0"
 
 
 def _load_from_db(key: str) -> str | None:

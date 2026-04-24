@@ -112,9 +112,9 @@ Agents use SystemContentBlock with cachePoints for cost optimization:
 ## Critical Coding Rules
 
 ### Model Selection
-- **Main model:** `claude-sonnet-4-5-20250929` (`MODEL_ID`) — Prompt Caching supported
-- **Lite model:** `claude-haiku-4-5-20251001` (`LITE_MODEL_ID`) — for Facilitator/summaries
-- **Never use** Sonnet 4.6 or Opus 4.6 — Prompt Caching not supported, costs 5-10x more
+- **Main model:** `claude-opus-4-6` (`MODEL_ID`) — highest quality
+- **Lite model:** `claude-sonnet-4-6` (`LITE_MODEL_ID`) — for Facilitator/summaries
+- **Fallback (저비용):** `claude-sonnet-4-5-20250929` — Prompt Caching supported
 
 ### DB Access Patterns
 - **StateManager** uses SQLAlchemy ORM — use it for transform_target_list operations
