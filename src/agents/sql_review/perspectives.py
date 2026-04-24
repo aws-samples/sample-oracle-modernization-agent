@@ -248,8 +248,8 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
 
         # Collect syntax issues
         if syntax_parse_error:
-            issues.append({"severity": "WARNING", "description": "[Syntax] Review agent output could not be parsed — manual review needed"})
-            has_warning = True
+            issues.append({"severity": "CRITICAL", "description": "[Syntax] Review agent output could not be parsed — manual review needed"})
+            has_critical = True
         else:
             syn = syntax_results.get(sql_id, {})
             if syn.get("result") == "FAIL":
@@ -262,13 +262,13 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
                     else:
                         has_warning = True
             elif not syn:
-                issues.append({"severity": "WARNING", "description": f"[Syntax] No review result returned for {sql_id}"})
-                has_warning = True
+                issues.append({"severity": "CRITICAL", "description": f"[Syntax] No review result returned for {sql_id}"})
+                has_critical = True
 
         # Collect equivalence issues
         if equiv_parse_error:
-            issues.append({"severity": "WARNING", "description": "[Equivalence] Review agent output could not be parsed — manual review needed"})
-            has_warning = True
+            issues.append({"severity": "CRITICAL", "description": "[Equivalence] Review agent output could not be parsed — manual review needed"})
+            has_critical = True
         else:
             eq = equiv_results.get(sql_id, {})
             if eq.get("result") == "FAIL":
@@ -281,8 +281,8 @@ def _facilitate(syntax_result: dict, equivalence_result: dict, sql_ids: list[str
                     else:
                         has_warning = True
             elif not eq:
-                issues.append({"severity": "WARNING", "description": f"[Equivalence] No review result returned for {sql_id}"})
-                has_warning = True
+                issues.append({"severity": "CRITICAL", "description": f"[Equivalence] No review result returned for {sql_id}"})
+                has_critical = True
 
         # LLM facilitator: validate CRITICAL findings for self-contradiction
         issues = _apply_facilitator_judgment(issues)
