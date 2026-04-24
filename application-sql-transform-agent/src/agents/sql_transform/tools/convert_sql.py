@@ -193,15 +193,19 @@ def convert_sql(sql_id: str, converted_sql: str, mapper_file: str, notes: str = 
     _db_execute_with_retry(_update_db)
 
     # Append-only transform history (non-fatal on failure)
+    attempt_no = 1
     try:
-        with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
+        hist_conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
             n_prior = hist_conn.execute(
                 "SELECT COUNT(*) FROM transform_history WHERE mapper_file=? AND sql_id=?",
                 (mapper_file, sql_id),
             ).fetchone()[0]
-        attempt_no = int(n_prior or 0) + 1
+            attempt_no = int(n_prior or 0) + 1
+        finally:
+            hist_conn.close()
     except Exception:
-        attempt_no = 1
+        pass
 
     original_sql_body = ""
     try:

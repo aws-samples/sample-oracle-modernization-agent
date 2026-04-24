@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Application SQL Transform Agent — a sub-module of OMA (Oracle Modernization Agent). AI-powered Multi-Agent system that converts Oracle SQL to PostgreSQL/MySQL in MyBatis Mapper XML files. Uses Strands Agents SDK with AWS Bedrock (Claude Sonnet 4.5) to automatically transform, review, validate, and test SQL conversions.
+Application SQL Transform Agent — a sub-module of OMA (Oracle Modernization Agent). AI-powered Multi-Agent system that converts Oracle SQL to PostgreSQL/MySQL in MyBatis Mapper XML files. Uses Strands Agents SDK with AWS Bedrock (Claude Opus 4.6) to automatically transform, review, validate, and test SQL conversions.
 
 ## Setup & Run
 
@@ -19,8 +19,11 @@ cd src && PYTHONPATH=. python3 run_setup.py
 # Run — main REPL orchestrator (Strands Agent, 21 tools, natural language)
 cd src && PYTHONPATH=. python3 run_orchestrator.py
 
-# Run example (self-contained demo with 3 mapper XMLs, 42 SQLs)
+# Run example (self-contained demo with 3 mapper XMLs, 44 SQLs)
 cd example && ./setup.sh && ./run.sh
+
+# View results — self-contained HTML report regenerated after every step
+open output/reports/oma_report.html
 ```
 
 ### Pipeline Steps (individual execution)
@@ -50,7 +53,7 @@ src/
 ├── run_*.py             # Pipeline runners
 ├── core/                # DB models, state manager (shared)
 ├── utils/               # Path constants
-├── reference/           # Conversion rules, Java test tools
+├── reference/           # Conversion rules
 ├── skills/              # Skill definitions (shared, symlinked)
 ├── AGENT.md             # Shared agent guide
 └── CLAUDE.md            # Claude Code specific
@@ -66,7 +69,7 @@ src/
 | **Transform** | `src/agents/sql_transform/` | Oracle → Target DB conversion |
 | **Review** | `src/agents/sql_review/` | Multi-perspective: Syntax + Equivalence agents in parallel → LLM Facilitator |
 | **Validate** | `src/agents/sql_validate/` | Functional equivalence verification |
-| **Test** | `src/agents/sql_test/` | Phase 0: EXPLAIN DML, Phase 1: Java SELECT (MERGE_DIR), Phase 2: Agent fix + auto re-merge |
+| **Test** | `src/agents/sql_test/` | Phase 0: EXPLAIN all, Phase 1: Execute (psql/mysql CLI), Phase 1.5: Oracle-PG Compare, Phase 2: Agent fix |
 | **Strategy Refine** | `src/agents/strategy_refine/` | Strategy learning and compression |
 
 Each agent directory follows: `agent.py` (factory), `tools/` (Strands @tool functions), `prompt.md` (system prompt).
@@ -78,11 +81,13 @@ Setup → Analyze → Transform → Review → Validate → Merge → Test
                                 ↓ FAIL (specific feedback)
                           Re-transform (max 3 rounds, round 2+: Strategy Refine)
 
-Test Flow (Phase 0 → Phase 1 → Phase 2):
+Test Flow (TC Gen → Phase 0 → Phase 1 → Phase 1.5 → Phase 2):
+  TC Gen: Auto-generate test cases (7-source: Oracle dict + inference + LLM)
   Pre-skip: sql/resultMap → SKIP
-  Phase 0: EXPLAIN (DML only) → PASS/FAIL
-  Phase 1: Java bulk test (SELECT only, MERGE_DIR, --select-only) → PASS/FAIL
-  Phase 2: Agent fix → convert_sql → auto re-merge → re-test
+  Phase 0: EXPLAIN (all SQL types) → PASS/FAIL
+  Phase 1: Execute via psql/mysql CLI (SELECT LIMIT + DML ROLLBACK) → PASS/FAIL
+  Phase 1.5: Oracle-PG Compare (row count, if Oracle available) → PASS/FAIL
+  Phase 2: Agent fix (Opus 4.6, explain + execute + compare, max 3 attempts)
   Reports: test_result_report.md (Pass/Fail/Skip by category)
 ```
 
@@ -93,6 +98,9 @@ Test Flow (Phase 0 → Phase 1 → Phase 2):
 - **`src/core/progress.py`** — Real-time progress tracking
 - **`src/utils/project_paths.py`** — All path constants, model IDs, DB path resolution, target DBMS config (`get_target_dbms()`, `get_rules_path()`, `load_prompt_text()`)
 - **`src/utils/db_utils.py`** — Common mapper_file resolution (`query_by_mapper()`, `update_by_mapper()`) — handles both `sub_dir/filename` and `filename` formats
+- **`src/core/sql_executor.py`** — CLI-based SQL executor (psql/mysql/sqlplus, batch marker pattern)
+- **`src/core/tc_generator.py`** — Test case auto-generator (7-source priority chain)
+- **`src/core/result_comparator.py`** — Oracle vs Target DB result comparator
 
 ### 2-Tier Rule System
 
@@ -109,9 +117,9 @@ Agents use SystemContentBlock with cachePoints for cost optimization:
 ## Critical Coding Rules
 
 ### Model Selection
-- **Main model:** `claude-sonnet-4-5-20250929` (`MODEL_ID`) — Prompt Caching supported
-- **Lite model:** `claude-haiku-4-5-20251001` (`LITE_MODEL_ID`) — for Facilitator/summaries
-- **Never use** Sonnet 4.6 or Opus 4.6 — Prompt Caching not supported, costs 5-10x more
+- **Main model:** `claude-opus-4-6` (`MODEL_ID`) — highest quality
+- **Lite model:** `claude-sonnet-4-6` (`LITE_MODEL_ID`) — for Facilitator/summaries
+- **Fallback (저비용):** `claude-sonnet-4-5-20250929` — Prompt Caching supported
 
 ### DB Access Patterns
 - **StateManager** uses SQLAlchemy ORM — use it for transform_target_list operations
@@ -134,7 +142,13 @@ Agents use SystemContentBlock with cachePoints for cost optimization:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OMA_OUTPUT_DIR` | Working directory (DB + all output) | `./output/` |
-| `OMA_MODEL_ID` | Bedrock model for agents | Sonnet 4.5 cross-region |
-| `OMA_LITE_MODEL_ID` | Bedrock model for Facilitator | Haiku 4.5 |
+| `OMA_MODEL_ID` | Bedrock model for agents | Opus 4.6 cross-region |
+| `OMA_LITE_MODEL_ID` | Bedrock model for Facilitator | Sonnet 4.6 |
 | `TARGET_DBMS_TYPE` | Target DB type (`postgresql` or `mysql`) | DB property or `postgresql` |
 | `AWS_DEFAULT_REGION` | AWS region | — |
+| **Oracle + Target DB** | *run_setup.py에서 입력 → DB properties에 저장 → Test 시 자동 로드* | |
+| `ORACLE_HOST` | Oracle DB host (DB key: `ORACLE_HOST`) | — |
+| `ORACLE_SID` | Oracle Service Name (DB key: `ORACLE_SERVICE_NAME`) | — |
+| `ORACLE_USER` | Oracle user (DB key: `ORACLE_SVC_USER`) | — |
+| `PGHOST` / `MYSQL_HOST` | Target DB host | — |
+| `PGDATABASE` / `MYSQL_DATABASE` | Target DB name | — |

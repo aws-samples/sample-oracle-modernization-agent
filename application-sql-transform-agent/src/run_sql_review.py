@@ -218,7 +218,7 @@ def _retransform_failures():
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             for entry in sql_entries:
                 conn.execute(
-                    "UPDATE transform_target_list SET reviewed='N' WHERE mapper_file=? AND sql_id=?",
+                    "UPDATE transform_target_list SET reviewed='N', current_step='transform' WHERE mapper_file=? AND sql_id=?",
                     (mapper, entry['sql_id'])
                 )
             conn.commit()

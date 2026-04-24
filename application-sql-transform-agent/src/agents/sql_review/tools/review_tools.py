@@ -55,12 +55,38 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
     next_step = 'validate' if reviewed_flag == 'Y' else 'review'
     for i in range(5):
         try:
-            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
-                from utils.db_utils import update_by_mapper
+            conn = sqlite3.connect(str(DB_PATH), timeout=10)
+            try:
+                from utils.db_utils import update_by_mapper, query_by_mapper
                 update_by_mapper(conn,
                     "UPDATE transform_target_list SET reviewed=?, review_result=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
                     mapper_file, sql_id, extra_params=(reviewed_flag, feedback_to_store, next_step))
                 conn.commit()
+
+                # History round_no + target_file in same connection
+                round_no = 1
+                try:
+                    n_prior = conn.execute(
+                        "SELECT COUNT(*) FROM review_history WHERE mapper_file=? AND sql_id=?",
+                        (mapper_file, sql_id),
+                    ).fetchone()[0]
+                    round_no = int(n_prior or 0) + 1
+                except Exception:
+                    pass
+
+                reviewed_sql_body = ""
+                try:
+                    row = query_by_mapper(
+                        conn.cursor(),
+                        "SELECT target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+                        mapper_file, sql_id,
+                    )
+                    if row and Path(row[0]).exists():
+                        reviewed_sql_body = Path(row[0]).read_text(encoding='utf-8')
+                except Exception:
+                    pass
+            finally:
+                conn.close()
 
             if result == 'PASS':
                 flag = "✅ PASS"
@@ -69,31 +95,6 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
             else:
                 flag = "❌ FAIL"
             print(f"  {flag} {mapper_file}/{sql_id} {violations}")
-
-            # Append-only review history (non-fatal on failure)
-            try:
-                with sqlite3.connect(str(DB_PATH), timeout=10) as hist_conn:
-                    n_prior = hist_conn.execute(
-                        "SELECT COUNT(*) FROM review_history WHERE mapper_file=? AND sql_id=?",
-                        (mapper_file, sql_id),
-                    ).fetchone()[0]
-                round_no = int(n_prior or 0) + 1
-            except Exception:
-                round_no = 1
-
-            reviewed_sql_body = ""
-            try:
-                with sqlite3.connect(str(DB_PATH), timeout=5) as tgt_conn:
-                    from utils.db_utils import query_by_mapper
-                    row = query_by_mapper(
-                        tgt_conn.cursor(),
-                        "SELECT target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-                        mapper_file, sql_id,
-                    )
-                if row and Path(row[0]).exists():
-                    reviewed_sql_body = Path(row[0]).read_text(encoding='utf-8')
-            except Exception:
-                pass
 
             _hw.record_review(
                 mapper_file=mapper_file,
@@ -105,7 +106,6 @@ def set_reviewed(mapper_file: str, sql_id: str, result: str, violations: str = "
                 mapper_path=_hw.resolve_mapper_path(mapper_file),
             )
 
-            # Emit progress event via thread-safe queue
             from core.progress import emit_progress
             emit_progress(mapper_file, sql_id, result, violations)
             return {'status': 'ok', 'sql_id': sql_id, 'result': result, 'violations': violations}

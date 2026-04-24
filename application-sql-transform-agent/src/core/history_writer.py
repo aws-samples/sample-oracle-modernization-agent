@@ -19,14 +19,20 @@ from typing import Any
 from utils.project_paths import DB_PATH, PROJECT_ROOT
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), timeout=15, isolation_level=None)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=15000")
-    except sqlite3.OperationalError:
-        pass
-    return conn
+class _connect:
+    """Context manager that opens AND closes a SQLite connection on exit."""
+    def __enter__(self) -> sqlite3.Connection:
+        self._conn = sqlite3.connect(str(DB_PATH), timeout=15, isolation_level=None)
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=15000")
+        except sqlite3.OperationalError:
+            pass
+        return self._conn
+
+    def __exit__(self, *exc):
+        self._conn.close()
+        return False
 
 
 def _execute_with_retry(conn: sqlite3.Connection, sql: str, params: tuple, retries: int = 8) -> None:

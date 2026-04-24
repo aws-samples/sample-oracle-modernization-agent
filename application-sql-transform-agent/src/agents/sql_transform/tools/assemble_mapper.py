@@ -152,5 +152,14 @@ def assemble_mapper(mapper_file: str) -> dict:
     output_path = merge_dir / file_name_only
     output_path.write_text(converted_content, encoding='utf-8')
 
+    # Update current_step for merged SQLs
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        conn.execute(
+            "UPDATE transform_target_list SET current_step='test', updated_at=CURRENT_TIMESTAMP "
+            "WHERE mapper_file=? AND transformed='Y'",
+            (mapper_file,)
+        )
+        conn.commit()
+
     print(f"📦 Merged: {output_path} ({success}/{len(conv_map)} SQLs)")
     return {'output_path': str(output_path), 'total': len(conv_map), 'success': success}

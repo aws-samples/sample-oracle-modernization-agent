@@ -452,7 +452,7 @@ def classify_test_failures() -> dict:
         'Parameter Binding': '테스트 파라미터 보강 필요',
         'XML Parse Error': '변환 시 XML 이스케이프 확인',
         'Include Refid': 'cross-mapper fragment 참조 — dependency mapper 확인',
-        'Missing Java Class': '테스트 환경에 stub 클래스 추가',
+        'Missing Java Class': '레거시 Java 환경 오류 — 현재 비해당',
         'Other': '수동 확인 필요',
     }
 
@@ -580,39 +580,51 @@ def generate_test_report() -> dict:
 
 @tool
 def setup_test_parameters() -> dict:
-    """Generate or regenerate parameters.properties for test execution.
+    """Generate test cases for all pending SQL IDs using TC auto-generator.
 
     Use when: "parameter setup", "파라미터 초기화", "파라미터 생성",
-    "parameters.properties 만들어줘", "테스트 파라미터 세팅"
+    "TC 생성", "테스트 케이스 만들어줘", "테스트 파라미터 세팅"
 
-    Scans transform XMLs and generates type-appropriate parameter values:
-    - <if test="xxx != null"> params → empty (skip dynamic blocks)
-    - Metadata-matched params → type-accurate values
-    - SQL ::cast params → cast-based values
-    - Others → default '1'
-
-    Force regeneration even if file already exists.
+    7-source priority chain: custom binds → Oracle sample → V$SQL_BIND_CAPTURE
+    → column stats → FK sampling → inference → LLM.
+    Falls back to inference + LLM when Oracle unavailable.
     """
-    from utils.project_paths import TRANSFORM_DIR
-    from agents.sql_test.tools.generate_parameters import generate_parameters_file
+    import sqlite3
+    from utils.project_paths import DB_PATH
+    from core.tc_generator import TCGenerator
 
-    params_file = str(TRANSFORM_DIR / "parameters.properties")
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
+        rows = conn.execute("""
+            SELECT mapper_file, sql_id, target_file
+            FROM transform_target_list
+            WHERE validated = 'Y'
+              AND LOWER(sql_type) IN ('select', 'insert', 'update', 'delete')
+            ORDER BY mapper_file, seq_no
+        """).fetchall()
+    finally:
+        conn.close()
 
-    # Delete existing to force regeneration
-    from pathlib import Path
-    p = Path(params_file)
-    if p.exists():
-        p.unlink()
-        print(f"  🗑️  기존 parameters.properties 삭제", flush=True)
+    if not rows:
+        return {'status': 'empty', 'tc_count': 0}
 
-    result = generate_parameters_file(params_file)
+    items = [{'mapper_file': r[0], 'sql_id': r[1], 'target_file': r[2]} for r in rows]
 
-    if result.get('status') == 'success':
-        print(f"  ✅ parameters.properties 생성 완료", flush=True)
-    else:
-        print(f"  ⚠️  생성 실패: {result}", flush=True)
+    gen = TCGenerator()
+    tc_map = gen.generate_batch(items)
+    tc_path = gen.save_tc_json(tc_map)
 
-    return result
+    tc_total = sum(len(v) for v in tc_map.values())
+    sources = {}
+    for cases in tc_map.values():
+        for tc in cases:
+            sources[tc.source] = sources.get(tc.source, 0) + 1
+    source_str = ", ".join(f"{k}:{v}" for k, v in sorted(sources.items()))
+
+    print(f"  ✅ TC 생성 완료: {tc_total}개 ({source_str})", flush=True)
+    print(f"  📄 {tc_path}", flush=True)
+
+    return {'status': 'success', 'tc_count': tc_total, 'output_path': str(tc_path)}
 
 
 @tool
@@ -667,20 +679,20 @@ def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
                 if step_name == 'test':
                     cursor.execute("""
                         UPDATE transform_target_list
-                        SET tested='N', test_result=NULL
+                        SET tested='N', test_result=NULL, current_step='test'
                         WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
                     """)
                 elif step_name == 'validate':
                     cursor.execute("""
                         UPDATE transform_target_list
-                        SET validated='N', validation_result=NULL
+                        SET validated='N', validation_result=NULL, current_step='validate'
                         WHERE validated='Y' AND validation_result IS NOT NULL AND validation_result NOT IN ('PASS', 'FIXED')
                     """)
                 elif step_name == 'review':
-                    cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE reviewed='F'")
+                    cursor.execute("UPDATE transform_target_list SET reviewed='N', current_step='review' WHERE reviewed='F'")
                 else:
                     cursor.execute("""
-                        UPDATE transform_target_list SET transformed='N'
+                        UPDATE transform_target_list SET transformed='N', current_step='transform'
                         WHERE transformed='Y' AND reviewed='F'
                     """)
                 count = cursor.rowcount
