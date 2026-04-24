@@ -185,7 +185,7 @@ export AWS_SECRET_ACCESS_KEY="..."
 export AWS_DEFAULT_REGION="us-east-1"
 
 # 4. Configure environment
-#    Optional: export OMA_LITE_MODEL_ID="us.anthropic.claude-haiku-4-5-20250929-v1:0"
+#    Optional: export OMA_LITE_MODEL_ID="global.anthropic.claude-sonnet-4-6"
 #    Optional: export OMA_OUTPUT_DIR="/path/to/output"
 python3 src/run_setup.py
 ```
@@ -463,8 +463,8 @@ See [System Documentation](docs/SYSTEM_DOCUMENTATION.md) for details.
 
 > **Warning: Model Selection**
 > OMA relies on **Prompt Caching** (3-Block strategy) for cost optimization.
-> Only use models that support Bedrock Prompt Caching (e.g. Claude Sonnet 4.5).
-> Models without caching support (e.g. Claude Sonnet 4.6, Opus 4.6) will result in **5-10x higher API costs**.
+> Default model: Claude Opus 4.6 (highest quality). Fallback: Claude Sonnet 4.5 (Prompt Caching, lower cost).
+> Opus 4.6 does not support Prompt Caching — for cost-sensitive environments, switch to Sonnet 4.5.
 > Check [AWS Bedrock Prompt Caching docs](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html) before changing `OMA_MODEL_ID`.
 
 <details>
@@ -480,8 +480,8 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 
 > **경고: 모델 선택 주의**
 > OMA는 **Prompt Caching** (3-Block 전략)에 의존하여 비용을 최적화합니다.
-> 반드시 Bedrock Prompt Caching을 지원하는 모델(예: Claude Sonnet 4.5)을 사용하세요.
-> 캐싱 미지원 모델(예: Claude Sonnet 4.6, Opus 4.6)을 사용하면 **API 비용이 5~10배 증가**합니다.
+> 기본 모델: Claude Opus 4.6 (최고 품질). 저비용 대안: Claude Sonnet 4.5 (Prompt Caching 지원).
+> Opus 4.6은 Prompt Caching 미지원 — 비용이 중요한 환경에서는 Sonnet 4.5로 전환하세요.
 > `OMA_MODEL_ID` 변경 전 [AWS Bedrock Prompt Caching 문서](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)를 확인하세요.
 
 </details>
@@ -490,7 +490,7 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 
 | Layer | Technology |
 |-------|-----------|
-| **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
+| **AI** | Strands Agents SDK · Claude Opus 4.6 (Bedrock) · Claude Sonnet 4.6 (Facilitator) |
 | **Runtime** | Python 3.11 · uv (package manager) · ThreadPoolExecutor (8 parallel) |
 | **DB** | SQLite (state management) · PostgreSQL/MySQL (target DB) |
 | **UI** | Rich (progress bar · tables · colored diff) |
@@ -502,7 +502,7 @@ Prompt Caching으로 API 비용 80% 절감 (캐시 히트율 90%+)
 
 | 레이어 | 기술 |
 |--------|------|
-| **AI** | Strands Agents SDK · Claude Sonnet 4.5 (Bedrock) · Claude Haiku 4.5 (Facilitator) · Prompt Caching |
+| **AI** | Strands Agents SDK · Claude Opus 4.6 (Bedrock) · Claude Sonnet 4.6 (Facilitator) |
 | **Runtime** | Python 3.11 · uv (패키지 관리) · ThreadPoolExecutor (병렬 8) |
 | **DB** | SQLite (상태 관리) · PostgreSQL/MySQL (타겟 DB) |
 | **UI** | Rich (progress bar · 테이블 · 컬러 diff) |
