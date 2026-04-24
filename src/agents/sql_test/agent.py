@@ -6,7 +6,7 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 from strands.types.content import SystemContentBlock
 
-from .tools.test_tools import run_bulk_test, run_single_test, get_test_failures
+from .tools.test_tools import run_single_test, explain_single, compare_single, get_test_failures
 from agents.sql_transform.tools.load_mapper_list import read_sql_source
 from agents.sql_validate.tools.validate_tools import read_transform
 from agents.sql_transform.tools.convert_sql import convert_sql
@@ -40,7 +40,8 @@ def create_sql_test_agent(*, suppress_streaming: bool = False) -> Agent:
         "model": model,
         "system_prompt": _load_system_prompt(),
         "tools": [get_test_failures, read_sql_source, read_transform,
-                  convert_sql, run_single_test, lookup_column_type],
+                  convert_sql, run_single_test, explain_single,
+                  compare_single, lookup_column_type],
     }
     if suppress_streaming:
         kwargs["callback_handler"] = None

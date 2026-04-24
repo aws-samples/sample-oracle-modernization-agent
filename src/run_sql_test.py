@@ -134,8 +134,11 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
             f"2. read_transform() to get current converted SQL\n"
             f"3. Analyze the error against both original and converted SQL, apply General Conversion Rules\n"
             f"4. convert_sql() to save the fix\n"
-            f"5. run_single_test() to verify\n"
-            f"6. If still fails, try once more. After 2 attempts, skip with MANUAL_REVIEW note.\n"
+            f"5. explain_single() for quick syntax check\n"
+            f"6. convert_sql() to save the fix\n"
+            f"7. run_single_test() to verify execution\n"
+            f"8. compare_single() to verify results match Oracle\n"
+            f"9. If still fails after 3 attempts, skip with MANUAL_REVIEW note.\n"
         )
 
         # Drain queue and advance by total sql_errors count
