@@ -12,10 +12,13 @@ def load_mapper_list() -> dict:
     Returns:
         Dict with mappers list containing file_path, file_name, relative_path
     """
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT file_path, file_name, relative_path FROM source_xml_list ORDER BY id")
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     mappers = [{'file_path': r[0], 'file_name': r[1], 'relative_path': r[2]} for r in rows]
     print(f"📋 Loaded {len(mappers)} mapper files from DB")
@@ -34,7 +37,8 @@ def get_pending_transforms(sample: int = 0) -> dict:
     Returns:
         Dict with pending list grouped by mapper_file
     """
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, seq_no, source_file, target_file
@@ -44,6 +48,8 @@ def get_pending_transforms(sample: int = 0) -> dict:
             ORDER BY mapper_file, seq_no
         """)
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     all_items = []
     for mapper, sql_id, sql_type, seq, source, target in rows:
@@ -79,7 +85,8 @@ def get_pending_transforms(sample: int = 0) -> dict:
 
 def _pick_and_reset_sample(n: int) -> list:
     """Pick N representative items from ALL SQLs and reset only those to transformed='N'."""
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, seq_no, source_file, target_file
@@ -87,6 +94,8 @@ def _pick_and_reset_sample(n: int) -> list:
             ORDER BY mapper_file, seq_no
         """)
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     all_items = [
         {'mapper_file': m, 'sql_id': sid, 'sql_type': st, 'seq_no': seq,
@@ -97,7 +106,8 @@ def _pick_and_reset_sample(n: int) -> list:
     sampled = _sample_representative(all_items, n)
 
     # Reset only sampled items (and their downstream: reviewed, validated, tested)
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         for item in sampled:
             conn.execute(
                 "UPDATE transform_target_list SET transformed='N', reviewed='N', validated='N', tested='N', current_step='pending' "
@@ -105,6 +115,8 @@ def _pick_and_reset_sample(n: int) -> list:
                 (item['mapper_file'], item['sql_id'])
             )
         conn.commit()
+    finally:
+        conn.close()
 
     print(f"🔄 Sample re-transform: reset {len(sampled)} SQL IDs for re-processing")
     return sampled
@@ -175,7 +187,8 @@ def read_sql_source(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Dict with sql_id, sql_type, sql_body (original SQL content)
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         from utils.db_utils import query_by_mapper
         row = query_by_mapper(
@@ -183,6 +196,8 @@ def read_sql_source(mapper_file: str, sql_id: str) -> dict:
             "SELECT source_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
             mapper_file, sql_id
         )
+    finally:
+        conn.close()
 
     if not row:
         return {'error': f'Not found: {mapper_file}/{sql_id}'}

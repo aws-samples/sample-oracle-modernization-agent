@@ -20,7 +20,8 @@ def assemble_mapper(mapper_file: str) -> dict:
     Args:
         mapper_file: Mapper file name (e.g. 'SellerMapper.xml')
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
 
         # Get all converted SQL IDs for this mapper (try exact match, then fallback)
@@ -44,6 +45,8 @@ def assemble_mapper(mapper_file: str) -> dict:
         file_name_only = Path(mapper_file).name
         cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?", (file_name_only,))
         src_rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return {'error': f'No converted SQLs for {mapper_file}', 'output_path': '', 'total': 0, 'success': 0}
@@ -153,13 +156,16 @@ def assemble_mapper(mapper_file: str) -> dict:
     output_path.write_text(converted_content, encoding='utf-8')
 
     # Update current_step for merged SQLs
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         conn.execute(
             "UPDATE transform_target_list SET current_step='test', updated_at=CURRENT_TIMESTAMP "
             "WHERE mapper_file=? AND transformed='Y'",
             (mapper_file,)
         )
         conn.commit()
+    finally:
+        conn.close()
 
     print(f"📦 Merged: {output_path} ({success}/{len(conv_map)} SQLs)")
     return {'output_path': str(output_path), 'total': len(conv_map), 'success': success}

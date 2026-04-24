@@ -14,7 +14,8 @@ def get_pending_reviews() -> dict:
     Returns:
         Dict with pending list grouped by mapper_file
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT mapper_file, sql_id, sql_type, source_file, target_file
@@ -23,6 +24,8 @@ def get_pending_reviews() -> dict:
             ORDER BY mapper_file, seq_no
         """)
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     pending = {}
     for mapper, sql_id, sql_type, source, target in rows:

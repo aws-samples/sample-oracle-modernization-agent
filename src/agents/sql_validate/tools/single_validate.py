@@ -28,12 +28,15 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Status dict with result (PASS/FIXED/FAIL)
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         from utils.db_utils import query_by_mapper
         row = query_by_mapper(cursor,
             "SELECT id, transformed, updated_at FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
             mapper_file, sql_id)
+    finally:
+        conn.close()
 
     if not row:
         return {
@@ -74,12 +77,15 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     )
 
     # Check DB state for result
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         from utils.db_utils import query_by_mapper
         row = query_by_mapper(cursor,
             "SELECT validated, updated_at FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
             mapper_file, sql_id)
+    finally:
+        conn.close()
 
     if not row or row[0] != 'Y':
         return {
@@ -93,12 +99,15 @@ def validate_single_sql(mapper_file: str, sql_id: str) -> dict:
     updated_at_after = row[1]
     if updated_at_after != updated_at_before:
         # Agent fixed the SQL — ensure validation_result reflects PASS
-        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
             from utils.db_utils import update_by_mapper
             update_by_mapper(conn,
                 "UPDATE transform_target_list SET validation_result='PASS' WHERE mapper_file=? AND sql_id=?",
                 mapper_file, sql_id)
             conn.commit()
+        finally:
+            conn.close()
         return {
             'status': 'FIXED',
             'mapper_file': mapper_file,

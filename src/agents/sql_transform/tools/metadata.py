@@ -263,7 +263,8 @@ def generate_metadata() -> dict:
             print("⚠️  No metadata rows returned")
             return {'status': 'empty', 'error': 'No rows returned', 'row_count': 0}
 
-        with sqlite3.connect(str(DB_PATH)) as conn:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
             _init_metadata_table(conn)
             conn.execute("DELETE FROM target_metadata")
             conn.executemany(
@@ -271,6 +272,8 @@ def generate_metadata() -> dict:
                 rows
             )
             conn.commit()
+        finally:
+            conn.close()
 
         # Also save as txt file for Java test tool
         metadata_dir = OUTPUT_DIR / "metadata"
@@ -316,7 +319,8 @@ def lookup_column_type(table_name: str, column_name: str) -> dict:
     Returns:
         Dict with data_type or 'unknown' if not found
     """
-    with sqlite3.connect(str(DB_PATH)) as conn:
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
         cursor = conn.cursor()
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='target_metadata'")
@@ -328,6 +332,8 @@ def lookup_column_type(table_name: str, column_name: str) -> dict:
             (table_name, column_name)
         )
         row = cursor.fetchone()
+    finally:
+        conn.close()
 
     if row:
         return {'table_name': table_name, 'column_name': column_name, 'data_type': row[0]}
