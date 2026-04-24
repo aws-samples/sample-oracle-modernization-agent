@@ -304,6 +304,51 @@ def explain_single(mapper_file: str, sql_id: str) -> dict:
 
 
 @tool
+def compare_single(mapper_file: str, sql_id: str) -> dict:
+    """Compare Oracle vs target DB results for a single SQL.
+
+    Executes on both databases and compares row counts.
+    Requires Oracle DB connection (ORACLE_HOST etc.).
+
+    Args:
+        mapper_file: Mapper file name
+        sql_id: SQL statement ID
+    """
+    from core.result_comparator import ResultComparator
+
+    if not _ensure_db_env():
+        return {'status': 'skipped', 'error': 'No target DB connection info'}
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(conn.cursor(),
+            "SELECT target_file, source_file, sql_type FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            mapper_file, sql_id)
+    finally:
+        conn.close()
+
+    if not row:
+        return {'status': 'error', 'error': f'Not found: {mapper_file}/{sql_id}'}
+
+    comparator = ResultComparator()
+    result = comparator.compare_single(
+        mapper_file=mapper_file, sql_id=sql_id,
+        target_file=row[0], source_file=row[1] or '',
+        sql_type=row[2] or 'select',
+    )
+
+    return {
+        'status': result.status,
+        'sql_id': sql_id,
+        'oracle_rows': result.oracle_rows,
+        'target_rows': result.target_rows,
+        'error': result.error,
+        'warnings': result.warnings,
+    }
+
+
+@tool
 def get_test_failures() -> dict:
     """Get SQL IDs that need testing — excludes non-testable types (sql fragments, resultMap).
 

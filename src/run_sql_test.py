@@ -332,6 +332,46 @@ def run(max_workers=8, auto_fix=False):
         log_and_print("\n  ℹ️  EXPLAIN 통과 항목 없음 — 실행 테스트 스킵")
         failures = explain_result.get('failures', [])
 
+    # Phase 1.5: Oracle-PG Compare (if Oracle available)
+    from core.result_comparator import ResultComparator
+    comparator = ResultComparator()
+    if comparator.oracle_available:
+        # Compare execute-passed items
+        exec_passed = [item for item in explain_passed_items
+                       if (item['mapper_file'], item['sql_id']) not in
+                       {(f['mapper_file'], f['sql_id']) for f in failures}]
+        if exec_passed:
+            log_and_print(f"\nPhase 1.5: Oracle-PG 결과 비교 ({len(exec_passed)}개)...")
+            compare_results = comparator.compare_batch(exec_passed)
+            compare_pass = sum(1 for r in compare_results if r.status == 'PASS')
+            compare_fail = sum(1 for r in compare_results if r.status.startswith('FAIL'))
+            compare_skip = sum(1 for r in compare_results if r.status in ('SKIP', 'ERROR'))
+            log_and_print(f"  ✅ Compare PASS: {compare_pass}")
+            if compare_fail > 0:
+                log_and_print(f"  ❌ Compare FAIL: {compare_fail}")
+            if compare_skip > 0:
+                log_and_print(f"  ⏭️  Compare SKIP: {compare_skip}")
+
+            for r in compare_results:
+                if r.status.startswith('FAIL'):
+                    logger.log_sql_result(r.mapper_file, r.sql_id, 'fail',
+                                          phase='compare', fail_category='compare_diff',
+                                          error=r.error,
+                                          oracle_rows=r.oracle_rows, target_rows=r.target_rows)
+                    failures.append({
+                        'mapper_file': r.mapper_file, 'sql_id': r.sql_id,
+                        'error': r.error,
+                    })
+                elif r.status == 'PASS':
+                    logger.log_sql_result(r.mapper_file, r.sql_id, 'success',
+                                          phase='compare',
+                                          oracle_rows=r.oracle_rows, target_rows=r.target_rows)
+                if r.warnings:
+                    for w in r.warnings:
+                        log_and_print(f"    ⚠️  {r.sql_id}: {w}")
+    else:
+        log_and_print("\n  ℹ️  Oracle 미접속 — 결과 비교 스킵")
+
     if not failures:
         with sqlite3.connect(str(DB_PATH)) as conn:
             cursor = conn.cursor()
