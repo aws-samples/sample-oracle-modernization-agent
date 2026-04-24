@@ -238,6 +238,29 @@ def run(max_workers=8, auto_fix=False):
 
     log_and_print(f"\n📋 테스트 대상: {len(all_items)}개 SQL")
 
+    # TC Generation — auto-generate test parameters
+    log_and_print("\n📝 TC 자동 생성 중...")
+    from core.tc_generator import TCGenerator
+    tc_gen = TCGenerator()
+    tc_map = tc_gen.generate_batch(all_items)
+    tc_path = tc_gen.save_tc_json(tc_map)
+
+    tc_total = sum(len(v) for v in tc_map.values())
+    sources = {}
+    for cases in tc_map.values():
+        for tc in cases:
+            sources[tc.source] = sources.get(tc.source, 0) + 1
+    source_str = ", ".join(f"{k}:{v}" for k, v in sorted(sources.items()))
+    log_and_print(f"  ✅ {tc_total}개 TC 생성 ({source_str})")
+    log_and_print(f"  📄 {tc_path}")
+
+    # Attach first TC params to items for execution
+    for item in all_items:
+        key = f"{item['mapper_file']}/{item['sql_id']}"
+        tcs = tc_map.get(key, [])
+        if tcs:
+            item['params'] = tcs[0].params
+
     # Phase 0: EXPLAIN — syntax check all types
     log_and_print("\nPhase 0: 구문 검증 (EXPLAIN)...")
     explain_result = explain_batch(all_items)
