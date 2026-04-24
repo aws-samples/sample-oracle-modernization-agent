@@ -302,9 +302,20 @@ def run(max_workers=8, auto_fix=False):
         else:
             logger.log_sql_result(item['mapper_file'], item['sql_id'], 'success', phase=0)
 
-    # Phase 1: Execute — EXPLAIN 통과한 항목만 실제 실행
-    # Reset EXPLAIN-passed items for execute phase
-    explain_passed_items = [item for item in all_items if (item['mapper_file'], item['sql_id']) not in fail_set]
+    # Phase 1: Execute — EXPLAIN 통과한 SELECT만 실제 실행
+    # DML (insert/update/delete)은 EXPLAIN PASS로 충분 — 실행 시 NOT NULL/FK 등 데이터 제약으로 실패
+    explain_passed_items = [
+        item for item in all_items
+        if (item['mapper_file'], item['sql_id']) not in fail_set
+        and item.get('sql_type', '').lower() == 'select'
+    ]
+    dml_passed = [
+        item for item in all_items
+        if (item['mapper_file'], item['sql_id']) not in fail_set
+        and item.get('sql_type', '').lower() in ('insert', 'update', 'delete')
+    ]
+    if dml_passed:
+        log_and_print(f"  ℹ️  DML {len(dml_passed)}개는 EXPLAIN PASS로 완료 (실행 테스트 생략)")
 
     if explain_passed_items:
         # Reset tested flag for execute phase (EXPLAIN already marked them PASS)
