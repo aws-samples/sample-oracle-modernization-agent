@@ -246,7 +246,7 @@ def run_single_test(mapper_file: str, sql_id: str) -> dict:
         return {'status': 'error', 'error': f'Not found: {mapper_file}/{sql_id}'}
 
     target_file = row[0]
-    extracted = extract_sql_from_xml(target_file)
+    extracted = extract_sql_from_xml(target_file, sql_id=sql_id)
     if not extracted:
         return {'status': 'FAIL', 'sql_id': sql_id, 'error': 'Failed to extract SQL from XML'}
 

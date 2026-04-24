@@ -44,18 +44,34 @@ _SQL_TAG_RE = re.compile(
 )
 
 
-def extract_sql_from_xml(target_file: str, params: dict | None = None) -> tuple[str, str] | None:
+def extract_sql_from_xml(target_file: str, params: dict | None = None,
+                          sql_id: str | None = None) -> tuple[str, str] | None:
     """Extract SQL from converted MyBatis XML and prepare for execution.
 
+    Args:
+        target_file: Path to XML file (transform/ single-SQL or merge/ full mapper)
+        params: Bind parameter values. If None, #{param} → NULL.
+        sql_id: Specific SQL ID to extract from multi-SQL mapper files.
+                If None, returns the first SQL found.
+
     Returns (sql_type, prepared_sql) or None.
-    If params is provided, binds #{param} → value; otherwise #{param} → NULL.
     """
     path = Path(target_file)
     if not path.exists():
         return None
 
     content = path.read_text(encoding='utf-8')
-    m = _SQL_TAG_RE.search(content)
+
+    if sql_id:
+        pattern = re.compile(
+            rf'<(select|insert|update|delete|sql)\s+[^>]*id\s*=\s*["\']'
+            rf'{re.escape(sql_id)}["\'][^>]*>(.*?)</\1>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        m = pattern.search(content)
+    else:
+        m = _SQL_TAG_RE.search(content)
+
     if not m:
         return None
 
@@ -210,7 +226,8 @@ class SQLExecutor:
 
         for item in items:
             test_id = f"{item['mapper_file']}/{item['sql_id']}"
-            extracted = extract_sql_from_xml(item['target_file'], item.get('params'))
+            extracted = extract_sql_from_xml(
+                item['target_file'], item.get('params'), sql_id=item.get('sql_id'))
             if not extracted:
                 continue
             sql_type, sql_body = extracted
@@ -237,7 +254,8 @@ class SQLExecutor:
 
         for item in items:
             test_id = f"{item['mapper_file']}/{item['sql_id']}"
-            extracted = extract_sql_from_xml(item['target_file'], item.get('params'))
+            extracted = extract_sql_from_xml(
+                item['target_file'], item.get('params'), sql_id=item.get('sql_id'))
             if not extracted:
                 continue
             sql_type, sql_body = extracted
