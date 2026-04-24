@@ -413,7 +413,7 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
             return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
 
         update_by_mapper(conn,
-            "UPDATE transform_target_list SET reviewed='Y', review_notes=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
+            "UPDATE transform_target_list SET reviewed='Y', review_notes=?, current_step='validate', updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
             mapper_file, sql_id, extra_params=(notes,))
         conn.commit()
     return {'status': 'success', 'message': f'Approved: {mapper_file}/{sql_id}'}

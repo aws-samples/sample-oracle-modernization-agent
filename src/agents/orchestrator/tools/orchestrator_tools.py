@@ -667,20 +667,20 @@ def reset_step(step_name: str, failed_only: bool = False) -> ResetStepResult:
                 if step_name == 'test':
                     cursor.execute("""
                         UPDATE transform_target_list
-                        SET tested='N', test_result=NULL
+                        SET tested='N', test_result=NULL, current_step='test'
                         WHERE tested='Y' AND test_result IS NOT NULL AND test_result NOT IN ('PASS', 'FIXED', 'SKIP')
                     """)
                 elif step_name == 'validate':
                     cursor.execute("""
                         UPDATE transform_target_list
-                        SET validated='N', validation_result=NULL
+                        SET validated='N', validation_result=NULL, current_step='validate'
                         WHERE validated='Y' AND validation_result IS NOT NULL AND validation_result NOT IN ('PASS', 'FIXED')
                     """)
                 elif step_name == 'review':
-                    cursor.execute("UPDATE transform_target_list SET reviewed='N' WHERE reviewed='F'")
+                    cursor.execute("UPDATE transform_target_list SET reviewed='N', current_step='review' WHERE reviewed='F'")
                 else:
                     cursor.execute("""
-                        UPDATE transform_target_list SET transformed='N'
+                        UPDATE transform_target_list SET transformed='N', current_step='transform'
                         WHERE transformed='Y' AND reviewed='F'
                     """)
                 count = cursor.rowcount

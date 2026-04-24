@@ -100,7 +100,7 @@ def _pick_and_reset_sample(n: int) -> list:
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         for item in sampled:
             conn.execute(
-                "UPDATE transform_target_list SET transformed='N', reviewed='N', validated='N', tested='N' "
+                "UPDATE transform_target_list SET transformed='N', reviewed='N', validated='N', tested='N', current_step='pending' "
                 "WHERE mapper_file=? AND sql_id=?",
                 (item['mapper_file'], item['sql_id'])
             )

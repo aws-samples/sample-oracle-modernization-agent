@@ -382,10 +382,16 @@ class StateManager:
             elif step == 'review':
                 filters.append(TransformTargetList.tested == 'N')
 
+            step_value_map = {
+                'transform': 'pending',
+                'review': 'transform',
+                'validate': 'review',
+                'test': 'validate',
+            }
             stmt = (
                 sql_update(TransformTargetList)
                 .where(*filters)
-                .values(**{column_name: 'N', 'updated_at': func.current_timestamp()})
+                .values(**{column_name: 'N', 'current_step': step_value_map.get(step, step), 'updated_at': func.current_timestamp()})
             )
             result = session.execute(stmt)
             reset_count = result.rowcount
