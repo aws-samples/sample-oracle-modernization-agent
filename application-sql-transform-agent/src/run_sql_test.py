@@ -166,7 +166,7 @@ def fix_mapper_failures(mapper_file: str, failures: list, progress_counter: dict
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
 
 
-def run(max_workers=8, auto_fix=False):
+def run(max_workers=5, auto_fix=False):
     from core.display import console_err
     console_err.print("[bold]SQL Test Agent[/bold]")
 
@@ -859,7 +859,7 @@ def _suggest_compaction():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=5)
     parser.add_argument('--reset', action='store_true', help='Reset all tested flags before running')
     parser.add_argument('--retry-failed', action='store_true', help='Reset only failed tests for re-test')
     parser.add_argument('--fix', action='store_true', help='Enable Phase 2 Agent auto-fix for failures')

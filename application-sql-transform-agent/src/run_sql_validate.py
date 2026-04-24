@@ -108,7 +108,7 @@ def validate_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, tot
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
 
 
-def run(max_workers=8):
+def run(max_workers=5):
     from core.display import console_err
     console_err.print("[bold]SQL Validate Agent[/bold]")
 
@@ -248,6 +248,6 @@ def _suggest_compaction():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=5)
     args = parser.parse_args()
     run(max_workers=args.workers)

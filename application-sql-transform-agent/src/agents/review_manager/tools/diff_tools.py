@@ -75,7 +75,8 @@ def get_review_candidates(filter_type: str = 'all') -> dict:
     Returns:
         Dict with candidates grouped by priority
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
 
         queries = {
@@ -86,6 +87,8 @@ def get_review_candidates(filter_type: str = 'all') -> dict:
         }
         cursor.execute(queries.get(filter_type, queries['all']))
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     candidates = [{'mapper_file': r[0], 'sql_id': r[1], 'sql_type': r[2]} for r in rows]
     return {'status': 'success', 'total': len(candidates), 'candidates': candidates, 'filter_type': filter_type}
@@ -102,12 +105,15 @@ def show_sql_diff(mapper_file: str, sql_id: str) -> dict:
     Returns:
         Dict with diff output
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         from utils.db_utils import query_by_mapper
         row = query_by_mapper(cursor,
             "SELECT source_file, target_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
             mapper_file, sql_id)
+    finally:
+        conn.close()
 
     if not row:
         return {'status': 'error', 'message': f'Not found: {mapper_file}/{sql_id}'}
@@ -133,7 +139,8 @@ def generate_diff_report(mapper_file: str = None) -> dict:
     Returns:
         Dict with report path
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         if mapper_file:
             cursor.execute(
@@ -145,6 +152,8 @@ def generate_diff_report(mapper_file: str = None) -> dict:
                 "SELECT mapper_file, sql_id, sql_type, source_file, target_file FROM transform_target_list WHERE transformed='Y' ORDER BY mapper_file, seq_no"
             )
         rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return {'status': 'error', 'message': 'No transformed SQLs found'}
@@ -196,7 +205,8 @@ def generate_test_failure_report() -> dict:
     Returns:
         Dict with report_path, summary, and per-SQL failure briefings
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
 
         # Get all test results
@@ -223,6 +233,8 @@ def generate_test_failure_report() -> dict:
             ORDER BY mapper_file, seq_no
         """)
         failures = cursor.fetchall()
+    finally:
+        conn.close()
 
     failed = len(failures)
     pass_rate = (passed * 100 // total_tested) if total_tested else 0
@@ -403,7 +415,8 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
         sql_id: SQL statement ID
         notes: Optional review notes
     """
-    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
         cursor = conn.cursor()
         from utils.db_utils import query_by_mapper, update_by_mapper
         row = query_by_mapper(cursor,
@@ -416,6 +429,8 @@ def approve_conversion(mapper_file: str, sql_id: str, notes: str = "") -> dict:
             "UPDATE transform_target_list SET reviewed='Y', review_notes=?, current_step='validate', updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
             mapper_file, sql_id, extra_params=(notes,))
         conn.commit()
+    finally:
+        conn.close()
     return {'status': 'success', 'message': f'Approved: {mapper_file}/{sql_id}'}
 
 

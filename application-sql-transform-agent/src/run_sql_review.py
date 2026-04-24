@@ -241,7 +241,7 @@ def _refine_strategy(fail_count):
     print("✅ 전략 업데이트 완료\n", flush=True)
 
 
-def run(max_workers=8, max_rounds=3):
+def run(max_workers=5, max_rounds=3):
     from core.display import console_err
     console_err.print("[bold]SQL Review Agent[/bold]")
 
@@ -346,7 +346,7 @@ def run(max_workers=8, max_rounds=3):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=5)
     parser.add_argument('--max-rounds', type=int, default=3, help='Max review-retransform rounds')
     parser.add_argument('--reset', action='store_true', help='Reset review status')
     args = parser.parse_args()

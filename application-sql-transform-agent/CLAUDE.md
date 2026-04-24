@@ -33,11 +33,11 @@ All scripts run from `src/` with `PYTHONPATH=.`. Working directory for state/out
 ```bash
 cd src
 PYTHONPATH=. python3 run_source_analyzer.py          # 1. Scan mappers, extract SQLs, generate strategy
-PYTHONPATH=. python3 run_sql_transform.py --workers 8   # 2. Oracle → Target DB conversion
-PYTHONPATH=. python3 run_sql_review.py --workers 4 --max-rounds 3  # 3. Multi-perspective review
-PYTHONPATH=. python3 run_sql_validate.py --workers 6    # 4. Functional equivalence validation
+PYTHONPATH=. python3 run_sql_transform.py --workers 5   # 2. Oracle → Target DB conversion
+PYTHONPATH=. python3 run_sql_review.py --workers 5 --max-rounds 3  # 3. Multi-perspective review
+PYTHONPATH=. python3 run_sql_validate.py --workers 5    # 4. Functional equivalence validation
 PYTHONPATH=. python3 run_sql_merge.py                   # 5. Reassemble final Mapper XMLs
-PYTHONPATH=. python3 run_sql_test.py --workers 6        # 6. DB execution test (requires target DB)
+PYTHONPATH=. python3 run_sql_test.py --workers 5        # 6. DB execution test (requires target DB)
 PYTHONPATH=. python3 run_strategy.py                    # Manual strategy refinement
 ```
 

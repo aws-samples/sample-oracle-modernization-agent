@@ -24,11 +24,11 @@
 | # | Step      | 실행 명령                                                                   |
 |---|-----------|----------------------------------------------------------------------------|
 | 1 | analyze   | `cd src && PYTHONPATH=. python3 run_source_analyzer.py`                     |
-| 2 | transform | `cd src && PYTHONPATH=. python3 run_sql_transform.py --workers 8`           |
-| 3 | review    | `cd src && PYTHONPATH=. python3 run_sql_review.py --workers 4 --max-rounds 3` |
-| 4 | validate  | `cd src && PYTHONPATH=. python3 run_sql_validate.py --workers 6`            |
+| 2 | transform | `cd src && PYTHONPATH=. python3 run_sql_transform.py --workers 5`           |
+| 3 | review    | `cd src && PYTHONPATH=. python3 run_sql_review.py --workers 5 --max-rounds 3` |
+| 4 | validate  | `cd src && PYTHONPATH=. python3 run_sql_validate.py --workers 5`            |
 | 5 | merge     | `cd src && PYTHONPATH=. python3 run_sql_merge.py`                           |
-| 6 | test      | `cd src && PYTHONPATH=. python3 run_sql_test.py --workers 6`                |
+| 6 | test      | `cd src && PYTHONPATH=. python3 run_sql_test.py --workers 5`                |
 
 메인 러너: `run_orchestrator.py` — REPL 형 Strands Agent (21 tools). 자연어로 파이프라인 조작.
 보조 러너: `run_setup.py` (최초 1회), `run_strategy.py` (수동 strategy refine).

@@ -1,6 +1,17 @@
 """Project utilities for path resolution"""
 import os
+import resource
 from pathlib import Path
+
+# Raise FD limit to prevent "Too many open files" under parallel workers.
+# Each Strands Agent holds boto3 HTTP connections + SQLite handles.
+try:
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = min(8192, _hard) if _hard > 0 else 8192
+    if _soft < _target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_target, _hard))
+except (ValueError, OSError):
+    pass
 
 
 def find_project_root() -> Path:

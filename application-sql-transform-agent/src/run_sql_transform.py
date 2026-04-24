@@ -163,7 +163,7 @@ def transform_mapper(mapper_file: str, sql_ids: list, progress_counter: dict, to
         return {'mapper': mapper_file, 'status': 'error', 'error': str(e)}
 
 
-def run(max_workers=8, sample=0):
+def run(max_workers=5, sample=0):
     from core.display import console_err
     label = f" [cyan](sample={sample})[/cyan]" if sample > 0 else ""
     console_err.print(f"[bold]SQL Transform Agent[/bold]{label}")
@@ -279,7 +279,7 @@ def run(max_workers=8, sample=0):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=5)
     parser.add_argument('--sample', type=int, default=0, help='N개만 샘플 변환 (0=전체)')
     parser.add_argument('--reset', action='store_true', help='전체 초기화 후 재실행')
     args = parser.parse_args()

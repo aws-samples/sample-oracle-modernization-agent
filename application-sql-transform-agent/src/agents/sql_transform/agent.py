@@ -6,10 +6,12 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 
 from .tools.load_mapper_list import load_mapper_list, get_pending_transforms, read_sql_source
-from .tools.split_mapper import split_mapper
 from .tools.convert_sql import convert_sql
 from .tools.assemble_mapper import assemble_mapper
 from .tools.metadata import generate_metadata, lookup_column_type
+# Note: split_mapper is intentionally NOT exposed as an agent tool. It is invoked
+# only by run_sql_transform.py's preprocessing block with files from source_xml_list,
+# preventing LLM-driven calls on WIP artifacts that previously created ghost rows.
 
 
 from strands.types.content import SystemContentBlock
@@ -61,7 +63,7 @@ def create_sql_transform_agent(*, suppress_streaming: bool = False) -> Agent:
         "name": "SQLTransform",
         "model": model,
         "system_prompt": _load_system_prompt(),
-        "tools": [load_mapper_list, get_pending_transforms, read_sql_source, split_mapper,
+        "tools": [load_mapper_list, get_pending_transforms, read_sql_source,
                   convert_sql, assemble_mapper,
                   generate_metadata, lookup_column_type],
     }
