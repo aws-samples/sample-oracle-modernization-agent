@@ -189,6 +189,26 @@ _DATE_FORMATS = {
 }
 
 
+_COL_PARAM_BIND = re.compile(
+    r'(\w+)\s*=\s*#\{(\w+)',
+    re.IGNORECASE,
+)
+
+
+def _build_param_to_column_map(sql_content: str) -> dict[str, str]:
+    """Extract column→param binding from SQL (SET col = #{param}, WHERE col = #{param}).
+
+    Returns {param_name: column_name} so we can look up the column type in metadata.
+    """
+    param_to_col = {}
+    for m in _COL_PARAM_BIND.finditer(sql_content):
+        col = m.group(1).lower()
+        param = m.group(2).strip()
+        if col not in ('test', 'and', 'or', 'not', 'when', 'then', 'else', 'set', 'where', 'if'):
+            param_to_col[param] = col
+    return param_to_col
+
+
 def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
     """Infer param values from XML patterns + metadata. Returns {param: value}."""
     values = {}
@@ -206,6 +226,8 @@ def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
     for m in _DATE_FUNC.finditer(xml_content):
         fmt = m.group(2).strip().upper()
         date_vals[m.group(1).strip()] = _DATE_FORMATS.get(fmt, '20250101')
+
+    param_to_col = _build_param_to_column_map(xml_content)
 
     for m in _PARAM_WITH_CAST.finditer(xml_content):
         param = m.group(1).strip()
@@ -225,6 +247,8 @@ def _infer_params(xml_content: str, metadata: dict) -> dict[str, str]:
             values[param] = date_vals[param]
         elif param.lower() in metadata:
             values[param] = _value_from_type(metadata[param.lower()])
+        elif param in param_to_col and param_to_col[param] in metadata:
+            values[param] = _value_from_type(metadata[param_to_col[param]])
         elif cast:
             values[param] = _value_from_cast(cast)
         else:
