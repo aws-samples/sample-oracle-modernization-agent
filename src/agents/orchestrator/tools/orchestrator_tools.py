@@ -549,8 +549,8 @@ def generate_test_report() -> dict:
     Returns:
         Dict with report_path and summary
     """
-    from run_sql_test import _generate_test_result_report
-    _generate_test_result_report()
+    from run_sql_test import _generate_test_failure_report
+    _generate_test_failure_report()
 
     import sqlite3
     with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
