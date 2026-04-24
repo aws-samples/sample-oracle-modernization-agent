@@ -19,8 +19,11 @@ cd src && PYTHONPATH=. python3 run_setup.py
 # Run — main REPL orchestrator (Strands Agent, 21 tools, natural language)
 cd src && PYTHONPATH=. python3 run_orchestrator.py
 
-# Run example (self-contained demo with 3 mapper XMLs, 42 SQLs)
+# Run example (self-contained demo with 3 mapper XMLs, 44 SQLs)
 cd example && ./setup.sh && ./run.sh
+
+# View results — self-contained HTML report regenerated after every step
+open output/reports/oma_report.html
 ```
 
 ### Pipeline Steps (individual execution)
