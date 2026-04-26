@@ -89,11 +89,25 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
+def _extract_last_text(result) -> str:
+    """Extract the last text block from AgentResult, skipping tool call/result noise."""
+    try:
+        content = result.message.get('content', [])
+        # Collect all text blocks (skip toolUse/toolResult)
+        text_blocks = [block['text'] for block in content
+                       if isinstance(block, dict) and 'text' in block]
+        if text_blocks:
+            return text_blocks[-1]
+    except Exception:
+        pass
+    return str(result)
+
+
 def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
     """Run a single perspective agent and extract its JSON output.
 
-    Uses callback_handler=None to suppress streaming output (no stdout capture needed).
-    Extracts text from AgentResult via str().
+    Uses result.message content blocks to get the final text output,
+    skipping tool call/result blocks that pollute JSON extraction.
     """
     agent = agent_factory()
     try:
@@ -103,11 +117,17 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
             f"then check according to your review checklist. "
             f"Output your results as the specified JSON format."
         )
-        output = str(result)
+        output = _extract_last_text(result)
     finally:
-        del agent  # release boto3 HTTP connections
+        del agent
 
     parsed = _extract_json(output)
+    if parsed and "results" in parsed:
+        return parsed
+
+    # Fallback: try str(result) in case message parsing missed it
+    full_output = str(result)
+    parsed = _extract_json(full_output)
     if parsed and "results" in parsed:
         return parsed
 
@@ -115,7 +135,7 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
         "perspective": perspective_name,
         "results": {},
         "_parse_error": True,
-        "_raw_output": output[-2000:] if len(output) > 2000 else output,
+        "_raw_output": full_output[-2000:] if len(full_output) > 2000 else full_output,
     }
 
 
