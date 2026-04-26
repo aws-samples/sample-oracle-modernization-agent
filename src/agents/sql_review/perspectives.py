@@ -93,13 +93,19 @@ def _extract_last_text(result) -> str:
     """Extract the last text block from AgentResult, skipping tool call/result noise."""
     try:
         content = result.message.get('content', [])
-        # Collect all text blocks (skip toolUse/toolResult)
         text_blocks = [block['text'] for block in content
                        if isinstance(block, dict) and 'text' in block]
         if text_blocks:
-            return text_blocks[-1]
-    except Exception:
-        pass
+            last = text_blocks[-1]
+            # Debug: log block count and last text preview to stderr
+            import sys
+            n_tool = sum(1 for b in content if isinstance(b, dict) and ('toolUse' in b or 'toolResult' in b))
+            print(f"    [perspectives] {len(content)} blocks ({len(text_blocks)} text, {n_tool} tool), last_text={len(last)} chars",
+                  file=sys.stderr)
+            return last
+    except Exception as e:
+        import sys
+        print(f"    [perspectives] _extract_last_text error: {e}", file=sys.stderr)
     return str(result)
 
 
