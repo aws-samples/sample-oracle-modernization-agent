@@ -109,19 +109,36 @@ def _extract_last_text(result) -> str:
     return str(result)
 
 
-def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
-    """Run a single perspective agent and extract its JSON output.
+def _read_sql_content(mapper_file: str, sql_ids_str: str) -> str:
+    """Pre-read SQL content for all SQL IDs so agent doesn't need tool calls."""
+    sql_ids = [s.strip() for s in sql_ids_str.split(",") if s.strip()]
+    sections = []
+    for sql_id in sql_ids:
+        original = read_sql_source(mapper_file=mapper_file, sql_id=sql_id)
+        converted = read_transform(mapper_file=mapper_file, sql_id=sql_id)
+        sections.append(
+            f"=== {sql_id} ===\n"
+            f"[ORIGINAL Oracle SQL]\n{original.get('sql_body', original.get('error', 'N/A'))}\n\n"
+            f"[CONVERTED SQL]\n{converted.get('sql_body', converted.get('error', 'N/A'))}\n"
+        )
+    return "\n".join(sections)
 
-    Uses result.message content blocks to get the final text output,
-    skipping tool call/result blocks that pollute JSON extraction.
+
+def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
+    """Run a single perspective agent with pre-read SQL content.
+
+    SQL content is injected directly into the prompt so the agent
+    doesn't need tool calls — Opus 4.6 was skipping tool use entirely.
     """
+    sql_content = _read_sql_content(mapper_file, sql_ids_str)
+
     agent = agent_factory()
     try:
         result = agent(
-            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
-            f"For each: read_sql_source for original, read_transform for converted, "
-            f"then check according to your review checklist. "
-            f"Output your results as the specified JSON format."
+            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n\n"
+            f"Here is the SQL content (already read for you):\n\n"
+            f"{sql_content}\n\n"
+            f"Review each SQL according to your checklist and output ONLY the JSON result."
         )
         output = _extract_last_text(result)
     finally:
@@ -131,7 +148,7 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
     if parsed and "results" in parsed:
         return parsed
 
-    # Fallback: try str(result) in case message parsing missed it
+    # Fallback: try full str(result)
     full_output = str(result)
     parsed = _extract_json(full_output)
     if parsed and "results" in parsed:
