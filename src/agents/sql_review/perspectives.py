@@ -154,6 +154,8 @@ def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, p
     if parsed and "results" in parsed:
         return parsed
 
+    import sys
+    print(f"    [perspectives] PARSE FAIL ({perspective_name}): {output[:200]}", file=sys.stderr)
     return {
         "perspective": perspective_name,
         "results": {},
