@@ -55,6 +55,86 @@ def create_equivalence_review_agent() -> Agent:
     )
 
 
+def _parse_natural_language_review(text: str, sql_ids: list[str], perspective: str) -> dict | None:
+    """Parse natural language review output when JSON extraction fails.
+
+    Scans for per-SQL patterns like:
+      **selectUserList**: ✅ PASS / ❌ FAIL / CRITICAL / no issues found
+    and extracts structured results.
+    """
+    if not text or not sql_ids:
+        return None
+
+    results = {}
+    text_lower = text.lower()
+
+    for i, sql_id in enumerate(sql_ids):
+        # Find section for this SQL ID
+        idx = text.find(sql_id)
+        if idx < 0:
+            idx = text_lower.find(sql_id.lower())
+        if idx < 0:
+            results[sql_id] = {"result": "PASS", "issues": [], "summary": "Not mentioned in review"}
+            continue
+
+        # Find end: next SQL ID or +500 chars, whichever comes first
+        end = idx + 500
+        for next_id in sql_ids[i + 1:]:
+            next_idx = text.find(next_id, idx + len(sql_id))
+            if next_idx < 0:
+                next_idx = text_lower.find(next_id.lower(), idx + len(sql_id))
+            if next_idx > 0:
+                end = min(end, next_idx)
+                break
+        section = text[idx:end].lower()
+
+        issues = []
+        has_critical = False
+
+        # Look for CRITICAL/FAIL indicators
+        critical_patterns = [
+            r'\[critical\]\s*(.*?)(?:\n|$)',
+            r'critical[:\s]+(.*?)(?:\n|$)',
+            r'❌\s*(.*?)(?:\n|$)',
+            r'fail[:\s]+(.*?)(?:\n|$)',
+        ]
+        for pat in critical_patterns:
+            for m in re.finditer(pat, section):
+                desc = m.group(1).strip()[:200]
+                if desc and 'pass' not in desc[:20]:
+                    issues.append({"severity": "CRITICAL", "description": f"[{perspective.title()}] {desc}"})
+                    has_critical = True
+
+        # Look for WARNING indicators
+        warning_patterns = [
+            r'\[warning\]\s*(.*?)(?:\n|$)',
+            r'warning[:\s]+(.*?)(?:\n|$)',
+            r'⚠️?\s*(.*?)(?:\n|$)',
+        ]
+        for pat in warning_patterns:
+            for m in re.finditer(pat, section):
+                desc = m.group(1).strip()[:200]
+                if desc:
+                    issues.append({"severity": "WARNING", "description": f"[{perspective.title()}] {desc}"})
+
+        # Determine result
+        if has_critical:
+            result = "FAIL"
+        elif any('✅' in section or 'pass' in section[:100] or 'no issues' in section or 'correct' in section[:100]
+                 for _ in [1]):
+            result = "PASS"
+        elif issues:
+            result = "FAIL"
+        else:
+            result = "PASS"
+
+        results[sql_id] = {"result": result, "issues": issues, "summary": "Parsed from natural language"}
+
+    if results:
+        return {"perspective": perspective, "results": results}
+    return None
+
+
 def _extract_json(text: str) -> dict | None:
     """Extract the first JSON object from agent output text."""
     # Try parsing the whole text first
@@ -89,33 +169,75 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
-    """Run a single perspective agent and extract its JSON output.
+def _extract_last_text(result) -> str:
+    """Extract the last text block from AgentResult, skipping tool call/result noise."""
+    try:
+        content = result.message.get('content', [])
+        text_blocks = [block['text'] for block in content
+                       if isinstance(block, dict) and 'text' in block]
+        if text_blocks:
+            return text_blocks[-1]
+    except Exception:
+        pass
+    return str(result)
 
-    Uses callback_handler=None to suppress streaming output (no stdout capture needed).
-    Extracts text from AgentResult via str().
+
+def _read_sql_content(mapper_file: str, sql_ids_str: str) -> str:
+    """Pre-read SQL content for all SQL IDs so agent doesn't need tool calls."""
+    sql_ids = [s.strip() for s in sql_ids_str.split(",") if s.strip()]
+    sections = []
+    for sql_id in sql_ids:
+        original = read_sql_source(mapper_file=mapper_file, sql_id=sql_id)
+        converted = read_transform(mapper_file=mapper_file, sql_id=sql_id)
+        sections.append(
+            f"=== {sql_id} ===\n"
+            f"[ORIGINAL Oracle SQL]\n{original.get('sql_body', original.get('error', 'N/A'))}\n\n"
+            f"[CONVERTED SQL]\n{converted.get('sql_body', converted.get('error', 'N/A'))}\n"
+        )
+    return "\n".join(sections)
+
+
+def _run_single_perspective(agent_factory, mapper_file: str, sql_ids_str: str, perspective_name: str) -> dict:
+    """Run a single perspective agent with pre-read SQL content.
+
+    SQL content is injected directly into the prompt so the agent
+    doesn't need tool calls — Opus 4.6 was skipping tool use entirely.
     """
+    sql_content = _read_sql_content(mapper_file, sql_ids_str)
+
     agent = agent_factory()
     try:
         result = agent(
-            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n"
-            f"For each: read_sql_source for original, read_transform for converted, "
-            f"then check according to your review checklist. "
-            f"Output your results as the specified JSON format."
+            f"Review the following SQL IDs in {mapper_file}: {sql_ids_str}\n\n"
+            f"Here is the SQL content (already read for you):\n\n"
+            f"{sql_content}\n\n"
+            f"Review each SQL according to your checklist and output ONLY the JSON result."
         )
-        output = str(result)
+        output = _extract_last_text(result)
     finally:
-        del agent  # release boto3 HTTP connections
+        del agent
 
     parsed = _extract_json(output)
     if parsed and "results" in parsed:
+        return parsed
+
+    # Fallback: try full str(result)
+    full_output = str(result)
+    parsed = _extract_json(full_output)
+    if parsed and "results" in parsed:
+        return parsed
+
+    # Fallback 2: parse natural language output into structured result
+    sql_ids = [s.strip() for s in sql_ids_str.split(",") if s.strip()]
+    parsed = _parse_natural_language_review(full_output or output, sql_ids, perspective_name)
+    if parsed:
         return parsed
 
     return {
         "perspective": perspective_name,
         "results": {},
         "_parse_error": True,
-        "_raw_output": output[-2000:] if len(output) > 2000 else output,
+        "_raw_output": full_output[-2000:] if len(full_output) > 2000 else full_output,
     }
 
 
