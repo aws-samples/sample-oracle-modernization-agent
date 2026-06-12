@@ -40,6 +40,25 @@ def register(sub):
     sv.add_argument("--json", action="store_true", dest="as_json")
     sv.set_defaults(func=run_save_transform)
 
+    for name, handler in (("set-reviewed", run_set_reviewed),
+                          ("set-validated", run_set_validated),
+                          ("set-tested", run_set_tested)):
+        sp = dbsub.add_parser(name, help=f"Record {name.split('-')[1]} result")
+        sp.add_argument("mapper_file")
+        sp.add_argument("sql_id")
+        sp.add_argument("--result", required=True,
+                        choices=["PASS", "PASS_WITH_WARNINGS", "FAIL", "SKIP", "FIXED"])
+        sp.add_argument("--feedback", default="", help="inline feedback text")
+        sp.add_argument("--feedback-file", default="", help="JSON feedback file (overrides --feedback)")
+        sp.add_argument("--notes", default="")
+        sp.add_argument("--json", action="store_true", dest="as_json")
+        sp.set_defaults(func=handler)
+
+    gp = dbsub.add_parser("get-property", help="Read a property value")
+    gp.add_argument("key")
+    gp.add_argument("--json", action="store_true", dest="as_json")
+    gp.set_defaults(func=run_get_property)
+
 
 def _connect():
     from utils.project_paths import DB_PATH
@@ -88,6 +107,73 @@ def run_save_transform(args) -> int:
         return 1
     if args.as_json:
         print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def _load_feedback(args) -> str:
+    """Load feedback from --feedback-file (if given), else --feedback."""
+    if args.feedback_file:
+        from pathlib import Path
+        p = Path(args.feedback_file)
+        if not p.exists():
+            print(f"Feedback file not found: {p}", file=sys.stderr)
+            raise SystemExit(1)
+        return p.read_text(encoding="utf-8")
+    return args.feedback
+
+
+def run_set_reviewed(args) -> int:
+    from cli.result_io import set_reviewed
+    feedback = _load_feedback(args)
+    result = set_reviewed(
+        mapper_file=args.mapper_file, sql_id=args.sql_id,
+        result=args.result, violations=feedback, review_feedback=feedback)
+    if result.get("status") == "error":
+        print(result.get("message", result.get("result", "unknown error")), file=sys.stderr)
+        return 1
+    if getattr(args, "as_json", False):
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def run_set_validated(args) -> int:
+    from cli.result_io import set_validated
+    feedback = _load_feedback(args)
+    notes = args.notes or feedback
+    result = set_validated(
+        mapper_file=args.mapper_file, sql_id=args.sql_id,
+        result=args.result, notes=notes)
+    if result.get("status") == "error":
+        print(result.get("message", result.get("result", "unknown error")), file=sys.stderr)
+        return 1
+    if getattr(args, "as_json", False):
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def run_set_tested(args) -> int:
+    from cli.result_io import set_tested
+    result = set_tested(
+        mapper_file=args.mapper_file, sql_id=args.sql_id,
+        result=args.result, notes=args.notes)
+    if result.get("status") == "error":
+        print(result.get("message", result.get("result", "unknown error")), file=sys.stderr)
+        return 1
+    if getattr(args, "as_json", False):
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def run_get_property(args) -> int:
+    from cli.result_io import get_property
+    result = get_property(args.key)
+    if result.get("status") == "error":
+        print(result.get("message", "unknown error"), file=sys.stderr)
+        return 1
+    if getattr(args, "as_json", False):
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(result["value"])
     return 0
 
 
