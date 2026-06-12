@@ -11,8 +11,22 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.scripts]
+oma = "cli.main:main"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "pytest-timeout>=2.4.0",
 ]
+
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
