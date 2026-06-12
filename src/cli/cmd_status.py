@@ -20,5 +20,5 @@ def run(args) -> int:
         print(json.dumps(counts, ensure_ascii=False))
     else:
         for k, v in counts.items():
-            print(f"{k:24s} {v}")
+            print(f"{k:24s} {v}", file=sys.stderr)
     return 0
