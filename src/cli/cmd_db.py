@@ -23,6 +23,23 @@ def register(sub):
                       help="comma list of mapper:sql_id to restrict (retry)")
     pend.set_defaults(func=run_pending)
 
+    rd = dbsub.add_parser("read-sql", help="Read original SQL body for one sql_id")
+    rd.add_argument("mapper_file")
+    rd.add_argument("sql_id")
+    rd.add_argument("--json", action="store_true", dest="as_json")
+    rd.set_defaults(func=run_read_sql)
+
+    sv = dbsub.add_parser("save-transform", help="Save converted SQL (file or stdin)")
+    sv.add_argument("mapper_file")
+    sv.add_argument("sql_id")
+    sv.add_argument("--sql-file", default="-",
+                    help="path to converted SQL file, or '-' for stdin (default)")
+    sv.add_argument("--notes", default="")
+    sv.add_argument("--step", default="transform",
+                    help="pipeline step writing this (transform|review|test|validate)")
+    sv.add_argument("--json", action="store_true", dest="as_json")
+    sv.set_defaults(func=run_save_transform)
+
 
 def _connect():
     from utils.project_paths import DB_PATH
@@ -30,6 +47,48 @@ def _connect():
         print(f"DB not found: {DB_PATH}", file=sys.stderr)
         raise SystemExit(1)
     return sqlite3.connect(str(DB_PATH), timeout=10)
+
+
+def run_read_sql(args) -> int:
+    from cli.transform_io import read_sql_source
+    result = read_sql_source(args.mapper_file, args.sql_id)
+    if "error" in result:
+        print(result["error"], file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(result["sql_body"])
+    return 0
+
+
+def run_save_transform(args) -> int:
+    if args.sql_file == "-":
+        converted = sys.stdin.read()
+    else:
+        from pathlib import Path
+        p = Path(args.sql_file)
+        if not p.exists():
+            print(f"SQL file not found: {p}", file=sys.stderr)
+            return 1
+        converted = p.read_text(encoding="utf-8")
+
+    if not converted.strip():
+        print("Converted SQL is empty", file=sys.stderr)
+        return 1
+
+    from cli import transform_io
+    transform_io.set_step(args.step)
+    result = transform_io.save_transform(
+        sql_id=args.sql_id, converted_sql=converted,
+        mapper_file=args.mapper_file, notes=args.notes)
+
+    if result.get("status") == "error":
+        print(result.get("message", "unknown error"), file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
 
 
 def run_pending(args) -> int:
