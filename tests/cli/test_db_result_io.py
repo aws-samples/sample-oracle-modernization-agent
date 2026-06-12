@@ -45,6 +45,22 @@ def test_set_validated_and_tested(oma_env, run_cli):
     assert test_result == "FIXED"
 
 
+def test_set_tested_fail_marks_N(oma_env, run_cli):
+    code, _, _ = run_cli("db", "set-tested", "OrderMapper.xml", "selectOrder",
+                         "--result", "FAIL", "--notes", "phase0 explain error")
+    assert code == 0
+    db = oma_env / "oma_control.db"
+    with sqlite3.connect(str(db)) as conn:
+        row = conn.execute(
+            "SELECT tested, test_result, current_step "
+            "FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
+            ("OrderMapper.xml", "selectOrder")).fetchone()
+    tested, test_result, current_step = row
+    assert tested == "N"
+    assert test_result == "FAIL"
+    assert current_step == "test"
+
+
 def test_get_property(oma_env, run_cli):
     code, stdout, _ = run_cli("db", "get-property", "TARGET_DBMS_TYPE")
     assert code == 0

@@ -172,6 +172,7 @@ def set_tested(mapper_file: str, sql_id: str, result: str, notes: str = "") -> d
     from utils.db_utils import update_by_mapper
 
     tested_flag = "N" if result == "FAIL" else "Y"
+    next_step = "test" if result == "FAIL" else "done"
 
     for i in range(5):
         try:
@@ -179,7 +180,7 @@ def set_tested(mapper_file: str, sql_id: str, result: str, notes: str = "") -> d
             try:
                 update_by_mapper(conn,
                     "UPDATE transform_target_list SET tested=?, test_result=?, test_notes=?, current_step=?, updated_at=CURRENT_TIMESTAMP WHERE mapper_file=? AND sql_id=?",
-                    mapper_file, sql_id, extra_params=(tested_flag, result, notes, 'done'))
+                    mapper_file, sql_id, extra_params=(tested_flag, result, notes, next_step))
                 conn.commit()
             finally:
                 conn.close()
