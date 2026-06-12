@@ -11,12 +11,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="oma", description="Application SQL Transform CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    from cli import cmd_status, cmd_db
+    from cli import cmd_status, cmd_db, cmd_analyze
     cmd_status.register(sub)
     cmd_db.register(sub)
+    cmd_analyze.register(sub)
     # Future tasks add modules here:
-    # cmd_analyze.register(sub), cmd_merge.register(sub),
-    # cmd_test.register(sub), cmd_report.register(sub), cmd_setup.register(sub)
+    # cmd_merge.register(sub), cmd_test.register(sub),
+    # cmd_report.register(sub), cmd_setup.register(sub)
 
     return parser
 
