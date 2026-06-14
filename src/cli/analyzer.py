@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -194,7 +193,7 @@ def split_mapper(file_path: str) -> dict:
         return {'error': f'File not found: {file_path}', 'sql_ids': [], 'total': 0}
 
     content = path.read_text(encoding='utf-8')
-    elements, namespace, xml_header, xml_doctype = _extract_level1_elements(content)
+    elements, namespace, xml_header, _ = _extract_level1_elements(content)
 
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
     try:
@@ -373,7 +372,7 @@ def _analyze_patterns_from_db() -> dict:
 
     # Import complexity helpers
     from agents.source_analyzer.tools.sql_extractor import (
-        _calculate_complexity, _get_complexity_level, _get_distribution, ORACLE_PATTERNS
+        _calculate_complexity, _get_complexity_level, _get_distribution
     )
 
     class _EmptyElem:
