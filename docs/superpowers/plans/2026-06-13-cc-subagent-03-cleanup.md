@@ -81,6 +81,8 @@ dependencies = [
 주의: 제거 전 확인 — `grep -rn "import rich\|from rich\|import boto3\|from botocore" src/ --include="*.py" | grep -v __pycache__`
 출력이 있으면 해당 모듈을 stderr print로 교체 후 제거. (Plan 01에서 display 의존을 안 남겼다면 출력 없음)
 
+**알려진 boto3 잔존 (Plan 01 T7에서 표시):** `src/core/db_conn.py`의 `get_pg_connection_vars`/`get_mysql_connection_vars`에 SSM Parameter Store 폴백 분기가 있고 `# TODO(plan-03): remove SSM/boto3 fallback` 주석이 달려 있다. 이 분기를 제거하라 — 접속정보는 properties 테이블 + 환경변수만으로 충분 (Oracle용 `get_oracle_connection_vars`가 이미 그 패턴). 제거 후 db_conn.py에 boto3 import가 없어야 한다.
+
 - [ ] **Step 2: sync + 전체 테스트**
 
 Run: `uv sync && PYTHONPATH=src pytest tests/ -v && uv run oma --help`
