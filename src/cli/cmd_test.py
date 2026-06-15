@@ -105,6 +105,7 @@ def _generate_failure_report(db_path: Path) -> str | None:
 
 def run(args) -> int:
     from utils.project_paths import DB_PATH, OUTPUT_DIR
+    from utils.db_utils import update_by_mapper
     from core.db_migrate import ensure_schema
     from core.db_conn import get_pg_connection_vars, get_mysql_connection_vars, get_oracle_connection_vars
     from core.sql_executor import SQLExecutor, check_cli_available
@@ -274,7 +275,6 @@ def run(args) -> int:
         # Reset tested flag for execute phase (EXPLAIN already marked PASS)
         with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             for item in execute_items:
-                from utils.db_utils import update_by_mapper
                 update_by_mapper(conn,
                     "UPDATE transform_target_list SET tested='N', test_result=NULL WHERE mapper_file=? AND sql_id=?",
                     item['mapper_file'], item['sql_id'])
@@ -365,8 +365,8 @@ def run(args) -> int:
 def _update_tested(db_path: Path, mapper_file: str, sql_id: str,
                    result: str = "PASS", error: str = ""):
     """Update test result in DB."""
+    from utils.db_utils import update_by_mapper
     with sqlite3.connect(str(db_path), timeout=10) as conn:
-        from utils.db_utils import update_by_mapper
         test_notes = error[:500] if result != "PASS" and error else ""
         next_step = 'completed' if result == 'PASS' else 'test'
         update_by_mapper(conn,

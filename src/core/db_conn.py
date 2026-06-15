@@ -45,6 +45,7 @@ def get_pg_connection_vars() -> dict:
     if all(os.environ.get(v) for v in required):
         return {k: os.environ[k] for k in _PG_PARAM_MAP if os.environ.get(k)}
 
+    # TODO(plan-03): remove SSM/boto3 fallback when boto3 dependency is dropped
     try:
         import boto3
         ssm = boto3.client('ssm')
@@ -69,6 +70,7 @@ def get_mysql_connection_vars() -> dict:
     if all(os.environ.get(v) for v in required):
         return {k: os.environ[k] for k in _MYSQL_PARAM_MAP if os.environ.get(k)}
 
+    # TODO(plan-03): remove SSM/boto3 fallback when boto3 dependency is dropped
     try:
         import boto3
         ssm = boto3.client('ssm')
