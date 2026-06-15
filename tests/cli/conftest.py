@@ -1,5 +1,6 @@
 """Shared fixtures: temp OUTPUT_DIR with a seeded oma_control.db"""
 import os
+import sys
 import sqlite3
 import pytest
 
@@ -17,10 +18,15 @@ def oma_env(tmp_path, monkeypatch):
     out.mkdir()
     monkeypatch.setenv("OMA_OUTPUT_DIR", str(out))
 
-    # project_paths caches module-level constants — must reload after env change
+    # project_paths caches module-level constants — must reload after env change.
+    # Modules that derive paths at import-time must also be reloaded.
     import importlib
     import utils.project_paths
     importlib.reload(utils.project_paths)
+    if "core.html_report" in sys.modules:
+        importlib.reload(sys.modules["core.html_report"])
+    if "core.db_migrate" in sys.modules:
+        importlib.reload(sys.modules["core.db_migrate"])
 
     db = out / "oma_control.db"
     with sqlite3.connect(str(db)) as conn:
