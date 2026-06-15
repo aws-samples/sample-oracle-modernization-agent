@@ -37,17 +37,16 @@ def run(args) -> int:
         return 0 if summary["merged"] > 0 else 1
 
     # Full mode: check all mappers
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT mapper_file,
-               COUNT(*) as total,
-               SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as transformed
-        FROM transform_target_list
-        GROUP BY mapper_file ORDER BY mapper_file
-    """)
-    mappers = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mapper_file,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as transformed
+            FROM transform_target_list
+            GROUP BY mapper_file ORDER BY mapper_file
+        """)
+        mappers = cursor.fetchall()
 
     if not mappers:
         print("transform_target_list is empty", file=sys.stderr)
@@ -82,8 +81,8 @@ def run(args) -> int:
         logger = PipelineLogger(step='merge')
         logger.log_summary(merged=merged, skipped=skipped,
                            total_files=merge_count, duration_ms=duration_ms)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"warning: pipeline log skipped: {e}", file=sys.stderr)
 
     # HTML report generation (non-fatal)
     try:
