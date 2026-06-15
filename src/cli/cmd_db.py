@@ -59,6 +59,14 @@ def register(sub):
     gp.add_argument("--json", action="store_true", dest="as_json")
     gp.set_defaults(func=run_get_property)
 
+    rs = dbsub.add_parser("reset", help="Reset step status to N")
+    rs.add_argument("--step", required=True, choices=["transform", "review", "validate", "test"])
+    rs.add_argument("--only", default="", help="comma list mapper:sql_id (default: all Y/F)")
+    rs.set_defaults(func=run_reset)
+
+    fp = dbsub.add_parser("feedback-patterns", help="Dump review/validate failure feedback (for strategy refine)")
+    fp.set_defaults(func=run_feedback_patterns)
+
 
 def _connect():
     from utils.project_paths import DB_PATH
@@ -205,4 +213,90 @@ def run_pending(args) -> int:
         print(json.dumps(result, ensure_ascii=False))
     else:
         print(f"pending[{args.step}]: {len(items)} SQLs / {len(batches)} batches", file=sys.stderr)
+    return 0
+
+
+def run_reset(args) -> int:
+    """Reset step status. --only targets specific mapper:sql_id pairs; without it resets all."""
+    if not args.only:
+        from utils.project_paths import DB_PATH
+        from core.state_manager import StateManager
+        n = StateManager(DB_PATH).reset_step_status(args.step)
+        print(f"reset[{args.step}]: {n} rows", file=sys.stderr)
+        return 0
+
+    col = {"transform": "transformed", "review": "reviewed",
+           "validate": "validated", "test": "tested"}[args.step]
+    pairs = [x.split(":", 1) for x in args.only.split(",") if ":" in x]
+    conn = _connect()
+    try:
+        n = 0
+        for mapper, sql_id in pairs:
+            # nosemgrep: python.lang.security.audit.formatted-sql-query
+            # col is from a code-internal fixed mapping, not user input
+            cur = conn.execute(
+                f"UPDATE transform_target_list SET {col}='N', updated_at=CURRENT_TIMESTAMP "
+                f"WHERE mapper_file=? AND sql_id=?", (mapper.strip(), sql_id.strip()))
+            n += cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"reset[{args.step}]: {n} rows", file=sys.stderr)
+    return 0
+
+
+def run_feedback_patterns(args) -> int:
+    """Dump review/validate failure feedback for strategy refinement."""
+    conn = _connect()
+    try:
+        # Collect review failures (reviewed='F' with review_result)
+        rows = conn.execute(
+            "SELECT mapper_file, sql_id, review_result FROM transform_target_list "
+            "WHERE reviewed='F' AND review_result IS NOT NULL"
+        ).fetchall()
+
+        # Collect validation failures
+        vrows = conn.execute(
+            "SELECT mapper_file, sql_id, validation_result FROM transform_target_list "
+            "WHERE validated='F' AND validation_result IS NOT NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows and not vrows:
+        print("No failure feedback found.", file=sys.stderr)
+        return 0
+
+    # Output review failures
+    if rows:
+        print("=== Review Failures ===")
+        for mapper, sql_id, result_text in rows:
+            print(f"\n--- {mapper} : {sql_id} ---")
+            try:
+                data = json.loads(result_text)
+                issues = data.get("issues", [])
+                if issues:
+                    for issue in issues:
+                        print(f"  - {issue}")
+                else:
+                    print(f"  {result_text}")
+            except (json.JSONDecodeError, TypeError):
+                print(f"  {result_text}")
+
+    # Output validation failures
+    if vrows:
+        print("\n=== Validation Failures ===")
+        for mapper, sql_id, result_text in vrows:
+            print(f"\n--- {mapper} : {sql_id} ---")
+            try:
+                data = json.loads(result_text)
+                issues = data.get("issues", [])
+                if issues:
+                    for issue in issues:
+                        print(f"  - {issue}")
+                else:
+                    print(f"  {result_text}")
+            except (json.JSONDecodeError, TypeError):
+                print(f"  {result_text}")
+
     return 0
