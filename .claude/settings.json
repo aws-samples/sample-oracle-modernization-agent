@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(oma:*)",
+      "Bash(uv run oma:*)",
+      "Bash(.venv/bin/oma:*)",
+      "Read(./src/reference/**)",
+      "Read(./output/**)",
+      "Write(./output/**)"
+    ]
+  },
+  "env": {
+    "PYTHONPATH": "src"
+  }
+}
