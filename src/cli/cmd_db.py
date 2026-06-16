@@ -65,6 +65,7 @@ def register(sub):
     rs.set_defaults(func=run_reset)
 
     fp = dbsub.add_parser("feedback-patterns", help="Dump review/validate failure feedback (for strategy refine)")
+    fp.add_argument("--json", action="store_true", dest="as_json")
     fp.set_defaults(func=run_feedback_patterns)
 
 
@@ -245,6 +246,16 @@ def run_reset(args) -> int:
     return 0
 
 
+def _parse_issues(result_text: str):
+    """Parse issues from a JSON result string. Returns list or raw text."""
+    try:
+        data = json.loads(result_text)
+        issues = data.get("issues", [])
+        return issues if issues else result_text
+    except (json.JSONDecodeError, TypeError):
+        return result_text
+
+
 def run_feedback_patterns(args) -> int:
     """Dump review/validate failure feedback for strategy refinement."""
     conn = _connect()
@@ -264,39 +275,47 @@ def run_feedback_patterns(args) -> int:
         conn.close()
 
     if not rows and not vrows:
-        print("No failure feedback found.", file=sys.stderr)
+        if getattr(args, "as_json", False):
+            print("[]")
+        else:
+            print("No failure feedback found.", file=sys.stderr)
         return 0
 
-    # Output review failures
+    # --json: structured output for strategy-refiner subagent
+    if getattr(args, "as_json", False):
+        items = []
+        for mapper, sql_id, result_text in rows:
+            issues = _parse_issues(result_text)
+            items.append({"source": "review", "mapper_file": mapper,
+                          "sql_id": sql_id, "issues": issues})
+        for mapper, sql_id, result_text in vrows:
+            issues = _parse_issues(result_text)
+            items.append({"source": "validation", "mapper_file": mapper,
+                          "sql_id": sql_id, "issues": issues})
+        print(json.dumps(items, ensure_ascii=False))
+        return 0
+
+    # Human-readable text output
     if rows:
         print("=== Review Failures ===")
         for mapper, sql_id, result_text in rows:
             print(f"\n--- {mapper} : {sql_id} ---")
-            try:
-                data = json.loads(result_text)
-                issues = data.get("issues", [])
-                if issues:
-                    for issue in issues:
-                        print(f"  - {issue}")
-                else:
-                    print(f"  {result_text}")
-            except (json.JSONDecodeError, TypeError):
-                print(f"  {result_text}")
+            issues = _parse_issues(result_text)
+            if isinstance(issues, list):
+                for issue in issues:
+                    print(f"  - {issue}")
+            else:
+                print(f"  {issues}")
 
-    # Output validation failures
     if vrows:
         print("\n=== Validation Failures ===")
         for mapper, sql_id, result_text in vrows:
             print(f"\n--- {mapper} : {sql_id} ---")
-            try:
-                data = json.loads(result_text)
-                issues = data.get("issues", [])
-                if issues:
-                    for issue in issues:
-                        print(f"  - {issue}")
-                else:
-                    print(f"  {result_text}")
-            except (json.JSONDecodeError, TypeError):
-                print(f"  {result_text}")
+            issues = _parse_issues(result_text)
+            if isinstance(issues, list):
+                for issue in issues:
+                    print(f"  - {issue}")
+            else:
+                print(f"  {issues}")
 
     return 0
