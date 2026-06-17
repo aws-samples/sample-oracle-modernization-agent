@@ -1,7 +1,7 @@
 """Database connection variable loaders (strands-free).
 
-Loads connection info from environment variables, AWS Parameter Store,
-or the DB properties table. Used by cli/cmd_test.py and other CLI commands
+Loads connection info from environment variables or the DB properties table
+(populated by `oma setup`). Used by cli/cmd_test.py and other CLI commands
 that need DB access without depending on agents/.
 """
 import os
@@ -9,25 +9,11 @@ import sqlite3
 
 from utils.project_paths import DB_PATH
 
-# --- PostgreSQL ---
-_PG_SSM_PREFIX = "/oma/target_postgres/"
-_PG_PARAM_MAP = {
-    'PGHOST': 'host',
-    'PGPORT': 'port',
-    'PGDATABASE': 'database',
-    'PGUSER': 'username',
-    'PGPASSWORD': 'password',
-}
+# --- PostgreSQL --- (env key == property key, so identity map of required+optional)
+_PG_KEYS = ['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD']
 
 # --- MySQL ---
-_MYSQL_SSM_PREFIX = "/oma/target_mysql/"
-_MYSQL_PARAM_MAP = {
-    'MYSQL_HOST': 'host',
-    'MYSQL_PORT': 'port',
-    'MYSQL_DATABASE': 'database',
-    'MYSQL_USER': 'username',
-    'MYSQL_PASSWORD': 'password',
-}
+_MYSQL_KEYS = ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD']
 
 # --- Oracle (source DB for TC generation + Compare) ---
 _ORACLE_PROP_MAP = {
@@ -39,54 +25,41 @@ _ORACLE_PROP_MAP = {
 }
 
 
-def get_pg_connection_vars() -> dict:
-    """Get PostgreSQL connection vars from env or AWS Parameter Store."""
-    required = ['PGHOST', 'PGDATABASE', 'PGUSER']
+def _vars_from_env_or_props(keys: list[str], required: list[str]) -> dict:
+    """Resolve connection vars: env vars first, then DB properties (oma setup)."""
     if all(os.environ.get(v) for v in required):
-        return {k: os.environ[k] for k in _PG_PARAM_MAP if os.environ.get(k)}
+        return {k: os.environ[k] for k in keys if os.environ.get(k)}
 
-    # TODO(plan-03): remove SSM/boto3 fallback when boto3 dependency is dropped
-    try:
-        import boto3
-        ssm = boto3.client('ssm')
-        resp = ssm.get_parameters_by_path(Path=_PG_SSM_PREFIX, WithDecryption=True)
-        params = {p['Name'].split('/')[-1]: p['Value'] for p in resp.get('Parameters', [])}
-        if not params:
-            return {}
-        pg_vars = {}
-        for env_key, ssm_key in _PG_PARAM_MAP.items():
-            if ssm_key in params:
-                pg_vars[env_key] = params[ssm_key]
-        if all(pg_vars.get(v) for v in required):
-            return pg_vars
+    if not DB_PATH.exists():
         return {}
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        try:
+            placeholders = ",".join("?" for _ in keys)
+            # nosemgrep: placeholders are positional '?' only; keys are code-internal constants
+            rows = conn.execute(
+                f"SELECT key, value FROM properties WHERE key IN ({placeholders})",
+                keys,
+            ).fetchall()
+        finally:
+            conn.close()
     except Exception:
         return {}
+
+    found = {k: v for k, v in rows if v}
+    if all(found.get(v) for v in required):
+        return found
+    return {}
+
+
+def get_pg_connection_vars() -> dict:
+    """Get PostgreSQL connection vars from env or DB properties (oma setup)."""
+    return _vars_from_env_or_props(_PG_KEYS, ['PGHOST', 'PGDATABASE', 'PGUSER'])
 
 
 def get_mysql_connection_vars() -> dict:
-    """Get MySQL connection vars from env or AWS Parameter Store."""
-    required = ['MYSQL_HOST', 'MYSQL_DATABASE', 'MYSQL_USER']
-    if all(os.environ.get(v) for v in required):
-        return {k: os.environ[k] for k in _MYSQL_PARAM_MAP if os.environ.get(k)}
-
-    # TODO(plan-03): remove SSM/boto3 fallback when boto3 dependency is dropped
-    try:
-        import boto3
-        ssm = boto3.client('ssm')
-        resp = ssm.get_parameters_by_path(Path=_MYSQL_SSM_PREFIX, WithDecryption=True)
-        params = {p['Name'].split('/')[-1]: p['Value'] for p in resp.get('Parameters', [])}
-        if not params:
-            return {}
-        mysql_vars = {}
-        for env_key, ssm_key in _MYSQL_PARAM_MAP.items():
-            if ssm_key in params:
-                mysql_vars[env_key] = params[ssm_key]
-        if all(mysql_vars.get(v) for v in required):
-            return mysql_vars
-        return {}
-    except Exception:
-        return {}
+    """Get MySQL connection vars from env or DB properties (oma setup)."""
+    return _vars_from_env_or_props(_MYSQL_KEYS, ['MYSQL_HOST', 'MYSQL_DATABASE', 'MYSQL_USER'])
 
 
 def get_oracle_connection_vars() -> dict:
