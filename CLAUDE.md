@@ -1,154 +1,134 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Application SQL Transform Agent — a sub-module of OMA (Oracle Modernization Agent). AI-powered Multi-Agent system that converts Oracle SQL to PostgreSQL/MySQL in MyBatis Mapper XML files. Uses Strands Agents SDK with AWS Bedrock (Claude Opus 4.6) to automatically transform, review, validate, and test SQL conversions.
+**Application SQL Transform Agent** — a sub-module of OMA (Oracle Modernization Agent).
+Converts Oracle SQL to PostgreSQL/MySQL in MyBatis Mapper XML files using a hybrid
+Claude Code subagent + `oma` CLI architecture.
 
-## Setup & Run
+- **Main session = Orchestrator**: The Claude Code conversation controls the pipeline
+- **`.claude/agents/`** = 5 subagents (LLM workers): oma-transformer, oma-reviewer, oma-validator, oma-test-fixer, oma-strategy-refiner
+- **`src/cli/`** = `oma` CLI (deterministic infrastructure): status, db, analyze, merge, test-exec, report, setup
+- **SQLite `oma_control.db`** = state SSOT (all pipeline progress)
+
+When the user requests a SQL transformation task, load the `oma-pipeline` skill and
+follow its procedure. Do NOT perform SQL conversion directly in the main session.
+
+## Setup & Commands
 
 ```bash
-# Install
+# Install dependencies
 uv sync
-source .venv/bin/activate
 
-# Configure (interactive — creates OUTPUT_DIR/oma_control.db)
-cd src && PYTHONPATH=. python3 run_setup.py
+# Run oma CLI
+uv run oma --help
+uv run oma setup --non-interactive --source <path> --target-db postgresql
+uv run oma status
+uv run oma analyze
+uv run oma merge
+uv run oma report
 
-# Run — main REPL orchestrator (Strands Agent, 21 tools, natural language)
-cd src && PYTHONPATH=. python3 run_orchestrator.py
+# Run tests
+uv run pytest tests/cli/ -v
 
-# Run example (self-contained demo with 3 mapper XMLs, 44 SQLs)
-cd example && ./setup.sh && ./run.sh
-
-# View results — self-contained HTML report regenerated after every step
-open output/reports/oma_report.html
-```
-
-### Pipeline Steps (individual execution)
-
-All scripts run from `src/` with `PYTHONPATH=.`. Working directory for state/output is controlled by `OMA_OUTPUT_DIR` env var (default: `./output/`).
-
-```bash
-cd src
-PYTHONPATH=. python3 run_source_analyzer.py          # 1. Scan mappers, extract SQLs, generate strategy
-PYTHONPATH=. python3 run_sql_transform.py --workers 5   # 2. Oracle → Target DB conversion
-PYTHONPATH=. python3 run_sql_review.py --workers 5 --max-rounds 3  # 3. Multi-perspective review
-PYTHONPATH=. python3 run_sql_validate.py --workers 5    # 4. Functional equivalence validation
-PYTHONPATH=. python3 run_sql_merge.py                   # 5. Reassemble final Mapper XMLs
-PYTHONPATH=. python3 run_sql_test.py --workers 5        # 6. DB execution test (requires target DB)
-PYTHONPATH=. python3 run_strategy.py                    # Manual strategy refinement
+# E2E example
+cd example && ./setup.sh
+# Then launch claude and say "변환 시작"
 ```
 
 ## Architecture
 
+```
+Claude Code Session (Orchestrator)
+  │
+  ├── Skills (.claude/skills/)
+  │     oma-pipeline.md   — 7-step workflow SSOT + checkpoint protocol
+  │     oma-start.md      — session startup
+  │     oma-status.md     — quick status check
+  │
+  ├── Subagents (.claude/agents/)  — LLM workers
+  │     oma-transformer.md     — Oracle → Target DB SQL conversion
+  │     oma-reviewer.md        — Multi-perspective review (syntax + equivalence)
+  │     oma-validator.md       — Functional equivalence verification
+  │     oma-test-fixer.md      — Fix SQL that fails DB execution
+  │     oma-strategy-refiner.md — Learn patterns from failures
+  │
+  └── oma CLI (src/cli/)  — deterministic infrastructure
+        setup / status / db / analyze / merge / test-exec / report
+```
+
 ### Directory Structure
 
-```
-src/
-├── mcp_server/          # MCP orchestration (18 tools) — Claude Code / Kiro interface
-├── agents/              # 8 Strands agents
-│   └── (orchestrator, sql_transform, sql_review, ...)
-├── run_*.py             # Pipeline runners
-├── core/                # DB models, state manager (shared)
-├── utils/               # Path constants
-├── reference/           # Conversion rules
-├── skills/              # Skill definitions (shared, symlinked)
-├── AGENT.md             # Shared agent guide
-└── CLAUDE.md            # Claude Code specific
-```
-
-### 8 Agents
-
-| Agent | Location | Role |
-|-------|----------|------|
-| **Orchestrator** | `src/agents/orchestrator/` | Pipeline control, interactive CLI (17 tools) |
-| **ReviewManager** | `src/agents/review_manager/` | Diff comparison/approval + test failure report (6 tools) |
-| **Source Analyzer** | `src/agents/source_analyzer/` | Mapper scan, SQL extraction, strategy generation |
-| **Transform** | `src/agents/sql_transform/` | Oracle → Target DB conversion |
-| **Review** | `src/agents/sql_review/` | Multi-perspective: Syntax + Equivalence agents in parallel → LLM Facilitator |
-| **Validate** | `src/agents/sql_validate/` | Functional equivalence verification |
-| **Test** | `src/agents/sql_test/` | Phase 0: EXPLAIN all, Phase 1: Execute (psql/mysql CLI), Phase 1.5: Oracle-PG Compare, Phase 2: Agent fix |
-| **Strategy Refine** | `src/agents/strategy_refine/` | Strategy learning and compression |
-
-Each agent directory follows: `agent.py` (factory), `tools/` (Strands @tool functions), `prompt.md` (system prompt).
-
-### Pipeline Flow
-
-```
-Setup → Analyze → Transform → Review → Validate → Merge → Test
-                                ↓ FAIL (specific feedback)
-                          Re-transform (max 3 rounds, round 2+: Strategy Refine)
-
-Test Flow (TC Gen → Phase 0 → Phase 1 → Phase 1.5 → Phase 2):
-  TC Gen: Auto-generate test cases (7-source: Oracle dict + inference + LLM)
-  Pre-skip: sql/resultMap → SKIP
-  Phase 0: EXPLAIN (all SQL types) → PASS/FAIL
-  Phase 1: Execute via psql/mysql CLI (SELECT LIMIT + DML ROLLBACK) → PASS/FAIL
-  Phase 1.5: Oracle-PG Compare (row count, if Oracle available) → PASS/FAIL
-  Phase 2: Agent fix (Opus 4.6, explain + execute + compare, max 3 attempts)
-  Reports: test_result_report.md (Pass/Fail/Skip by category)
-```
-
-### Key Modules
-
-- **`src/core/models.py`** — SQLAlchemy ORM models (transform_target_list, properties, history tables)
-- **`src/core/state_manager.py`** — Centralized DB access interface (SQLAlchemy ORM)
-- **`src/core/progress.py`** — Real-time progress tracking
-- **`src/utils/project_paths.py`** — All path constants, model IDs, DB path resolution, target DBMS config (`get_target_dbms()`, `get_rules_path()`, `load_prompt_text()`)
-- **`src/utils/db_utils.py`** — Common mapper_file resolution (`query_by_mapper()`, `update_by_mapper()`) — handles both `sub_dir/filename` and `filename` formats
-- **`src/core/sql_executor.py`** — CLI-based SQL executor (psql/mysql/sqlplus, batch marker pattern)
-- **`src/core/tc_generator.py`** — Test case auto-generator (7-source priority chain)
-- **`src/core/result_comparator.py`** — Oracle vs Target DB result comparator
+| Path | Purpose |
+|------|---------|
+| `.claude/agents/` | 5 subagent definitions (spawned by orchestrator) |
+| `.claude/skills/` | Pipeline skills (loaded into main session) |
+| `src/cli/` | `oma` CLI — single Python entry point, subcommands |
+| `src/core/` | Shared modules: state_manager (SQLAlchemy), sql_executor, tc_generator, html_report, metadata, complexity, db_conn |
+| `src/reference/` | Conversion rules (`oracle_to_postgresql_rules.md`, `oracle_to_mysql_rules.md`) — subagents Read these |
+| `src/utils/` | Path constants (`project_paths.py`), DB helpers (`db_utils.py`) |
+| `output/` | Working directory (DB + all artifacts) |
+| `tests/cli/` | pytest suite for CLI |
 
 ### 2-Tier Rule System
 
-- **Tier 1 (Static):** `src/reference/oracle_to_{dbms}_rules.md` — common Oracle→Target DB patterns (selected by TARGET_DBMS_TYPE)
+- **Tier 1 (Static):** `src/reference/oracle_to_{dbms}_rules.md` — common patterns (selected by TARGET_DBMS_TYPE)
 - **Tier 2 (Dynamic):** `output/strategy/transform_strategy.md` — project-specific patterns learned from failures
-
-### Prompt Caching (3-Block)
-
-Agents use SystemContentBlock with cachePoints for cost optimization:
-- Block 1: System prompt + General Rules + cachePoint
-- Block 2: Project Strategy + cachePoint
-- Block 3: Per-request context
 
 ## Critical Coding Rules
 
-### Model Selection
-- **Main model:** `claude-opus-4-6` (`MODEL_ID`) — highest quality
-- **Lite model:** `claude-sonnet-4-6` (`LITE_MODEL_ID`) — for Facilitator/summaries
-- **Fallback (저비용):** `claude-sonnet-4-5-20250929` — Prompt Caching supported
-
 ### DB Access Patterns
-- **StateManager** uses SQLAlchemy ORM — use it for transform_target_list operations
-- **Tool functions** use parameterized `sqlite3` queries — never use f-string SQL
-- Always use `with sqlite3.connect(str(DB_PATH), timeout=10) as conn:` for connections
-- **mapper_file queries** — always use `db_utils.query_by_mapper()` / `update_by_mapper()` for mapper_file + sql_id lookups (handles path prefix variations)
+- **StateManager** uses SQLAlchemy ORM — use for `transform_target_list` operations
+- **CLI/tool code** uses parameterized `sqlite3` queries — **never f-string SQL**
+- Always: `with sqlite3.connect(str(DB_PATH), timeout=10) as conn:`
+- **mapper_file queries** — use `utils/db_utils.query_by_mapper()` / `update_by_mapper()` (handles path prefix variations)
 
-### Agent Creation
-- Use `suppress_streaming=True` parameter in agent factory to set `callback_handler=None` at creation time
-- Never overwrite `agent.callback_handler` after creation (causes NoneType errors)
+### XML Parsing
+- All XML parsing via `defusedxml` — never `xml.etree.ElementTree` directly
+
+### Subagent Definitions
+- When modifying `.claude/agents/*.md`, never embed full conversion rule text — subagents Read rules from `src/reference/` at runtime
+- Keep agent prompts focused on procedure and output format
+
+### CLI Output Convention
+- Machine-readable: `--json` flag outputs JSON to stdout
+- Human-readable: formatted output to stderr
+- Exit codes: 0 = success, 1 = error, 2 = invalid args
 
 ### Security
-- No hardcoded secrets — use env vars or AWS Secrets Manager
-- Passwords via `getpass.getpass()` only
+- No hardcoded secrets — use env vars
 - All XML parsing via `defusedxml`
-- Target: 0 Critical findings in semgrep/bandit scans
+- Parameterized SQL only (no string interpolation)
 
 ## Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OMA_OUTPUT_DIR` | Working directory (DB + all output) | `./output/` |
-| `OMA_MODEL_ID` | Bedrock model for agents | Opus 4.6 cross-region |
-| `OMA_LITE_MODEL_ID` | Bedrock model for Facilitator | Sonnet 4.6 |
 | `TARGET_DBMS_TYPE` | Target DB type (`postgresql` or `mysql`) | DB property or `postgresql` |
-| `AWS_DEFAULT_REGION` | AWS region | — |
-| **Oracle + Target DB** | *run_setup.py에서 입력 → DB properties에 저장 → Test 시 자동 로드* | |
-| `ORACLE_HOST` | Oracle DB host (DB key: `ORACLE_HOST`) | — |
-| `ORACLE_SID` | Oracle Service Name (DB key: `ORACLE_SERVICE_NAME`) | — |
-| `ORACLE_USER` | Oracle user (DB key: `ORACLE_SVC_USER`) | — |
+| **Oracle DB** | *`oma setup` stores in DB properties* | |
+| `ORACLE_HOST` | Oracle DB host | — |
+| `ORACLE_SID` | Oracle Service Name | — |
+| `ORACLE_USER` | Oracle user | — |
+| **Target DB** | *`oma setup` stores in DB properties* | |
 | `PGHOST` / `MYSQL_HOST` | Target DB host | — |
 | `PGDATABASE` / `MYSQL_DATABASE` | Target DB name | — |
+
+## Pipeline (7 Steps)
+
+```
+Analyze → Transform → Review → Validate → Merge → Test → Report
+                        ↓ FAIL
+                  Re-transform (max 3 rounds)
+```
+
+Each step writes to `oma_control.db`. After each step the orchestrator presents
+results and waits for checkpoint approval before proceeding.
+
+## Response Style
+
+- Communicate in Korean (user preference)
+- After each step: brief summary (counts, pass/fail) + next recommended action
+- No long log dumps — counts and 2-3 representative samples max
