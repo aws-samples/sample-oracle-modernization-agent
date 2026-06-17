@@ -36,11 +36,11 @@ def _vars_from_env_or_props(keys: list[str], required: list[str]) -> dict:
         conn = sqlite3.connect(str(DB_PATH), timeout=10)
         try:
             placeholders = ",".join("?" for _ in keys)
-            # nosemgrep: placeholders are positional '?' only; keys are code-internal constants
-            rows = conn.execute(
-                f"SELECT key, value FROM properties WHERE key IN ({placeholders})",
-                keys,
-            ).fetchall()
+            # placeholders is only positional '?' marks; values bound via params (keys).
+            # keys are code-internal constants (_PG_KEYS/_MYSQL_KEYS), never user input.
+            query = f"SELECT key, value FROM properties WHERE key IN ({placeholders})"
+            # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+            rows = conn.execute(query, keys).fetchall()
         finally:
             conn.close()
     except Exception:
