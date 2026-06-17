@@ -22,7 +22,7 @@ dispatch prompt: `mapper_file` + `sql_ids` 목록.
 
 각 sql_id 처리 절차:
 1. `oma db read-sql <mapper_file> <sql_id> --json` → 원본 Oracle SQL
-2. 변환 파일 Read: `output/xmls/transform/<mapper_stem>/<sql_id>.xml`
+2. `oma db read-transform <mapper_file> <sql_id> --json` → 변환된 Target DB SQL
 3. Functional Equivalence Checklist 전체 검증
 4. PASS → `oma db set-validated <mapper_file> <sql_id> --result PASS`
 5. FAIL이지만 직접 수정 가능 → 수정한 SQL을 임시 파일에 Write 후:

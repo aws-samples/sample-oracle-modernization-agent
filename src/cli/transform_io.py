@@ -294,3 +294,48 @@ def read_sql_source(mapper_file: str, sql_id: str) -> dict:
     sql_body = body_match.group(2).strip() if body_match else content
 
     return {'sql_id': sql_id, 'sql_type': sql_type, 'sql_body': sql_body}
+
+
+def read_transform(mapper_file: str, sql_id: str) -> dict:
+    """Read the CONVERTED (target DB) SQL for a given SQL ID.
+
+    Reads from the target_file path stored in the DB so reviewer/validator/
+    test-fixer subagents never need to reconstruct the on-disk path themselves.
+
+    Returns:
+        Dict with sql_id, sql_type, sql_body (converted SQL content), or {'error': ...}
+    """
+    from utils.project_paths import DB_PATH
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    try:
+        cursor = conn.cursor()
+        from utils.db_utils import query_by_mapper
+        row = query_by_mapper(
+            cursor,
+            "SELECT target_file, sql_type, transformed FROM transform_target_list WHERE mapper_file = ? AND sql_id = ?",
+            mapper_file, sql_id
+        )
+    finally:
+        conn.close()
+
+    if not row:
+        return {'error': f'Not found: {mapper_file}/{sql_id}'}
+
+    target_file, sql_type, transformed = row
+    if transformed != 'Y':
+        return {'error': f'Not transformed yet: {mapper_file}/{sql_id} (transformed={transformed})'}
+
+    path = Path(target_file) if target_file else None
+    if not path or not path.exists():
+        return {'error': f'Transform file not found: {target_file}'}
+
+    content = path.read_text(encoding='utf-8')
+    import re
+    body_match = re.search(
+        r'<(select|insert|update|delete|sql)\s+[^>]*id\s*=\s*["\'][^"\']+["\'][^>]*>(.*?)</\1>',
+        content, re.DOTALL | re.IGNORECASE
+    )
+    sql_body = body_match.group(2).strip() if body_match else content
+
+    return {'sql_id': sql_id, 'sql_type': sql_type, 'sql_body': sql_body}

@@ -29,6 +29,12 @@ def register(sub):
     rd.add_argument("--json", action="store_true", dest="as_json")
     rd.set_defaults(func=run_read_sql)
 
+    rt = dbsub.add_parser("read-transform", help="Read converted SQL body for one sql_id")
+    rt.add_argument("mapper_file")
+    rt.add_argument("sql_id")
+    rt.add_argument("--json", action="store_true", dest="as_json")
+    rt.set_defaults(func=run_read_transform)
+
     sv = dbsub.add_parser("save-transform", help="Save converted SQL (file or stdin)")
     sv.add_argument("mapper_file")
     sv.add_argument("sql_id")
@@ -80,6 +86,19 @@ def _connect():
 def run_read_sql(args) -> int:
     from cli.transform_io import read_sql_source
     result = read_sql_source(args.mapper_file, args.sql_id)
+    if "error" in result:
+        print(result["error"], file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(result["sql_body"])
+    return 0
+
+
+def run_read_transform(args) -> int:
+    from cli.transform_io import read_transform
+    result = read_transform(args.mapper_file, args.sql_id)
     if "error" in result:
         print(result["error"], file=sys.stderr)
         return 1

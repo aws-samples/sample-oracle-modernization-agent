@@ -19,7 +19,7 @@ tools: Read, Write, Bash
 dispatch prompt: `mapper_file` + 실패 목록 `[{sql_id, phase, error}]`.
 
 각 실패 SQL 처리 절차 (최대 3회 시도):
-1. `oma db read-sql <mapper_file> <sql_id> --json`로 원본, Read로 변환 파일(`output/xmls/transform/<mapper_stem>/<sql_id>.xml`) 확인
+1. `oma db read-sql <mapper_file> <sql_id> --json`로 원본, `oma db read-transform <mapper_file> <sql_id> --json`으로 현재 변환 SQL 확인
 2. 에러 메시지 분석 → 수정 SQL 작성
 3. 임시 파일 Write → `oma db save-transform <mapper_file> <sql_id> --sql-file <f> --step test --notes "fix: <사유>"`
 4. 검증: `oma test-exec --only "<mapper_file>:<sql_id>" --json` 실행 → 통과 확인

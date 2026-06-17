@@ -69,3 +69,26 @@ def test_save_transform_missing_sql_errors(oma_env, run_cli, tmp_path):
     code, _, stderr = run_cli("db", "save-transform", "NoMapper.xml", "nope", "--sql-file", str(f))
     assert code == 1
     assert "Not found" in stderr
+
+
+def test_read_transform_returns_converted_body(oma_env, run_cli, tmp_path):
+    _prepare_source(oma_env)
+    converted = tmp_path / "converted.sql"
+    converted.write_text(
+        "/* [OMA] NVL->COALESCE */\nSELECT COALESCE(name, 'X') FROM users WHERE id = #{id}::numeric",
+        encoding="utf-8")
+    run_cli("db", "save-transform", "UserMapper.xml", "selectUser",
+            "--sql-file", str(converted), "--notes", "x")
+
+    code, stdout, _ = run_cli("db", "read-transform", "UserMapper.xml", "selectUser", "--json")
+    assert code == 0
+    data = json.loads(stdout)
+    assert "COALESCE" in data["sql_body"]
+    assert data["sql_type"] == "select"
+
+
+def test_read_transform_not_yet_transformed_errors(oma_env, run_cli):
+    # UserMapper.insertUser is transformed='N' in seed
+    code, _, stderr = run_cli("db", "read-transform", "UserMapper.xml", "insertUser")
+    assert code == 1
+    assert "Not transformed" in stderr or "not found" in stderr.lower()
