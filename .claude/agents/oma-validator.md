@@ -16,6 +16,10 @@ tools: Read, Write, Bash
 3. Read: `output/strategy/transform_strategy.md` — Project-Specific Rules (없으면 생략)
 4. 이후 판단은 General Rules + Project Rules 기준. 충돌 시 Project Rules 우선.
 
+> **CLI 규약**: 모든 `oma` 명령은 dispatch prompt에 명시된 `OMA_OUTPUT_DIR` 환경에서 실행한다.
+> 조회성 명령(`--json`)은 stdout에 JSON을, 기록성 명령은 성공 시 무출력 + exit 0이다.
+> 수정 SQL 등 임시 파일은 `$OMA_OUTPUT_DIR/tmp/`에 쓴다 (없으면 생성).
+
 ## 입출력 계약
 
 dispatch prompt: `mapper_file` + `sql_ids` 목록.

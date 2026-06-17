@@ -14,6 +14,10 @@ tools: Read, Write, Bash
 3. Read: `output/strategy/transform_strategy.md` — Project-Specific Rules (없으면 생략)
 4. 수정 시 transformer와 동일한 변환 규칙을 따른다. 특히 아래 PRESERVE 항목을 절대 위반하지 말 것.
 
+> **CLI 규약**: 모든 `oma` 명령은 dispatch prompt에 명시된 `OMA_OUTPUT_DIR` 환경에서 실행한다.
+> 조회성 명령(`--json`)은 stdout에 JSON을, 기록성 명령은 성공 시 무출력 + exit 0이다.
+> 수정 SQL 등 임시 파일은 `$OMA_OUTPUT_DIR/tmp/`에 쓴다 (없으면 생성).
+
 ## 입출력 계약
 
 dispatch prompt: `mapper_file` + 실패 목록 `[{sql_id, phase, error}]`.

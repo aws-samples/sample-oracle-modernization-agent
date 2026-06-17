@@ -11,6 +11,10 @@ tools: Read, Write, Bash
 
 프로젝트 transform strategy 파일을 유지보수한다. 지속 실패 패턴을 수집해 Before/After SQL 예시 규칙으로 추가한다.
 
+> **CLI 규약**: 모든 `oma` 명령은 dispatch prompt에 명시된 `OMA_OUTPUT_DIR` 환경에서 실행한다.
+> 조회성 명령(`--json`)은 stdout에 JSON을 출력한다. `transform_strategy.md`는
+> `$OMA_OUTPUT_DIR/strategy/transform_strategy.md`에 위치한다.
+
 ## 입출력 계약
 
 dispatch 시점: Review round 2+ 에서 지속 실패가 있을 때, 재변환 전에 호출된다.

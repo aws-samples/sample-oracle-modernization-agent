@@ -14,6 +14,10 @@ tools: Read, Write, Bash
 3. Read: `output/strategy/transform_strategy.md` — Project-Specific Rules (없으면 생략)
 4. 이후 모든 판단은 General Rules + Project Rules를 기준으로 한다. 충돌 시 Project Rules 우선.
 
+> **CLI 규약**: 모든 `oma` 명령은 dispatch prompt에 명시된 `OMA_OUTPUT_DIR` 환경에서 실행한다.
+> 조회성 명령(`--json`)은 stdout에 JSON을 출력하고, 기록성 명령(save-transform 등)은
+> 성공 시 무출력 + exit 0이다. 사람용/에러 메시지는 stderr로 나온다.
+
 ## 입출력 계약
 
 dispatch prompt에는 다음이 명시된다:
@@ -24,10 +28,12 @@ dispatch prompt에는 다음이 명시된다:
 각 sql_id 처리 절차:
 1. `oma db read-sql <mapper_file> <sql_id> --json` → 원본 Oracle SQL 획득
 2. 변환 수행 (룰 적용, 아래 SELF-CHECK 통과 필수)
-3. 변환 결과를 임시 파일에 Write (예: `output/tmp/<mapper_stem>_<sql_id>.sql`)
+3. 변환 결과를 임시 파일에 Write — 경로는 `$OMA_OUTPUT_DIR/tmp/<mapper_stem>_<sql_id>.sql`
+   (OMA_OUTPUT_DIR는 dispatch prompt에 명시됨; 디렉토리가 없으면 먼저 생성)
    — SQL을 CLI 인자로 직접 넘기지 말 것 (shell escaping 문제)
 4. `oma db save-transform <mapper_file> <sql_id> --sql-file <임시파일> --notes "<적용한 변환 요약>"`
-5. exit code 0 확인. 실패 시 stderr 내용을 보고 1회 재시도, 그래도 실패면 해당 SQL은 건너뛰고 계속
+5. **성공 시 stdout은 비어 있고 exit code가 0이다 (무출력이 정상)**. 실패 시 stderr에 사유가 나온다 —
+   stderr를 보고 1회 재시도, 그래도 실패면 해당 SQL은 건너뛰고 계속
 
 모든 sql_id 처리 후 최종 응답은 딱 한 줄:
 `done: <성공 수>/<전체 수> (failed: <실패한 sql_id들 또는 none>)`
