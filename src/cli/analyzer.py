@@ -334,7 +334,7 @@ def generate_metadata() -> dict:
     import io
     import contextlib
     try:
-        from agents.sql_transform.tools.metadata import generate_metadata as _gen
+        from core.metadata import generate_metadata as _gen
         with contextlib.redirect_stdout(io.StringIO()):
             return _gen()
     except Exception as e:
@@ -371,7 +371,7 @@ def _analyze_patterns_from_db() -> dict:
         return {}
 
     # Import complexity helpers
-    from agents.source_analyzer.tools.sql_extractor import (
+    from core.complexity import (
         _calculate_complexity, _get_complexity_level, _get_distribution
     )
 
