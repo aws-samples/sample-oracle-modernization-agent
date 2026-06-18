@@ -164,6 +164,12 @@ claude   # then: "변환 시작"
 
 See [example/README.md](example/README.md) for details.
 
+## Applying to a Real Project (Site Runbook)
+
+For converting an actual customer codebase (not the bundled example) — covering
+source-path selection, target-DB connection setup, resume-after-interrupt, and
+troubleshooting — see **[docs/SITE_GUIDE.md](docs/SITE_GUIDE.md)**.
+
 ## Generated Assets
 
 | Asset | Location |
