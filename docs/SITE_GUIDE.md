@@ -73,26 +73,43 @@ uv run oma setup --non-interactive \
 
 ### 3-2. Test 단계까지 하려면 — DB 접속정보 추가
 
-**중요**: `--non-interactive`는 접속정보를 받지 않는다. Test(실 DB 실행 검증)까지 하려면
-아래 둘 중 하나로 접속정보를 넣어야 한다.
+Test(실 DB 실행 검증)까지 하려면 접속정보가 필요하다. **비밀번호를 제외한** 접속정보
+(host/port/database/user)는 `--non-interactive` 플래그로 한 번에 넣을 수 있다.
+비밀번호는 보안상 플래그로 받지 않으며, 환경변수 또는 interactive 입력만 허용한다.
 
-**(a) interactive setup으로 입력** (DB properties에 저장 — 영구)
+**(a) 플래그로 한 번에** (권장 — CI/자동화에 적합)
+```bash
+# PostgreSQL 타겟 + Oracle 소스를 한 번에 설정
+uv run oma setup --non-interactive \
+  --source "$SOURCE_ROOT" --target-db postgresql \
+  --pg-host db.example.com --pg-port 5432 --pg-database appdb --pg-user svc_user \
+  --oracle-host ora.example.com --oracle-port 1521 \
+  --oracle-service ORCLPDB1 --oracle-user migr
+
+# 비밀번호는 환경변수로 (플래그 없음)
+export PGPASSWORD=...
+export ORACLE_SVC_PASSWORD=...
+```
+MySQL 타겟이면 `--mysql-host/--mysql-port/--mysql-database/--mysql-user` + `export MYSQL_PASSWORD=...`.
+
+> 사용 가능한 접속 플래그: `--pg-*`, `--mysql-*`, `--oracle-*` (각 host/port/database(또는 service)/user).
+> 일부만 줘도 되고, 준 것만 저장된다 (기존 값은 보존).
+
+**(b) interactive setup으로 입력** (모든 값을 프롬프트로, 비밀번호 포함)
 ```bash
 uv run oma setup          # 프롬프트에서 "Configure DB connections now? y" 선택
-# Oracle(소스) + PostgreSQL/MySQL(타겟) 접속정보를 차례로 입력
-# 비밀번호는 getpass로 화면에 안 보이게 입력됨
+# Oracle(소스) + PostgreSQL/MySQL(타겟) 접속정보를 차례로 입력 (비밀번호는 getpass)
 ```
 
-**(b) 환경변수로 주입** (세션 한정 — CI/일회성에 적합)
+**(c) 전부 환경변수로** (세션 한정 — 일회성)
 ```bash
-# 타겟 PostgreSQL
 export PGHOST=... PGPORT=5432 PGDATABASE=... PGUSER=... PGPASSWORD=...
-# 소스 Oracle (TC 생성 + Oracle-PG 결과 비교에 사용, 없으면 그 단계 자동 스킵)
 export ORACLE_HOST=... ORACLE_PORT=1521 ORACLE_SID=... ORACLE_USER=... ORACLE_PASSWORD=...
 ```
 
 > 접속정보 해석 우선순위: **환경변수 > DB properties**. 둘 다 없으면 Test 단계에서 안내 후 중단.
 > Oracle 접속정보가 없으면 Phase 1.5(Oracle-PG 결과 비교)는 자동 스킵되고 나머지는 진행.
+> 비밀번호는 절대 DB properties에 플래그로 들어가지 않는다 — env var(권장) 또는 interactive getpass만.
 
 ### 3-3. 설정 확인
 ```bash
@@ -191,7 +208,7 @@ uv run oma --help                                  # 전체 서브커맨드
 | subagent가 변환을 안 함 | AWS Bedrock 자격증명 확인 (`aws sts get-caller-identity`) |
 | `DB not found` | `OMA_OUTPUT_DIR`이 export됐는지, `oma setup`을 돌렸는지 확인 |
 | analyze 결과 mapper 0건 | `--source` 경로 아래에 `*.xml` mapper가 있는지 확인 (경로 한 단계 위/아래일 수 있음) |
-| Test가 "connection info" 안내 후 중단 | 3-2의 (a) 또는 (b)로 접속정보 입력 |
+| Test가 "connection info" 안내 후 중단 | 3-2의 (a/b/c) 중 하나로 접속정보 입력 (비밀번호는 env var) |
 | Phase 1.5(Oracle 비교)만 스킵됨 | Oracle 접속정보 없음 — 정상. 나머지는 진행됨 |
 | 변환 품질이 아쉬움 | `src/reference/oracle_to_{db}_rules.md`(공통 룰)와 `strategy/transform_strategy.md`(학습 룰) 보강 |
 | 대규모(mapper 수십+)에서 느림/lock | 병렬 수는 `oma-pipeline` skill의 "최대 5개" 기준. 필요 시 조정 |

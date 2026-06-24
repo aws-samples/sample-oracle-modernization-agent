@@ -7,6 +7,18 @@ OMA_MODEL_ID/OMA_LITE_MODEL_ID (no longer needed in CLI-only architecture).
 import sys
 
 
+# Connection flag → DB property key. Passwords are intentionally excluded —
+# they go via env vars (PGPASSWORD etc.) or interactive getpass only.
+_CONN_FLAG_MAP = {
+    "pg_host": "PGHOST", "pg_port": "PGPORT",
+    "pg_database": "PGDATABASE", "pg_user": "PGUSER",
+    "mysql_host": "MYSQL_HOST", "mysql_port": "MYSQL_PORT",
+    "mysql_database": "MYSQL_DATABASE", "mysql_user": "MYSQL_USER",
+    "oracle_host": "ORACLE_HOST", "oracle_port": "ORACLE_PORT",
+    "oracle_service": "ORACLE_SERVICE_NAME", "oracle_user": "ORACLE_SVC_USER",
+}
+
+
 def register(sub):
     p = sub.add_parser("setup", help="Configure OMA (interactive or --non-interactive)")
     p.add_argument("--source", default="", help="Java source root -> JAVA_SOURCE_FOLDER")
@@ -14,6 +26,27 @@ def register(sub):
                    help="Target DBMS type")
     p.add_argument("--non-interactive", action="store_true",
                    help="Set properties from flags without prompting")
+
+    # Connection info (optional, for Test phase). Passwords NOT accepted as flags —
+    # use env vars (PGPASSWORD/MYSQL_PASSWORD/ORACLE_SVC_PASSWORD) or interactive setup.
+    pg = p.add_argument_group("PostgreSQL target (optional)")
+    pg.add_argument("--pg-host", default="")
+    pg.add_argument("--pg-port", default="")
+    pg.add_argument("--pg-database", default="")
+    pg.add_argument("--pg-user", default="")
+
+    my = p.add_argument_group("MySQL target (optional)")
+    my.add_argument("--mysql-host", default="")
+    my.add_argument("--mysql-port", default="")
+    my.add_argument("--mysql-database", default="")
+    my.add_argument("--mysql-user", default="")
+
+    ora = p.add_argument_group("Oracle source (optional)")
+    ora.add_argument("--oracle-host", default="")
+    ora.add_argument("--oracle-port", default="")
+    ora.add_argument("--oracle-service", default="")
+    ora.add_argument("--oracle-user", default="")
+
     p.set_defaults(func=run)
 
 
@@ -66,12 +99,26 @@ def _run_non_interactive(args) -> int:
     if args.target_db:
         _set_property("TARGET_DBMS_TYPE", args.target_db, "Target database type")
 
+    # Connection flags → properties (only those provided)
+    conn_set = []
+    for flag, prop_key in _CONN_FLAG_MAP.items():
+        value = getattr(args, flag, "")
+        if value:
+            _set_property(prop_key, value, "Set via 'oma setup' connection flag")
+            conn_set.append((prop_key, value))
+
     # Print summary
     print("setup: non-interactive complete", file=sys.stderr)
     if args.source:
         print(f"  JAVA_SOURCE_FOLDER={args.source}", file=sys.stderr)
     if args.target_db:
         print(f"  TARGET_DBMS_TYPE={args.target_db}", file=sys.stderr)
+    for prop_key, value in conn_set:
+        print(f"  {prop_key}={value}", file=sys.stderr)
+    if conn_set:
+        # Passwords are never set via flags — remind where they go.
+        print("  (passwords: set via env vars — PGPASSWORD/MYSQL_PASSWORD/ORACLE_SVC_PASSWORD)",
+              file=sys.stderr)
     return 0
 
 
