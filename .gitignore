@@ -23,6 +23,16 @@ venv/
 .kiro/
 .bkit/
 
+# Allow CC subagent/skill project files (override .claude/ ignore above)
+!.claude/
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
+!.claude/settings.json
+.claude/settings.local.json
+.claude/agent-memory/
+
 # Internal working docs (plan/design/analysis/report/archive/template)
 # Keep only: docs/*.md (top-level), docs/agents/, docs/demo.gif
 docs/01-plan/

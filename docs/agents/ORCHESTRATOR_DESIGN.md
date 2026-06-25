@@ -1,3 +1,5 @@
+> DEPRECATED (2026-06): Strands 기반 구조 설계 문서. 현행 아키텍처는 docs/superpowers/specs/2026-06-13-cc-subagent-architecture-design.md 참조.
+
 # Orchestrator Agent Design
 
 > Last synced with code: 2026-04-24. The authoritative runtime contract lives in
