@@ -49,10 +49,6 @@ example/skills
 example2/
 GITHUB_PUSH_GUIDE.md
 push-github.sh
-src/config/
 src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
-src/reference/lib/backup/
 deliverables/
-dashboard/node_modules/
-dashboard/.next/
