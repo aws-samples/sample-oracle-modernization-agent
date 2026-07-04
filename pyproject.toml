@@ -1,7 +1,7 @@
 [project]
 name = "oma-sql-transform"
 version = "0.1.0"
-description = "Application SQL Transform Agent - AI-powered Oracle to PostgreSQL SQL converter (part of OMA)"
+description = "Application SQL Transform Agent - AI-powered Oracle to PostgreSQL/MySQL SQL converter (part of OMA)"
 requires-python = ">=3.11"
 dependencies = [
     "defusedxml>=0.7.1",

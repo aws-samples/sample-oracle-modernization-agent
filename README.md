@@ -174,9 +174,9 @@ troubleshooting — see **[docs/SITE_GUIDE.md](docs/SITE_GUIDE.md)**.
 
 | Asset | Location |
 |-------|----------|
-| Converted SQL snippets | `output/transform/` |
+| Converted SQL snippets | `output/xmls/transform/` |
 | Project-specific strategy | `output/strategy/transform_strategy.md` |
-| Final Mapper XMLs | `output/merge/` |
+| Final Mapper XMLs | `output/xmls/merge/` |
 | HTML Report (7 tabs) | `output/reports/oma_report.html` |
 | Fix history (3-way diff) | `output/logs/fix_history/` |
 
@@ -228,9 +228,9 @@ application-sql-transform-assistant/
 │   └── utils/                # Path constants, db_utils
 ├── output/                   # Working directory ($OMA_OUTPUT_DIR)
 │   ├── oma_control.db
-│   ├── transform/
+│   ├── xmls/transform/
+│   ├── xmls/merge/
 │   ├── strategy/
-│   ├── merge/
 │   └── reports/
 ├── example/                  # Self-contained demo (3 mappers, 44 SQLs)
 ├── docs/                     # Documentation

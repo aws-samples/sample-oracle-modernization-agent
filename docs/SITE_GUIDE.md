@@ -12,7 +12,7 @@
 | Claude Code CLI | `claude --version` |
 | Python 3.11+ | `python3 --version` |
 | uv | `uv --version` |
-| AWS Bedrock 자격증명 | `aws sts get-caller-identity` (subagent가 변환에 사용) |
+| Claude Code 인증 | `claude --version` (subagent가 변환에 사용; Bedrock provider 설정 시 `aws sts get-caller-identity`도 확인) |
 | 변환 대상 소스 | 고객 Java/MyBatis 프로젝트 (mapper XML 포함) |
 | psql/mysql CLI | **Test 단계만 필요** — `psql --version` / `mysql --version` |
 

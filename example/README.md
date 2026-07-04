@@ -6,8 +6,8 @@
 
 | Mapper | SQL Count | Key Oracle Features |
 |--------|-----------|---------------------|
-| UserMapper | 15 | `(+)` outer join, `NVL`, `DECODE`, `MERGE INTO`, `LISTAGG`, `CUBE`/`ROLLUP`, `ROWNUM`, window functions |
-| ProductMapper | 15 | `CONNECT BY`/`START WITH`, `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LEVEL`, sequence `NEXTVAL` |
+| UserMapper | 16 | `(+)` outer join, `NVL`, `DECODE`, `MERGE INTO`, `LISTAGG`, `CUBE`/`ROLLUP`, `ROWNUM`, window functions |
+| ProductMapper | 14 | `CONNECT BY`/`START WITH`, `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LEVEL`, sequence `NEXTVAL` |
 | OrderMapper | 14 | `MEDIAN`, `ROWNUM` pagination, `(+)` outer join, `EXTRACT` interval, window functions |
 
 ## Prerequisites
@@ -39,9 +39,9 @@ cd .. && claude
 Inside the Claude Code session, OMA runs as CC subagents. Each step pauses for approval:
 
 ```
-Analyze → Transform → Review → Validate → Merge → Test
-                        ↓ FAIL (specific feedback)
-                  Re-transform (max 3 rounds)
+Analyze → Transform → Review → Validate → Merge → Test → Report
+                         ↓ FAIL (specific feedback)
+                   Re-transform (max 3 rounds)
 ```
 
 - **Analyze** — Scans mapper XMLs, extracts SQL, generates conversion strategy
