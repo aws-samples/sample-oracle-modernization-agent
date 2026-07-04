@@ -393,7 +393,11 @@ def _output(result: dict, as_json: bool, log_fn):
     if as_json:
         print(json.dumps(result, ensure_ascii=False))
     else:
-        total_pass = result['phase0']['pass'] + result['phase1']['pass'] + result['phase15']['pass']
+        # DML items only go through Phase 0; SELECT items go 0→1→1.5.
+        # Count DML PASS (phase0 only) + SELECT final pass (phase1 or phase15).
+        dml_pass = result['phase0']['pass'] - result['phase1']['pass'] - result['phase1']['fail']
+        select_pass = result['phase1']['pass'] + result['phase15']['pass']
+        total_pass = max(dml_pass, 0) + select_pass
         total_fail = len(result['failures'])
         log_fn(f"\nResult: pass={total_pass} fail={total_fail}")
         if result['failures']:

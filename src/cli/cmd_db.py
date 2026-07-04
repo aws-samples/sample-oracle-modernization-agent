@@ -314,27 +314,28 @@ def run_feedback_patterns(args) -> int:
         print(json.dumps(items, ensure_ascii=False))
         return 0
 
-    # Human-readable text output
+    # Human-readable text output (stderr per CLI convention)
+    out = sys.stderr
     if rows:
-        print("=== Review Failures ===")
+        print("=== Review Failures ===", file=out)
         for mapper, sql_id, result_text in rows:
-            print(f"\n--- {mapper} : {sql_id} ---")
+            print(f"\n--- {mapper} : {sql_id} ---", file=out)
             issues = _parse_issues(result_text)
             if isinstance(issues, list):
                 for issue in issues:
-                    print(f"  - {issue}")
+                    print(f"  - {issue}", file=out)
             else:
-                print(f"  {issues}")
+                print(f"  {issues}", file=out)
 
     if vrows:
-        print("\n=== Validation Failures ===")
+        print("\n=== Validation Failures ===", file=out)
         for mapper, sql_id, result_text in vrows:
-            print(f"\n--- {mapper} : {sql_id} ---")
+            print(f"\n--- {mapper} : {sql_id} ---", file=out)
             issues = _parse_issues(result_text)
             if isinstance(issues, list):
                 for issue in issues:
-                    print(f"  - {issue}")
+                    print(f"  - {issue}", file=out)
             else:
-                print(f"  {issues}")
+                print(f"  {issues}", file=out)
 
     return 0

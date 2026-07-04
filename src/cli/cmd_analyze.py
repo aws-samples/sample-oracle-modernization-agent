@@ -1,6 +1,7 @@
 """oma analyze — mapper scan/SQL extraction/metadata/strategy draft (LLM-free)"""
 import json
 import sys
+from pathlib import Path
 
 
 def register(sub):
@@ -25,6 +26,10 @@ def run(args) -> int:
     if not source:
         print("No source folder: pass --source or set JAVA_SOURCE_FOLDER via 'oma setup'",
               file=sys.stderr)
+        return 1
+
+    if not Path(source).is_dir():
+        print(f"Source folder not found: {source}", file=sys.stderr)
         return 1
 
     from cli.analyzer import run_analyze

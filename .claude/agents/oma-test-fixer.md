@@ -26,6 +26,7 @@ dispatch prompt: `mapper_file` + 실패 목록 `[{sql_id, phase, error}]`.
 1. `oma db read-sql <mapper_file> <sql_id> --json`로 원본, `oma db read-transform <mapper_file> <sql_id> --json`으로 현재 변환 SQL 확인
 2. 에러 메시지 분석 → 수정 SQL 작성
 3. 임시 파일 Write → `oma db save-transform <mapper_file> <sql_id> --sql-file <f> --step test --notes "fix: <사유>"`
+   (save-transform은 `--step test`일 때 자동으로 tested='N' 리셋 → test-exec가 재실행 대상으로 인식)
 4. 검증: `oma test-exec --only "<mapper_file>:<sql_id>" --json` 실행 → 통과 확인
 5. 통과 → `oma db set-tested <mapper_file> <sql_id> --result FIXED --notes "<수정 요약>"`
 6. 3회 실패 → `oma db set-tested <mapper_file> <sql_id> --result FAIL --notes "<최종 에러>"`

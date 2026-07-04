@@ -53,12 +53,14 @@ def _save_fix_history(mapper_file, sql_id, target_path, new_sql, notes):
     # Read original Oracle SQL for reference
     original = ""
     try:
+        from utils.db_utils import query_by_mapper
         _conn = sqlite3.connect(str(DB_PATH), timeout=5)
         try:
-            _row = _conn.execute(
+            _row = query_by_mapper(
+                _conn.cursor(),
                 "SELECT source_file FROM transform_target_list WHERE mapper_file=? AND sql_id=?",
-                (mapper_file, sql_id)
-            ).fetchone()
+                mapper_file, sql_id
+            )
         finally:
             _conn.close()
         if _row and Path(_row[0]).exists():
@@ -195,16 +197,36 @@ def save_transform(sql_id: str, converted_sql: str, mapper_file: str, notes: str
 """
     target_path.write_text(output_content, encoding='utf-8')
 
-    # Update DB flag
+    # Update DB flag — current_step depends on pipeline phase:
+    #   transform → next step is 'review'
+    #   test (fix) → next step is 'test' (awaiting re-execution)
+    #   validate (fix) → next step is 'validate'
+    next_step = {
+        'transform': 'review',
+        'test': 'test',
+        'validate': 'validate',
+        'review': 'review',
+    }.get(_current_step, 'review')
+
     def _update_db():
         from utils.project_paths import DB_PATH as _dbp
         conn2 = sqlite3.connect(str(_dbp), timeout=10)
         try:
-            conn2.execute("""
-                UPDATE transform_target_list
-                SET transformed = 'Y', current_step = 'review', updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (record_id,))
+            # When saving a fix for the test phase, reset tested flag so
+            # test-exec --only can pick up the item again
+            if _current_step == 'test':
+                conn2.execute("""
+                    UPDATE transform_target_list
+                    SET transformed = 'Y', current_step = ?, tested = 'N',
+                        test_result = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (next_step, record_id))
+            else:
+                conn2.execute("""
+                    UPDATE transform_target_list
+                    SET transformed = 'Y', current_step = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (next_step, record_id))
             conn2.commit()
         finally:
             conn2.close()

@@ -33,16 +33,13 @@ def _vars_from_env_or_props(keys: list[str], required: list[str]) -> dict:
     if not DB_PATH.exists():
         return {}
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=10)
-        try:
+        with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
             placeholders = ",".join("?" for _ in keys)
             # placeholders is only positional '?' marks; values bound via params (keys).
             # keys are code-internal constants (_PG_KEYS/_MYSQL_KEYS), never user input.
             query = f"SELECT key, value FROM properties WHERE key IN ({placeholders})"
             # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
             rows = conn.execute(query, keys).fetchall()
-        finally:
-            conn.close()
     except Exception:
         return {}
 
@@ -75,13 +72,10 @@ def get_oracle_connection_vars() -> dict:
     # Load from DB properties table
     if DB_PATH.exists():
         try:
-            conn = sqlite3.connect(str(DB_PATH), timeout=10)
-            try:
+            with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
                 props = {}
                 for row in conn.execute("SELECT key, value FROM properties WHERE key LIKE 'ORACLE%'"):
                     props[row[0]] = row[1]
-            finally:
-                conn.close()
 
             if not props:
                 return {}

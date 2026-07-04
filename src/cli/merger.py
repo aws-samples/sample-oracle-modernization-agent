@@ -23,8 +23,9 @@ def assemble_mapper(mapper_file: str) -> dict:
     """
     from utils.project_paths import DB_PATH, ORIGIN_DIR, MERGE_DIR
 
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    try:
+    resolved_mapper = mapper_file
+
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         cursor = conn.cursor()
 
         # Get all converted SQL IDs for this mapper (try exact match, then fallback)
@@ -37,11 +38,14 @@ def assemble_mapper(mapper_file: str) -> dict:
         if not rows:
             file_name_only_check = Path(mapper_file).name
             cursor.execute("""
-                SELECT sql_id, target_file FROM transform_target_list
+                SELECT sql_id, target_file, mapper_file FROM transform_target_list
                 WHERE (mapper_file = ? OR mapper_file LIKE ?) AND transformed = 'Y'
                 ORDER BY seq_no
             """, (file_name_only_check, f'%/{file_name_only_check}'))
-            rows = cursor.fetchall()
+            fallback_rows = cursor.fetchall()
+            rows = [(r[0], r[1]) for r in fallback_rows]
+            if fallback_rows:
+                resolved_mapper = fallback_rows[0][2]
 
         # Get relative_path for output directory
         # mapper_file may include sub_dir prefix (e.g., "master/Mapper.xml")
@@ -49,8 +53,6 @@ def assemble_mapper(mapper_file: str) -> dict:
         cursor.execute("SELECT relative_path FROM source_xml_list WHERE file_name = ?",
                        (file_name_only,))
         src_rows = cursor.fetchall()
-    finally:
-        conn.close()
 
     if not rows:
         return {'error': f'No converted SQLs for {mapper_file}',
@@ -164,16 +166,13 @@ def assemble_mapper(mapper_file: str) -> dict:
     output_path.write_text(converted_content, encoding='utf-8')
 
     # Update current_step for merged SQLs
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
-    try:
+    with sqlite3.connect(str(DB_PATH), timeout=10) as conn:
         conn.execute(
             "UPDATE transform_target_list SET current_step='test', updated_at=CURRENT_TIMESTAMP "
             "WHERE mapper_file=? AND transformed='Y'",
-            (mapper_file,)
+            (resolved_mapper,)
         )
         conn.commit()
-    finally:
-        conn.close()
 
     print(f"  merged: {output_path.name} ({success}/{len(conv_map)} SQLs)", file=sys.stderr)
     return {'output_path': str(output_path), 'total': len(conv_map), 'success': success}
