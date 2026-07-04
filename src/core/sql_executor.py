@@ -148,18 +148,22 @@ class SQLExecutor:
                     '-u', os.environ.get('MYSQL_USER', ''),
                     '-D', os.environ.get('MYSQL_DATABASE', 'test')]
         if self._db_type == 'oracle':
-            u = os.environ.get('ORACLE_USER', '')
-            p = os.environ.get('ORACLE_PASSWORD', '')
-            h = os.environ.get('ORACLE_HOST', '')
-            port = os.environ.get('ORACLE_PORT', '1521')
-            sid = os.environ.get('ORACLE_SID', '')
-            conn_type = os.environ.get('ORACLE_CONN_TYPE', 'service')
-            if conn_type == 'sid':
-                conn = f"(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
-            else:
-                conn = f"{h}:{port}/{sid}"
-            return ['sqlplus', '-S', f'{u}/{p}@{conn}']
+            return ['sqlplus', '-S', '/nolog']
         return ['psql']
+
+    def _oracle_connect_preamble(self) -> str:
+        """Build CONNECT command for sqlplus /nolog mode (credentials via stdin)."""
+        u = os.environ.get('ORACLE_USER', '')
+        p = os.environ.get('ORACLE_PASSWORD', '')
+        h = os.environ.get('ORACLE_HOST', '')
+        port = os.environ.get('ORACLE_PORT', '1521')
+        sid = os.environ.get('ORACLE_SID', '')
+        conn_type = os.environ.get('ORACLE_CONN_TYPE', 'service')
+        if conn_type == 'sid':
+            conn = f"(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
+        else:
+            conn = f"{h}:{port}/{sid}"
+        return f"CONNECT {u}/{p}@{conn}\n"
 
     def _marker(self, test_id: str) -> str:
         if self._db_type == 'mysql':
@@ -284,6 +288,9 @@ class SQLExecutor:
         else:
             script = f"SET statement_timeout = '30s';\n{clean};\n"
 
+        if self._db_type == 'oracle':
+            script = self._oracle_connect_preamble() + script
+
         env = self._build_env()
         try:
             # nosemgrep: dangerous-subprocess-use-audit
@@ -319,23 +326,24 @@ class SQLExecutor:
 
             if self._db_type == 'postgresql':
                 cmd = self._cli_cmd() + ['-f', tmp.name]
-            elif self._db_type == 'mysql':
-                cmd = self._cli_cmd()
-                # mysql reads from stdin for temp file
-                cmd = None  # will use input instead
-            else:
-                cmd = self._cli_cmd()
-
-            if cmd:
                 # nosemgrep: dangerous-subprocess-use-audit
                 proc = subprocess.run(
                     cmd, capture_output=True, text=True,
                     timeout=timeout, env=env,
                 )
-            else:
+            elif self._db_type == 'mysql':
                 # nosemgrep: dangerous-subprocess-use-audit
                 proc = subprocess.run(
                     self._cli_cmd(), input=sql_script,
+                    capture_output=True, text=True,
+                    timeout=timeout, env=env,
+                )
+            else:
+                # Oracle: credentials passed via stdin CONNECT (not CLI args)
+                oracle_input = self._oracle_connect_preamble() + sql_script
+                # nosemgrep: dangerous-subprocess-use-audit
+                proc = subprocess.run(
+                    self._cli_cmd(), input=oracle_input,
                     capture_output=True, text=True,
                     timeout=timeout, env=env,
                 )

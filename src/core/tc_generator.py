@@ -34,6 +34,14 @@ class TestCase:
 
 # ── Oracle helpers ──
 
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z0-9_$#]+$')
+
+
+def _valid_identifier(name: str) -> bool:
+    """Check if name is a safe Oracle identifier (no special chars / injection risk)."""
+    return bool(name) and _SAFE_IDENTIFIER_RE.match(name) is not None
+
+
 def _oracle_available() -> bool:
     for k in ('ORACLE_HOST', 'ORACLE_USER', 'ORACLE_SID'):
         if not os.environ.get(k):
@@ -41,24 +49,28 @@ def _oracle_available() -> bool:
     return True
 
 
-def _oracle_conn_str() -> str:
+def _oracle_connect_cmd() -> str:
+    """Build CONNECT command for sqlplus /nolog mode (credentials via stdin)."""
     u = os.environ.get('ORACLE_USER', '')
     p = os.environ.get('ORACLE_PASSWORD', '')
     h = os.environ.get('ORACLE_HOST', '')
     port = os.environ.get('ORACLE_PORT', '1521')
     sid = os.environ.get('ORACLE_SID', '')
     if os.environ.get('ORACLE_CONN_TYPE') == 'sid':
-        return f"{u}/{p}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
-    return f"{u}/{p}@{h}:{port}/{sid}"
+        conn = f"(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
+    else:
+        conn = f"{h}:{port}/{sid}"
+    return f"CONNECT {u}/{p}@{conn}\n"
 
 
 def _run_oracle_sql(sql: str, timeout: int = 30) -> str:
-    """Execute SQL via sqlplus CLI. Returns stdout."""
+    """Execute SQL via sqlplus CLI. Credentials passed via stdin (not CLI args)."""
     header = "SET PAGESIZE 0 FEEDBACK OFF HEADING OFF LINESIZE 32767 TRIMOUT ON TRIMSPOOL ON\n"
+    script = _oracle_connect_cmd() + header + sql + "\nEXIT;\n"
     try:
         result = subprocess.run(
-            ['sqlplus', '-S', _oracle_conn_str()],
-            input=header + sql + "\nEXIT;\n",
+            ['sqlplus', '-S', '/nolog'],
+            input=script,
             capture_output=True, text=True, timeout=timeout,
         )
         return result.stdout
@@ -86,6 +98,8 @@ def _get_sample_data(tables: set[str]) -> dict[str, list[dict]]:
     schema = _oracle_schema()
     samples = {}
     for tbl in tables:
+        if not _valid_identifier(schema) or not _valid_identifier(tbl):
+            continue
         sql = f"SELECT * FROM {schema}.{tbl} SAMPLE(1) WHERE ROWNUM <= 3;\n"
         out = _run_oracle_sql(sql, 15)
         if out and 'ORA-' not in out:
@@ -163,6 +177,8 @@ def _get_fk_samples() -> dict[str, list[str]]:
     fk_vals = {}
     for parts in _parse_pipe(out, 3):
         col, ref_tbl, ref_col = parts[0].lower(), parts[1], parts[2]
+        if not (_valid_identifier(schema) and _valid_identifier(ref_tbl) and _valid_identifier(ref_col)):
+            continue
         sample_sql = f"SELECT DISTINCT {ref_col} FROM {schema}.{ref_tbl} WHERE {ref_col} IS NOT NULL AND ROWNUM<=3;\n"
         sample_out = _run_oracle_sql(sample_sql, 10)
         vals = [l.strip() for l in sample_out.split('\n') if l.strip() and 'ORA-' not in l][:3]

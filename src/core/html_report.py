@@ -430,6 +430,9 @@ def generate_html_report() -> Path | None:
         data = _collect_report_data()
         template = _TEMPLATE_PATH.read_text(encoding="utf-8")
         payload = json.dumps(data, ensure_ascii=False, default=str)
+        # Neutralize </script> sequences inside JSON to prevent premature tag close.
+        # JSON spec allows \/ as an escaped solidus, so <\/ is valid JSON.
+        payload = payload.replace("</", "<\\/")
         if _PLACEHOLDER not in template:
             _warn(f"placeholder {_PLACEHOLDER} not found in template")
             return None

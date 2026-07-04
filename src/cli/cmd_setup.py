@@ -124,8 +124,6 @@ def _run_non_interactive(args) -> int:
 
 def _run_interactive(args) -> int:
     """Interactive setup — prompts for values. Mirrors run_setup.py minus model config."""
-    import getpass
-    from pathlib import Path
     from utils.project_paths import OUTPUT_DIR, DB_PATH
 
     print("OMA Environment Setup\n", file=sys.stderr)
@@ -169,15 +167,16 @@ def _run_interactive(args) -> int:
 
 
 def _setup_connections(target_dbms: str):
-    """Interactive DB connection prompts (Oracle + Target)."""
-    import getpass
+    """Interactive DB connection prompts (Oracle + Target).
 
+    Passwords are NOT stored in SQLite — use environment variables instead:
+      ORACLE_SVC_PASSWORD, PGPASSWORD, MYSQL_PASSWORD
+    """
     print("\n  Oracle (Source DB):", file=sys.stderr)
     ora_host = input("    ORACLE_HOST: ").strip()
     ora_port = input("    ORACLE_PORT [1521]: ").strip() or "1521"
     ora_service = input("    ORACLE_SERVICE_NAME: ").strip()
     ora_user = input("    ORACLE_SVC_USER: ").strip()
-    ora_password = getpass.getpass("    ORACLE_SVC_PASSWORD: ")
 
     if ora_host:
         _set_property("ORACLE_HOST", ora_host, "Oracle host")
@@ -187,8 +186,8 @@ def _setup_connections(target_dbms: str):
         _set_property("ORACLE_SERVICE_NAME", ora_service, "Oracle service name")
     if ora_user:
         _set_property("ORACLE_SVC_USER", ora_user, "Oracle user")
-    if ora_password:
-        _set_property("ORACLE_SVC_PASSWORD", ora_password, "Oracle password")
+
+    print("    (password: set ORACLE_SVC_PASSWORD env var)", file=sys.stderr)
 
     if target_dbms == "postgresql":
         print("\n  PostgreSQL (Target DB):", file=sys.stderr)
@@ -196,7 +195,6 @@ def _setup_connections(target_dbms: str):
         pg_port = input("    PGPORT [5432]: ").strip() or "5432"
         pg_db = input("    PGDATABASE: ").strip()
         pg_user = input("    PGUSER: ").strip()
-        pg_pass = getpass.getpass("    PGPASSWORD: ")
         if pg_host:
             _set_property("PGHOST", pg_host, "PostgreSQL host")
         if pg_port:
@@ -205,15 +203,13 @@ def _setup_connections(target_dbms: str):
             _set_property("PGDATABASE", pg_db, "PostgreSQL database")
         if pg_user:
             _set_property("PGUSER", pg_user, "PostgreSQL user")
-        if pg_pass:
-            _set_property("PGPASSWORD", pg_pass, "PostgreSQL password")
+        print("    (password: set PGPASSWORD env var)", file=sys.stderr)
     else:
         print("\n  MySQL (Target DB):", file=sys.stderr)
         my_host = input("    MYSQL_HOST: ").strip()
         my_port = input("    MYSQL_PORT [3306]: ").strip() or "3306"
         my_db = input("    MYSQL_DATABASE: ").strip()
         my_user = input("    MYSQL_USER: ").strip()
-        my_pass = getpass.getpass("    MYSQL_PASSWORD: ")
         if my_host:
             _set_property("MYSQL_HOST", my_host, "MySQL host")
         if my_port:
@@ -222,8 +218,7 @@ def _setup_connections(target_dbms: str):
             _set_property("MYSQL_DATABASE", my_db, "MySQL database")
         if my_user:
             _set_property("MYSQL_USER", my_user, "MySQL user")
-        if my_pass:
-            _set_property("MYSQL_PASSWORD", my_pass, "MySQL password")
+        print("    (password: set MYSQL_PASSWORD env var)", file=sys.stderr)
 
 
 def run(args) -> int:
