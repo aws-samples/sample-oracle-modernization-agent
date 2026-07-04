@@ -20,6 +20,8 @@ tools: Read, Write, Bash
 dispatch 시점: Review round 2+ 에서 지속 실패가 있을 때, 재변환 전에 호출된다.
 
 절차:
+0. `oma db get-property TARGET_DBMS_TYPE` 실행 → 타겟 DB 확인 (postgresql | mysql)
+   Read: `src/reference/oracle_to_{타겟}_rules.md` — General Conversion Rules (중복 판별 기준)
 1. `oma db feedback-patterns --json` 실행 → 실패 피드백 수집
    (출력: `[{"source": "review"|"validation", "mapper_file", "sql_id", "issues": [...]}]`)
 2. Read: `output/strategy/transform_strategy.md` (현재 전략, 없으면 빈 전략으로 간주)
@@ -43,7 +45,7 @@ dispatch 시점: Review round 2+ 에서 지속 실패가 있을 때, 재변환 �
 
 ## 패턴 추출/작성 가이드
 
-**The General Conversion Rules are provided in your system prompt. You MUST check every pattern against them.**
+**The General Conversion Rules are in the file Read at step 0. You MUST check every pattern against them.**
 
 ### Responsibilities
 1. **Add patterns** — ONLY patterns NOT covered by General Rules

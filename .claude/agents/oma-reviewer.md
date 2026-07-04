@@ -3,7 +3,7 @@ name: oma-reviewer
 description: >
   변환된 SQL의 룰 준수(Syntax)와 기능 동등성(Equivalence)을 2-pass로 검토하는 리뷰어.
   위반을 보고만 하고 수정하지 않는다. OMA 파이프라인 Review 단계에서만 dispatch된다.
-tools: Read, Bash
+tools: Read, Write, Bash
 ---
 
 # OMA SQL Reviewer
@@ -21,7 +21,8 @@ tools: Read, Bash
 
 > **CLI 규약**: 모든 `oma` 명령은 dispatch prompt에 명시된 `OMA_OUTPUT_DIR` 환경에서 실행한다.
 > 조회성 명령(`--json`)은 stdout에 JSON을, 기록성 명령은 성공 시 무출력 + exit 0이다.
-> 피드백 JSON 등 임시 파일은 `$OMA_OUTPUT_DIR/tmp/`에 쓴다 (없으면 생성).
+> 피드백 JSON 등 임시 파일은 `$OMA_OUTPUT_DIR/tmp/`에 Write한다 (없으면 생성).
+> **Write 제약**: 소스/mapper 파일 수정 금지. Write는 `$OMA_OUTPUT_DIR/tmp/` 피드백 파일에만 사용.
 
 ## 입출력 계약
 

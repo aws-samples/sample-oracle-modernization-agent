@@ -14,7 +14,7 @@ description: >
 ## 불변 원칙
 
 1. **상태의 SSOT는 DB다.** 진행 판단은 항상 `oma status --json`으로 시작한다.
-2. **체크포인트 승인형.** 각 단계가 끝나면 결과를 요약하고 AskUserQuestion으로
+2. **체크포인트 승인형.** 각 단계가 끝나면 결과를 요약하고 사용자에게
    다음 행동을 묻는다. 사용자 승인 없이 다음 단계로 자동 진행하지 않는다.
 3. **병렬 dispatch는 최대 5개.** 배치가 더 많으면 5개 단위로 나눠 순차 dispatch.
 4. **subagent 응답은 파싱하지 않는다.** dispatch 후 결과 집계는 `oma status --json`
@@ -26,7 +26,7 @@ description: >
 
 ### 0. Setup
 `oma status` 실행이 "DB not found"면: 사용자에게 소스 경로·타겟 DB를
-AskUserQuestion으로 물은 뒤 `oma setup --non-interactive --source <path> --target-db <db>`.
+물은 뒤 `oma setup --non-interactive --source <path> --target-db <db>`.
 DB 접속 정보는 Test 단계 전까지 불필요하다고 안내.
 
 ### 1. Analyze
@@ -35,7 +35,7 @@ oma analyze --json
 ```
 완료 후 요약 표시 (mapper 수, SQL 수, 메타데이터 상태) +
 `output/strategy/transform_strategy.md` 초안 존재 안내.
-체크포인트 (AskUserQuestion): [전체 변환 진행 / 샘플 N건만 / 전략 파일 검토·수정 / 중단]
+체크포인트: [전체 변환 진행 / 샘플 N건만 / 전략 파일 검토·수정 / 중단]
 
 ### 2. Transform
 ```

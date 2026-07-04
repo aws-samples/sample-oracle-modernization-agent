@@ -35,7 +35,9 @@ uv run pytest tests/cli/ -v
 
 # E2E example
 cd example && ./setup.sh
-# Then launch claude and say "변환 시작"
+export OMA_OUTPUT_DIR=$(pwd)/output
+cd .. && claude
+# Then say "변환 시작"
 ```
 
 ## Architecture
@@ -44,9 +46,9 @@ cd example && ./setup.sh
 Claude Code Session (Orchestrator)
   │
   ├── Skills (.claude/skills/)
-  │     oma-pipeline.md   — 7-step workflow SSOT + checkpoint protocol
-  │     oma-start.md      — session startup
-  │     oma-status.md     — quick status check
+  │     oma-pipeline/SKILL.md  — 7-step workflow SSOT + checkpoint protocol
+  │     oma-start/SKILL.md     — session startup
+  │     oma-status/SKILL.md    — quick status check
   │
   ├── Subagents (.claude/agents/)  — LLM workers
   │     oma-transformer.md     — Oracle → Target DB SQL conversion
@@ -110,7 +112,7 @@ Claude Code Session (Orchestrator)
 | `TARGET_DBMS_TYPE` | Target DB type (`postgresql` or `mysql`) | DB property or `postgresql` |
 | **Oracle DB** | *`oma setup` stores in DB properties* | |
 | `ORACLE_HOST` | Oracle DB host | — |
-| `ORACLE_SID` | Oracle Service Name | — |
+| `ORACLE_SID` | Oracle Service Name (maps to ORACLE_SERVICE_NAME property) | — |
 | `ORACLE_USER` | Oracle user | — |
 | **Target DB** | *`oma setup` stores in DB properties* | |
 | `PGHOST` / `MYSQL_HOST` | Target DB host | — |
