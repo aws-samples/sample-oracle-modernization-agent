@@ -1,6 +1,3 @@
-# Claude Code
-CLAUDE.md
-
 # Python
 __pycache__/
 *.py[cod]
@@ -41,6 +38,7 @@ docs/03-analysis/
 docs/04-report/
 docs/archive/
 docs/template/
+docs/superpowers/
 
 # Project specific
 output/
