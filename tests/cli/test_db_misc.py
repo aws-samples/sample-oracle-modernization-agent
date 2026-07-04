@@ -39,9 +39,9 @@ def test_feedback_patterns_outputs_review_failures(oma_env, run_cli):
             "review_result='{\"result\":\"FAIL\",\"issues\":[\"comma join wrong\"]}' "
             "WHERE mapper_file='OrderMapper.xml' AND sql_id='selectOrder'")
         conn.commit()
-    code, stdout, _ = run_cli("db", "feedback-patterns")
+    code, stdout, stderr = run_cli("db", "feedback-patterns")
     assert code == 0
-    assert "comma join wrong" in stdout
+    assert "comma join wrong" in stderr
 
 
 def test_feedback_patterns_json_structured_output(oma_env, run_cli):

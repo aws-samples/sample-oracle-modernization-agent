@@ -23,6 +23,8 @@ def oma_env(tmp_path, monkeypatch):
     import importlib
     import utils.project_paths
     importlib.reload(utils.project_paths)
+    if "core.db_conn" in sys.modules:
+        importlib.reload(sys.modules["core.db_conn"])
     if "core.html_report" in sys.modules:
         importlib.reload(sys.modules["core.html_report"])
     if "core.db_migrate" in sys.modules:
