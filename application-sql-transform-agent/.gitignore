@@ -1,6 +1,3 @@
-# Claude Code
-CLAUDE.md
-
 # Python
 __pycache__/
 *.py[cod]
@@ -23,6 +20,16 @@ venv/
 .kiro/
 .bkit/
 
+# Allow CC subagent/skill project files (override .claude/ ignore above)
+!.claude/
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
+!.claude/settings.json
+.claude/settings.local.json
+.claude/agent-memory/
+
 # Internal working docs (plan/design/analysis/report/archive/template)
 # Keep only: docs/*.md (top-level), docs/agents/, docs/demo.gif
 docs/01-plan/
@@ -31,6 +38,7 @@ docs/03-analysis/
 docs/04-report/
 docs/archive/
 docs/template/
+docs/superpowers/
 
 # Project specific
 output/
@@ -41,10 +49,6 @@ example/skills
 example2/
 GITHUB_PUSH_GUIDE.md
 push-github.sh
-src/config/
 src/reference/pg_connection.properties
 src/reference/com/test/mybatis/*.class
-src/reference/lib/backup/
 deliverables/
-dashboard/node_modules/
-dashboard/.next/

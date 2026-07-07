@@ -1,29 +1,62 @@
-# OMA Application SQL Transform Agent — Unified Configuration
-# Priority: env var > this yaml > DB properties table
+# ============================================================================
+# OMA Configuration Reference (NOT LOADED BY CODE)
+# ============================================================================
+#
+# WARNING: 이 파일은 현재 어떤 코드에서도 읽지 않는다.
+# 순수하게 '설정 레퍼런스' 용도로 존재한다.
+#
+# OMA의 실제 설정 메커니즘:
+#   1. `oma setup` 명령이 DB properties 테이블에 key/value 저장
+#   2. 환경변수가 런타임 동작을 제어
+#   3. 파이프라인 병렬도/라운드 제한은 .claude/skills/oma-pipeline/SKILL.md에 정의
+#
+# 아래는 사용 가능한 설정 항목의 문서화.
+# ============================================================================
 
-project:
-  output_dir: ./output
-  target_dbms: postgresql
-  # model_id: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+# ---------------------------------------------------------------------------
+# Project Settings (stored in DB via `oma setup`)
+# ---------------------------------------------------------------------------
+# JAVA_SOURCE_FOLDER : MyBatis mapper XML이 있는 Java 소스 루트 경로
+# TARGET_DBMS_TYPE   : 'postgresql' 또는 'mysql'
+# SOURCE_DBMS_TYPE   : 'oracle' (고정)
 
-database:
-  host: ${PGHOST}
-  port: ${PGPORT}
-  user: ${PGUSER}
-  password: ${PGPASSWORD}
-  database: ${PGDATABASE}
+# ---------------------------------------------------------------------------
+# Environment Variables
+# ---------------------------------------------------------------------------
+# OMA_OUTPUT_DIR     : 작업 디렉토리 (DB + 모든 산출물). 기본값: ./output/
+# TARGET_DBMS_TYPE   : env var로도 지정 가능 (DB property보다 우선)
 
-pipeline:
-  definition: pipeline.md
-  transform:
-    workers: 8
-  review:
-    workers: 4
-    max_rounds: 3
-  validate:
-    workers: 6
-  test:
-    workers: 6
-    timeout: 5
-  stop_on_fail: true
-  retry_failed: true
+# ---------------------------------------------------------------------------
+# Oracle Source DB (stored in DB via `oma setup`, Test 단계에서 사용)
+# ---------------------------------------------------------------------------
+# ORACLE_HOST         : Oracle DB host
+# ORACLE_PORT         : Oracle DB port (기본: 1521)
+# ORACLE_SERVICE_NAME : Oracle service name
+# ORACLE_SVC_USER     : Oracle user
+# ORACLE_SVC_PASSWORD : Oracle password (env var 또는 interactive 입력만 가능)
+
+# ---------------------------------------------------------------------------
+# PostgreSQL Target DB (stored in DB via `oma setup`)
+# ---------------------------------------------------------------------------
+# PGHOST     : PostgreSQL host
+# PGPORT     : PostgreSQL port (기본: 5432)
+# PGDATABASE : PostgreSQL database name
+# PGUSER     : PostgreSQL user
+# PGPASSWORD : env var 전용 (플래그로 받지 않음)
+
+# ---------------------------------------------------------------------------
+# MySQL Target DB (stored in DB via `oma setup`)
+# ---------------------------------------------------------------------------
+# MYSQL_HOST     : MySQL host
+# MYSQL_PORT     : MySQL port (기본: 3306)
+# MYSQL_DATABASE : MySQL database name
+# MYSQL_USER     : MySQL user
+# MYSQL_PASSWORD : env var 전용 (플래그로 받지 않음)
+
+# ---------------------------------------------------------------------------
+# Pipeline Parameters (defined in .claude/skills/oma-pipeline/SKILL.md)
+# ---------------------------------------------------------------------------
+# 병렬 dispatch    : 최대 5 subagents 동시
+# 배치 크기        : mapper당 기본, 15 SQL 초과 시 분할
+# Review max rounds: 3 (FAIL 시 재변환, 3회 초과 → 수동 처리)
+# Test timeout     : psql/mysql 실행 타임아웃은 sql_executor.py 내 하드코딩 (5s)

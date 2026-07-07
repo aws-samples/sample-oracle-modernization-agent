@@ -2,72 +2,54 @@
 
 > Part of **OMA (Oracle Modernization Agent)**
 
-## Project Description
+## Overview
 
-Application SQL Transform Agent is a sub-module of OMA, an AI-powered multi-agent system designed to accelerate Oracle to PostgreSQL/MySQL database migration. The system provides comprehensive support for MyBatis Mapper XML transformation, including:
+Oracle SQL을 PostgreSQL/MySQL로 자동 변환하는 하이브리드 AI 시스템.
+MyBatis Mapper XML 파일 내의 SQL을 추출, 변환, 검증, 병합하여
+Target DB용 최종 XML을 생성한다.
 
-- **Automated SQL Conversion**: Leverages Claude Sonnet 4.5 via AWS Bedrock to intelligently convert Oracle SQL to target database syntax (PostgreSQL or MySQL)
-- **Multi-Stage Quality Assurance**: 4-tier validation pipeline (Transform → Review [multi-perspective: Syntax + Equivalence] → Validate → Test) ensures conversion accuracy
-- **Sample Transform**: Run representative subset (N SQLs with type coverage + mapper round-robin) to verify strategy quality before full pipeline
-- **Intelligent Pattern Learning**: Dynamic strategy generation adapts to project-specific SQL patterns and automatically learns from failures
-- **Real Database Testing**: Validates converted SQL against actual target database instances to ensure functional equivalence
-- **Rich Progress UI**: Real-time progress bars, structured pipeline status tables, git-like colored diff display
-- **Batch Processing Optimization**: Groups related SQL statements for efficient processing with prompt caching, reducing API costs by ~80%
+## Architecture
 
-The system combines rule-based transformation with AI-powered expert judgment to handle complex Oracle-specific constructs, providing diagnosis, analysis, and migration best practices to accelerate real workload migration from Oracle to AWS open-source databases.
+Claude Code 메인 세션이 오케스트레이터 역할을 하며, LLM 작업은 5개 subagent에,
+결정적 인프라 작업은 `oma` CLI에 위임한다.
 
-## Business Value
+```
+Claude Code (Orchestrator)
+  ├── .claude/agents/  — 5 subagents (transformer, reviewer, validator, test-fixer, strategy-refiner)
+  ├── .claude/skills/  — Pipeline workflow (SSOT)
+  └── src/cli/         — oma CLI (setup, status, db, analyze, merge, test-exec, report)
+```
 
-OMA has demonstrated significant business value for enterprise database migration initiatives:
+- **상태 SSOT**: SQLite DB (`output/oma_control.db`)
+- **Target DB**: PostgreSQL, MySQL (설정으로 전환)
+- **품질 파이프라인**: Analyze → Transform → Review → Validate → Merge → Test → Report
 
-### Quantified Impact
-- **86% Reduction in Migration Effort**: Decreased manual conversion work from 7 person-months to 1 person-month through GenAI automation
-- **Cost Optimization**: Eliminates ongoing Oracle license fees while establishing a modernized architecture foundation based on open-source databases
-- **Quality Assurance**: 4-stage validation pipeline reduces post-migration defects and rework
-- **API Cost Reduction**: Batch processing with prompt caching reduces API costs by approximately 80%
+## Key Features
 
-### Strategic Benefits
-- **Accelerated Time-to-Market**: Automated conversion enables faster migration cycles, reducing business disruption
-- **Risk Mitigation**: Systematic validation and real database testing minimize migration risks
-- **Knowledge Capture**: Dynamic strategy generation documents project-specific patterns for future reference
-- **Scalability**: Batch processing and parallel execution support large-scale enterprise migrations
+- **7단계 품질 파이프라인** — Review FAIL 시 피드백 기반 자동 재변환 (최대 3라운드)
+- **체크포인트 승인형** — 매 단계 결과 요약 후 사용자 승인 대기
+- **2-Tier 규칙 체계** — 정적 General Rules + 프로젝트별 동적 전략 (자동 학습)
+- **다중 Target DB** — PostgreSQL/MySQL 동시 지원
+- **중단/재개** — DB 기반 상태 관리로 세션 중단 후 즉시 재개
 
-### Technical Advantages
-- **AWS Native Integration**: Seamless integration with AWS Bedrock and cloud-native services
-- **Open Source Foundation**: Built on PostgreSQL/MySQL, eliminating vendor lock-in and enabling cloud-native architectures
-- **Extensibility**: Multi-agent architecture allows easy addition of new validation stages or database targets
-- **Learning Capability**: Automatic pattern learning from failures improves conversion accuracy over time
+## Quick Start
 
-This successful implementation validates the potential of GenAI technology to transform traditional database migration approaches, establishing a repeatable framework for Oracle modernization initiatives.
+```bash
+uv sync
+uv run oma setup --non-interactive --source <java-source-path> --target-db postgresql
+# Claude Code 세션에서: "변환 시작"
+```
 
-## Target Use Cases
+## Documentation
 
-- Enterprise applications with extensive MyBatis-based data access layers
-- Oracle to PostgreSQL/MySQL migration projects requiring high conversion accuracy
-- Organizations seeking to reduce Oracle licensing costs through open-source adoption
-- Teams needing automated validation and testing for database migrations
-- Large-scale migrations with hundreds or thousands of SQL statements
-
-## Technology Foundation
-
-- **AI Model**: Claude Sonnet 4.5 (AWS Bedrock)
-- **Framework**: Strands Agents SDK (v1.24.0+) - Multi-agent orchestration
-- **Target Database**: PostgreSQL, MySQL
-- **Source Framework**: MyBatis (XML Mapper files)
-- **Programming Language**: Python 3.11+ (uv package manager)
-- **Key Dependencies**: boto3, defusedxml, rich, sqlalchemy
-
-## Architecture Highlights
-
-- **4-Stage Quality Pipeline**: Transform → Review (multi-perspective) → Validate → Test
-- **2-Tier Rule System**: Static General Rules + Dynamic Project Strategy
-- **Batch Processing**: Groups 3-5 SQL statements for cost-efficient processing
-- **Prompt Caching**: 3-block caching structure reduces API costs by 90%
-- **Parallel Execution**: 8 concurrent workers for faster processing
-- **Automatic Learning**: Failed patterns automatically added to strategy
+| 문서 | 내용 |
+|------|------|
+| `CLAUDE.md` | Claude Code 가이드 (아키텍처, 코딩 규칙, 환경 변수) |
+| `docs/SYSTEM_DOCUMENTATION.md` | 시스템 전체 문서 (CLI 레퍼런스, 상태 모델, 데이터 흐름) |
+| `docs/LARGE_SCALE_GUIDE.md` | 대규모 프로젝트(수백~수천 SQL) 운영 가이드 |
+| `docs/SITE_GUIDE.md` | 실 프로젝트 투입 시 runbook |
+| `docs/db-schema.md` | DB 스키마 관계도 |
 
 ---
 
-**Last Updated**: 2026-03-13
-**Version**: 4.0
-**Status**: Production Ready
+**Version**: 5.0 | **Updated**: 2026-07

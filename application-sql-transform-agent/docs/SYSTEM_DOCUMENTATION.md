@@ -2,8 +2,8 @@
 
 **OMA 서브 모듈: Application SQL Transform Agent 시스템 문서**
 
-**버전**: 4.0
-**최종 업데이트**: 2026-03-13
+**버전**: 5.0
+**최종 업데이트**: 2026-07
 **상태**: Production Ready
 
 ---
@@ -12,343 +12,332 @@
 
 1. [시스템 개요](#시스템-개요)
 2. [아키텍처](#아키텍처)
-3. [Agent 상세](#agent-상세)
-4. [파이프라인 워크플로우](#파이프라인-워크플로우)
-5. [전략 시스템](#전략-시스템)
-6. [데이터베이스 스키마](#데이터베이스-스키마)
-7. [기술 스택](#기술-스택)
+3. [파이프라인 워크플로우](#파이프라인-워크플로우)
+4. [oma CLI 레퍼런스](#oma-cli-레퍼런스)
+5. [2-Tier 룰 시스템](#2-tier-룰-시스템)
+6. [상태 모델](#상태-모델)
+7. [데이터 흐름](#데이터-흐름)
+8. [디렉토리 구조](#디렉토리-구조)
 
 ---
 
 ## 시스템 개요
 
-OMA는 Oracle SQL을 PostgreSQL로 자동 변환하는 Multi-Agent 시스템입니다.
+OMA Application SQL Transform Agent는 Oracle SQL을 PostgreSQL 또는 MySQL로
+자동 변환하는 하이브리드 시스템이다. MyBatis Mapper XML 내의 SQL을 추출, 변환,
+검증, 병합하여 최종 Target DB용 XML을 생성한다.
 
 ### 핵심 특징
 
-- 🤖 **AI 기반 자동 변환**: Claude Sonnet 4.5 (max_tokens=64000)
-- 📋 **2-Tier 규칙 체계**: 정적 General Rules + 프로젝트별 동적 전략
-- 🔍 **4단계 품질 보증**: Transform → Review → Validate → Test
-- 🔄 **자동 수정 루프**: FAIL 시 자동 재변환
-- 📚 **학습 기능**: 실패 패턴 자동 학습
-- 🧪 **샘플 변환**: N개 대표 SQL로 전략 품질 사전 검증
-- 📊 **Rich 진행률 UI**: progress bar, 구조화된 상태 테이블, git-like 컬러 diff
+- **하이브리드 아키텍처**: Claude Code 메인 세션(오케스트레이터) + subagent(LLM 작업) + CLI(결정적 인프라)
+- **7단계 품질 파이프라인**: Analyze → Transform → Review → Validate → Merge → Test → Report
+- **2-Tier 규칙 체계**: 정적 General Rules + 프로젝트별 동적 전략
+- **체크포인트 승인형**: 매 단계 결과 요약 후 사용자 승인 대기
+- **Review 재변환 루프**: FAIL 시 피드백 기반 자동 재변환 (최대 3라운드)
+- **다중 Target DB**: PostgreSQL, MySQL 지원 (TARGET_DBMS_TYPE으로 전환)
 
 ---
 
 ## 아키텍처
 
-### 시스템 구조
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e8f4fd', 'primaryTextColor': '#1a1a1a', 'lineColor': '#5a9bd5', 'background': '#ffffff'}}}%%
-graph LR
-    subgraph Control
-        ORC[Orchestrator<br/>14 tools]
-        RVM[ReviewManager<br/>5 tools]
-    end
-
-    subgraph Pipeline
-        ANA[Analyze] --> TRF[Transform<br/>8 workers]
-        TRF --> REV[Review<br/>Syntax+Equiv]
-        REV -->|PASS / PWW| VAL[Validate]
-        REV -->|FAIL| TRF
-        VAL --> TST[Test<br/>Java+Agent]
-        TST --> MRG[Merge]
-    end
-
-    subgraph Data
-        DB[(oma_control.db)]
-        STG[strategy.md]
-        SRF[Strategy Refine]
-    end
-
-    ORC -.->|run_step| ANA
-    ORC -.->|delegate| RVM
-    VAL -.->|learning| SRF
-    TST -.->|learning| SRF
-    SRF -->|update| STG
-```
-
-### 3-Block Prompt Caching
-
-Transform, Review, Validate, Test Agent 모두 동일한 캐싱 구조:
+### 전체 구조
 
 ```
-Block 0: prompt.md + cachePoint          (Agent별 역할 정의)
-Block 1: General Rules + cachePoint      (정적, 모든 Agent 공유)
-Block 2: Project Strategy + cachePoint   (동적, 학습으로 갱신)
+Claude Code Session (Orchestrator)
+  │
+  ├── Skills (.claude/skills/)
+  │     oma-pipeline   — 7-step workflow SSOT + checkpoint protocol
+  │     oma-start      — session startup
+  │     oma-status     — quick status check
+  │
+  ├── Subagents (.claude/agents/)  — LLM workers
+  │     oma-transformer       — Oracle → Target DB SQL conversion
+  │     oma-reviewer          — Multi-perspective review (syntax + equivalence)
+  │     oma-validator         — Functional equivalence verification
+  │     oma-test-fixer        — Fix SQL that fails DB execution
+  │     oma-strategy-refiner  — Learn patterns from failures
+  │
+  └── oma CLI (src/cli/)  — deterministic infrastructure
+        setup / status / db / analyze / merge / test-exec / report
 ```
 
-- Review Agent의 Syntax/Equivalence Agent는 각각 Block 0 + Block 1만 사용 (Strategy 불필요)
-- Prompt Caching으로 비용 90% 절감, 캐시 유효 5분
+### 역할 분담
 
-### Agent 역할 분리
+| 계층 | 역할 | 상태 관리 |
+|------|------|-----------|
+| **Orchestrator** (메인 세션) | 파이프라인 진행, 체크포인트, 사용자 분기 | DB 읽기 (oma status) |
+| **Subagents** (5개) | SQL 변환/리뷰/검증/수정/전략 보강 | DB 쓰기 (oma db save-*) |
+| **oma CLI** (7 commands) | 스캔/병합/테스트/리포트 등 결정적 작업 | DB 읽기+쓰기 |
 
-| Agent | 역할 | 관점 | 수정 여부 |
-|-------|------|------|----------|
-| **Orchestrator** | 파이프라인 제어 | "단계 실행, 상태 모니터링" | 없음 (제어만) |
-| **ReviewManager** | 변환 검토 관리 | "변환 결과 비교, 승인" | 없음 (검토만) |
-| **Transform** | Oracle → PG 변환 | "규칙 + 전문가 판단으로 변환" | SQL 생성 |
-| **Review** | 다관점 리뷰 (Syntax + Equivalence) | "구문 규칙 준수 + 기능 동등성" | 안 함 (severity 기반 PASS/PWW/FAIL) |
-| **Validate** | 기능 동등성 | "같은 입력에 같은 결과 나오나?" | FAIL 시 수정 |
-| **Test** | DB 실행 검증 | "실제로 돌아가나?" | FAIL 시 수정 |
+모든 계층이 `output/oma_control.db` (SQLite)를 SSOT로 공유한다.
 
----
+### 실행 환경
 
-## Agent 상세
-
-### 1. Source Analyzer Agent
-- **위치**: `src/agents/source_analyzer/`
-- **역할**: Mapper XML 스캔, SQL ID 추출, 패턴 분석, 전략 생성
-- **도구**: `file_scanner`, `sql_extractor`, `pattern_analyzer`, `strategy_generator`, `report_generator`
-- **출력**: DB 등록 + `output/strategy/transform_strategy.md`
-
-### 2. Transform Agent
-- **위치**: `src/agents/sql_transform/`
-- **역할**: Oracle SQL → PostgreSQL 변환
-- **max_tokens**: 64000
-- **도구**: `read_sql_source`, `convert_sql`, `lookup_column_type`, `split_mapper`
-- **특징**: General Rules에 없는 Oracle 구문도 전문가 판단으로 변환
-- **SELF-CHECK**: Oracle 잔재, XML escaping, parameter casting 확인 후 저장
-
-### 3. Review Agent (다관점 리뷰)
-- **위치**: `src/agents/sql_review/`
-- **역할**: 2개 관점의 독립 리뷰 + Facilitator 통합 (수정하지 않음)
-- **구조**: Syntax Agent + Equivalence Agent (병렬) → Facilitator (Python 함수)
-- **Syntax Agent** (max_tokens=16000):
-  - Phase 1~4 Oracle 잔재 (40+ 함수/구문)
-  - 잘못된 변환 패턴 (COALESCE+OR IS NULL, interval 오류, ROUND numeric 등)
-  - Parameter casting, XML escaping, MyBatis 태그 무결성
-- **Equivalence Agent** (max_tokens=16000):
-  - Oracle/PG 동작 차이 ('' = NULL, DECODE NULL, OUTER JOIN + WHERE)
-  - 컬럼 출력, JOIN 관계, 정렬, 서브쿼리 로직, MyBatis 무결성
-- **Facilitator**: LLM 기반 (Claude Haiku 4.5, `LITE_MODEL_ID`) — CRITICAL 판정의 자기반박 여부를 의미적으로 검증
-  - CRITICAL 이슈 → FAIL (재변환), WARNING만 → PASS_WITH_WARNINGS (경고 기록, 재변환 안 함)
-  - 자기반박 패턴 (분석 후 "correct"라고 결론냈으나 CRITICAL로 표기) → WARNING으로 다운그레이드
-- **도구**: `read_sql_source`, `read_transform` (읽기 전용, 각 Perspective Agent)
-- **Agent 출력 캡처**: `suppress_streaming=True`로 Agent 생성 (callback_handler=None을 생성자에 전달)
-- **FAIL 시**: `review_result` 컬럼에 CRITICAL 피드백 JSON 저장 → Transform Agent 재호출 (최대 3라운드, round 2+에서 Strategy Refine 자동 호출)
-
-### 4. Validate Agent
-- **위치**: `src/agents/sql_validate/`
-- **역할**: 원본 Oracle SQL과 변환된 PostgreSQL SQL의 기능 동등성 검증
-- **max_tokens**: 64000
-- **도구**: `get_pending_validations`, `read_sql_source`, `read_transform`, `convert_sql`, `set_validated`, `lookup_column_type`
-- **체크 범위**:
-  - Oracle/PG 동작 차이 ('' = NULL, DECODE NULL 비교, OUTER JOIN + WHERE)
-  - 컬럼 출력, 데이터 필터링, JOIN 관계, 정렬, 서브쿼리 로직
-  - MyBatis 태그 무결성
-- **전제 조건**: `reviewed='Y'` (Review 통과한 것만 검증)
-
-### 5. Test Agent
-- **위치**: `src/agents/sql_test/`
-- **역할**: PostgreSQL DB에서 실행 테스트, 에러 수정
-- **max_tokens**: 64000
-- **도구**: `get_test_failures`, `read_sql_source`, `read_transform`, `convert_sql`, `run_single_test`, `lookup_column_type`
-- **Phase 0**: EXPLAIN 기반 DML 검증 — INSERT/UPDATE/DELETE를 `EXPLAIN`으로 구문/테이블/컬럼/타입 검증 (실행 없음, PK/NULL 무관)
-- **Phase 1**: Java bulk test — SELECT 실행 테스트
-- **Phase 2**: Agent가 실패 SQL 수정
-- **DB 미설정 시**: PostgreSQL 접속 정보 없으면 test step이 skipped 반환 + 안내 메시지
-- **특징**: General Rules 참조하여 올바른 패턴으로 수정 (ad-hoc 수정 금지)
-
-### 6. Strategy Refine Agent
-- **위치**: `src/agents/strategy_refine/`
-- **역할**: 전략 파일 보강/압축
-- **도구**: `read_strategy`, `get_feedback_patterns`, `append_patterns`, `write_strategy`
-- **규칙**: General Rules 중복 패턴은 절대 추가하지 않음
-
-### 7. Orchestrator Agent
-- **위치**: `src/agents/orchestrator/`
-- **역할**: 파이프라인 제어, 사용자 대화
-- **도구 (14개)**: `check_setup`, `check_step_status`, `run_step`, `reset_step`, `get_summary`, `search_sql_ids`, `run_single_test`, `transform_single_sql`, `validate_single_sql`, `test_and_fix_single_sql`, `compact_strategy`, `regenerate_strategy`, `show_progress`, `delegate_to_review_manager`
-- **특징**:
-  - 중앙화된 상태 관리 (`StateManager` 사용)
-  - TypedDict 기반 타입 안전성
-  - ReviewManager에 Diff 작업 위임
-- **"실행" vs "재실행"**: "재/다시/초기화" 없으면 절대 reset 안 함
-
-### 8. ReviewManager Agent
-- **위치**: `src/agents/review_manager/`
-- **역할**: 변환 결과 검토 및 승인 관리 (Orchestrator로부터 독립)
-- **도구 (5개)**: `show_sql_diff`, `generate_diff_report`, `get_review_candidates`, `approve_conversion`, `suggest_revision`
-- **특징**:
-  - Orchestrator로부터 분리된 독립 Agent
-  - SQL 비교 및 검토 전문화
-  - TypedDict 기반 타입 안전성
-  - Diff 관련 모든 작업 전담
-
-### 단일 SQL 처리 도구
-각 Agent는 단일 SQL 처리를 위한 전용 도구를 제공합니다:
-- **Transform**: `transform_single_sql` - 특정 SQL만 즉시 변환
-- **Validate**: `validate_single_sql` - 특정 SQL만 검증
-- **Test**: `test_and_fix_single_sql` - 특정 SQL 테스트 및 자동 수정
-- **특징**:
-  - 배치 처리 없이 즉시 실행
-  - Agent를 `suppress_streaming=True`로 생성 (streaming 억제)
-  - 결과 판정: DB 상태 직접 조회 (stdout 파싱 아님)
-  - 디버깅 및 문제 해결에 유용
-  - Orchestrator를 통해 자연어로 호출 가능
+- **런타임**: Claude Code CLI (로컬 실행)
+- **패키지 관리**: uv
+- **의존성**: defusedxml, sqlalchemy, rich (LLM SDK 의존 없음)
 
 ---
 
 ## 파이프라인 워크플로우
 
-### 전체 흐름
+### 7단계 파이프라인
+
+| # | 단계 | 실행 주체 | 필수 여부 | 산출물 |
+|---|------|-----------|-----------|--------|
+| 1 | **Analyze** | oma CLI (`oma analyze`) | Required | source_xml_list, transform_target_list, strategy draft |
+| 2 | **Transform** | Subagent (oma-transformer) | Required | transformed SQL → extract_record + transform_history |
+| 3 | **Review** | Subagent (oma-reviewer) | Required | review_result (PASS/FAIL) → review_history |
+| 4 | **Validate** | Subagent (oma-validator) | Required | validation_result → validate_history |
+| 5 | **Merge** | oma CLI (`oma merge`) | Required | output/xmls/merge/*.xml |
+| 6 | **Test** | oma CLI (`oma test-exec`) | Optional* | test_result (PASS/FAIL/SKIP) |
+| 7 | **Report** | oma CLI (`oma report`) | Optional | output/reports/oma_report.html |
+
+*Test는 Target DB 접속 정보가 있을 때만 실행 가능.
+
+### Review 재변환 루프
 
 ```
- Setup --> Analyze --> Transform --> Review -------> Validate --> Test --> Merge
-            (1x)       (8 workers)   (Syntax+Equiv)  (auto-fix)  (DB run)
-                            ^          |
-                            |   FAIL   |  PASS / PASS_WITH_WARNINGS
-                            +----------+   --> next stage
-                           (max 3 rounds,
-                            CRITICAL only,
-                            round 2+: Strategy Refine)
+Review → FAIL?
+  ├─ Yes (round < 3) → strategy-refiner → re-transform → re-review
+  ├─ Yes (round = 3) → 수동 처리 목록으로 보고
+  └─ No → Validate로 진행
 ```
 
-### 단계별 상태 전이 (DB)
+### 체크포인트 프로토콜
 
-```
- Phase             transformed  reviewed  validated  tested
- ─────────────────────────────────────────────────────────
- After Analyze          N          N          N        N
- After Transform        Y          N          N        N
- Review PASS/PWW        Y          Y          N        N
- Review FAIL            Y          F          N        N   <-- re-transform
- After Validate         Y          Y          Y        N
- After Test             Y          Y          Y        Y
-```
-
-### Progress Queue (진행률 추적)
-
-Thread-safe `queue.Queue` 기반 진행 상황 전달 (`src/core/progress.py`):
-
-| 함수 | 역할 | 사용처 |
-|------|------|--------|
-| `emit_progress(mapper, sql_id, status, notes)` | 이벤트 발행 | Tool 파일들 (convert_sql, validate_tools, test_tools, review_tools) |
-| `drain_progress()` | 큐에서 이벤트 일괄 수신 | Runner 파일들 (run_sql_transform, validate, test) |
-
-이전 signal file 기반 IPC는 race condition 문제로 제거됨.
-
-### Fix History
-
-모든 수정은 `output/logs/fix_history/`에 3단 비교로 기록:
-- **ORIGINAL (Oracle)**: 원본 Oracle SQL
-- **BEFORE (PG)**: 수정 전 PostgreSQL SQL
-- **AFTER (PG)**: 수정 후 PostgreSQL SQL
+매 단계 완료 시:
+1. 결과 요약 (성공/실패 건수, 대표 사례 2~3건)
+2. AskUserQuestion으로 다음 선택지 제시
+3. 사용자 승인 없이 자동 진행 금지
 
 ---
 
-## 전략 시스템
+## oma CLI 레퍼런스
 
-### 2-Tier 구조
+실행: `uv run oma <command> [options]`
 
-| Tier | 파일 | 내용 | 관리 |
-|------|------|------|------|
-| **Tier 1: General Rules** | `src/reference/oracle_to_postgresql_rules.md` | 모든 프로젝트 공통 규칙 | 수동 편집 |
-| **Tier 2: Project Strategy** | `output/strategy/transform_strategy.md` | 프로젝트 특화 패턴 | Agent 자동 생성/학습 |
+### setup
 
-### General Rules 구조
+환경 설정 (DB 생성 + properties 저장).
 
 ```
-Phase 1: Structural    — 스키마, 힌트, DUAL, DB Link 제거
-Phase 2: Syntax        — Comma JOIN, (+) outer join, 서브쿼리 alias
-Phase 3: Functions     — NVL, DECODE, SYSDATE, TO_DATE, SUBSTR, 정규식 등 (40+)
-Phase 4: Advanced      — CONNECT BY, MERGE, ROWNUM, MINUS
-Reference Rule         — Parameter Casting (각 Phase에서 적용)
-XML Escaping           — < <= 만 escape, > >= 는 불필요
-Common Wrong Conversions — 자주 발생하는 잘못된 변환 패턴 5개
+oma setup [--non-interactive] [--source PATH] [--target-db postgresql|mysql]
+          [--pg-host H] [--pg-port P] [--pg-database D] [--pg-user U]
+          [--mysql-host H] [--mysql-port P] [--mysql-database D] [--mysql-user U]
+          [--oracle-host H] [--oracle-port P] [--oracle-service S] [--oracle-user U]
 ```
 
-### 전략 학습 흐름
+비밀번호는 플래그로 받지 않음 — 환경변수(`PGPASSWORD`/`MYSQL_PASSWORD`/`ORACLE_SVC_PASSWORD`) 또는 interactive mode에서 입력.
+
+### status
+
+파이프라인 진행 현황 (step별 건수).
 
 ```
-호출 경로 1: Validate/Test에서 FAIL → 수정 → fix_history 기록 → Strategy Refine
-호출 경로 2: Review round 2+ 지속 FAIL → Strategy Refine 자동 호출 → 재변환
-    ↓
-General Rules 중복 체크 → 중복이면 무시
-    ↓
-프로젝트 특화 패턴만 Before/After 형식으로 전략에 추가
-    ↓
-다음 Transform 실행 시 자동 적용
+oma status [--json]
+```
+
+### analyze
+
+Mapper 스캔 → SQL 추출 → 전략 초안 생성.
+
+```
+oma analyze [--source PATH] [--json]
+```
+
+`--source` 미지정 시 DB의 JAVA_SOURCE_FOLDER property 사용.
+
+### db
+
+상태 DB 조회/갱신 (subagent와 orchestrator의 공용 인터페이스).
+
+```
+oma db pending --step transform|review|validate [--max-batch N] [--only LIST] [--json]
+oma db read-sql MAPPER_FILE SQL_ID [--json]
+oma db read-transform MAPPER_FILE SQL_ID [--json]
+oma db save-transform MAPPER_FILE SQL_ID [--sql-file PATH|-] [--notes TEXT] [--step STEP] [--json]
+oma db set-reviewed MAPPER_FILE SQL_ID --result PASS|FAIL|SKIP [--feedback TEXT] [--feedback-file F] [--json]
+oma db set-validated MAPPER_FILE SQL_ID --result PASS|FAIL|SKIP [--notes TEXT] [--json]
+oma db set-tested MAPPER_FILE SQL_ID --result PASS|FAIL|SKIP|FIXED [--notes TEXT] [--json]
+oma db get-property KEY [--json]
+oma db reset --step transform|review|validate|test [--only LIST]
+oma db feedback-patterns [--json]
+```
+
+### merge
+
+변환된 SQL을 원본 XML에 병합하여 최종 mapper 생성.
+
+```
+oma merge [--mapper MAPPER_FILE] [--json]
+```
+
+`--mapper`: 단일 mapper만 재병합 (test-fixer 수정 후 사용).
+
+### test-exec
+
+Target DB에서 SQL 실행 테스트.
+
+```
+oma test-exec [--phase 0|1|1.5|all] [--only LIST] [--json]
+```
+
+- Phase 0: EXPLAIN (syntax validation)
+- Phase 1: EXPLAIN + Execute
+- Phase 1.5/all: Full (Oracle comparison 포함)
+
+### report
+
+HTML 리포트 재생성.
+
+```
+oma report
+```
+
+산출물: `output/reports/oma_report.html`
+
+---
+
+## 2-Tier 룰 시스템
+
+### Tier 1: Static General Rules
+
+위치: `src/reference/oracle_to_{dbms}_rules.md`
+
+TARGET_DBMS_TYPE에 따라 선택됨:
+- `oracle_to_postgresql_rules.md` (~680줄)
+- `oracle_to_mysql_rules.md` (~600줄)
+
+내용: 공통 Oracle→Target 변환 패턴, 함수 매핑, 자료형, PL/SQL 구문 등.
+Subagent가 변환 시 Read하여 참조.
+
+### Tier 2: Dynamic Project Strategy
+
+위치: `output/strategy/transform_strategy.md`
+
+Analyze 단계에서 초안 생성, 프로젝트 진행 중 oma-strategy-refiner가 갱신.
+내용: 해당 프로젝트에서 발견된 고유 패턴, 반복 실패 수정법, 특수 함수/패키지 처리.
+
+---
+
+## 상태 모델
+
+### oma_control.db
+
+SQLite 데이터베이스. 위치: `$OMA_OUTPUT_DIR/oma_control.db` (기본: `output/oma_control.db`)
+
+### 주요 테이블
+
+| 테이블 | 역할 | 키 |
+|--------|------|-----|
+| `properties` | 설정 key/value (setup 결과) | PK: key |
+| `source_xml_list` | 발견된 Mapper XML 목록 | PK: id |
+| `transform_target_list` | **Master State** — SQL별 현재 상태 | UQ: (mapper_file, sql_id) |
+| `extract_record` | SQL별 원본 기록 (UPSERT) | UQ: (mapper_file, sql_id) |
+| `transform_history` | 변환 시도 로그 (append-only) | FK: (mapper_file, sql_id) |
+| `review_history` | 리뷰 로그 (append-only) | FK: (mapper_file, sql_id) |
+| `validate_history` | 검증 로그 (append-only) | FK: (mapper_file, sql_id) |
+| `test_history` | 테스트 로그 (append-only) | FK: (mapper_file, sql_id) |
+| `target_metadata` | Target DB 컬럼 메타데이터 (타입 캐스팅용) | — |
+
+### transform_target_list 상태 플래그
+
+```
+transformed : N / Y / F  (Not done / Yes / Failed)
+reviewed    : N / Y / F
+validated   : N / Y
+tested      : N / Y
+completed   : N / Y
+current_step: pending / extract / transform / review / validate / test / completed
+```
+
+상세 스키마: `docs/db-schema.md` 참조.
+
+---
+
+## 데이터 흐름
+
+```
+Source Java Project (MyBatis XMLs)
+    │
+    │ [oma analyze] scan + extract
+    ▼
+source_xml_list + transform_target_list + extract_record
+    │
+    │ [oma-transformer subagent] convert SQL
+    ▼
+transform_history (converted SQL saved via oma db save-transform)
+    │
+    │ [oma-reviewer subagent] syntax + equivalence check
+    ▼
+review_history (PASS/FAIL via oma db set-reviewed)
+    │                         ↑ FAIL → re-transform loop
+    │ [oma-validator subagent]
+    ▼
+validate_history (PASS/FAIL via oma db set-validated)
+    │
+    │ [oma merge] XML reassembly
+    ▼
+output/xmls/merge/*.xml (final mapper XMLs)
+    │
+    │ [oma test-exec] run against Target DB
+    ▼
+test_result (PASS/FAIL/SKIP via oma db set-tested)
+    │
+    │ [oma report]
+    ▼
+output/reports/oma_report.html
 ```
 
 ---
 
-## 데이터베이스 스키마
+## 디렉토리 구조
 
-### SQLite: `output/oma_control.db`
-
-#### transform_target_list (핵심 테이블)
-```sql
-CREATE TABLE transform_target_list (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    mapper_file TEXT NOT NULL,
-    sql_id TEXT NOT NULL,
-    sql_type TEXT NOT NULL,
-    seq_no INTEGER NOT NULL,
-    namespace TEXT,
-    source_file TEXT NOT NULL,
-    target_file TEXT,
-    transformed TEXT DEFAULT 'N',    -- Transform 완료
-    reviewed TEXT DEFAULT 'N',       -- Review 완료 (Y=PASS/PWW, F=FAIL, N=미리뷰)
-    validated TEXT DEFAULT 'N',      -- Validate 완료
-    tested TEXT DEFAULT 'N',         -- Test 완료
-    completed TEXT DEFAULT 'N',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
 ```
-
-#### 기타 테이블
-- **properties**: 환경 설정 (Java 경로, DB 접속 정보, `OMA_MODEL_ID`, `OMA_LITE_MODEL_ID`, `OMA_OUTPUT_DIR`)
-- **source_xml_list**: Mapper XML 파일 목록
-- **pg_metadata**: PostgreSQL 컬럼 메타데이터 (타입 캐스팅용)
-
----
-
-## 기술 스택
-
-| 구분 | 기술 |
-|------|------|
-| **Framework** | [Strands Agents SDK](https://github.com/strands-agents/sdk-python) v1.24.0+ |
-| **Model** | Claude Sonnet 4.5 (`MODEL_ID`, AWS Bedrock) · Claude Haiku 4.5 (`LITE_MODEL_ID`, Facilitator) |
-| **Prompt Caching** | 3-Block: prompt + General Rules + Strategy |
-| **DB** | SQLite (상태 관리), PostgreSQL (타겟 DB) |
-| **상태 관리** | StateManager (중앙화된 DB 접근 인터페이스) |
-| **타입 안전성** | TypedDict (Orchestrator, ReviewManager schemas) |
-| **외부 연동** | AWS Bedrock, Java MyBatis |
-| **병렬 처리** | ThreadPoolExecutor (8 workers) |
-| **진행률** | `queue.Queue` 기반 progress + log tailing |
-| **Python** | 3.10+ (권장 3.11) |
-| **Dependencies** | boto3, defusedxml |
-
----
-
-## 문제 해결
-
-### 일반적인 문제
-
-| 문제 | 원인 | 해결 |
-|------|------|------|
-| Transform 실패 | 전략 파일 없음 | `python3 src/run_source_analyzer.py` |
-| Validate 에러 | reviewed 컬럼 없음 | Review 단계를 먼저 실행 (자동 생성) |
-| Test 실패 | PostgreSQL 접속 불가 | `run_setup.py`로 접속 정보 재설정 |
-| 전략 파일 비대 | 학습 항목 누적 | `python3 src/run_strategy.py --task compact_strategy` |
-| "실행"인데 리셋됨 | Orchestrator 혼동 | "수행해줘" (이어서) vs "재수행해줘" (초기화) |
-
-### 로그 위치
+repo/
+├── .claude/
+│   ├── agents/              # 5 subagent definitions (markdown)
+│   │   ├── oma-transformer.md
+│   │   ├── oma-reviewer.md
+│   │   ├── oma-validator.md
+│   │   ├── oma-test-fixer.md
+│   │   └── oma-strategy-refiner.md
+│   └── skills/              # Pipeline skills (loaded into main session)
+│       ├── oma-pipeline/SKILL.md
+│       ├── oma-start/SKILL.md
+│       └── oma-status/SKILL.md
+├── src/
+│   ├── cli/                 # oma CLI (Python, single entry point)
+│   │   ├── main.py
+│   │   ├── cmd_setup.py
+│   │   ├── cmd_status.py
+│   │   ├── cmd_db.py
+│   │   ├── cmd_analyze.py
+│   │   ├── cmd_merge.py
+│   │   ├── cmd_test.py
+│   │   └── cmd_report.py
+│   ├── core/                # Shared modules
+│   │   ├── state_manager.py (SQLAlchemy ORM)
+│   │   ├── models.py        (DB schema definitions)
+│   │   ├── html_report.py   (self-contained HTML report)
+│   │   ├── sql_executor.py  (psql/mysql execution)
+│   │   ├── db_conn.py       (DB connection helpers)
+│   │   ├── metadata.py      (target DB metadata)
+│   │   └── complexity.py    (SQL complexity scoring)
+│   ├── reference/           # Conversion rules (subagents Read these)
+│   │   ├── oracle_to_postgresql_rules.md
+│   │   └── oracle_to_mysql_rules.md
+│   └── utils/
+│       ├── project_paths.py (path constants)
+│       └── db_utils.py      (query_by_mapper/update_by_mapper)
+├── output/                  # Working directory (gitignored)
+│   ├── oma_control.db
+│   ├── strategy/transform_strategy.md
+│   ├── xmls/origin/         # Analyze가 복사한 원본
+│   ├── xmls/merge/          # Merge 산출물 (최종)
+│   └── reports/oma_report.html
+├── tests/cli/               # pytest suite
+├── example/                 # E2E demo project
+└── docs/                    # Documentation
 ```
-output/logs/
-├── transform/[Mapper].log    # 변환 상세
-├── review/[Mapper].log       # 리뷰 PASS/PWW/FAIL + severity별 violations
-├── validate/[Mapper].log     # 검증 상세
-├── test/[Mapper].log         # 테스트 상세
-└── fix_history/              # 수정 이력 (ORIGINAL/BEFORE/AFTER)
-```
-
----
-
-**문서 버전**: 3.4
-**마지막 업데이트**: 2026-03-05

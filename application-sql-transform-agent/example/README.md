@@ -1,82 +1,62 @@
-# OMA Example — Quick Start
+# OMA Example — Oracle to PostgreSQL
 
-This folder contains a sample Spring Boot + MyBatis application with Oracle SQL mapper XMLs.
-Use it to try OMA's Oracle-to-PostgreSQL migration pipeline.
+3 MyBatis mapper XMLs (44 Oracle SQL statements) converted to PostgreSQL using the OMA pipeline inside Claude Code.
+
+## What's Included
+
+| Mapper | SQL Count | Key Oracle Features |
+|--------|-----------|---------------------|
+| UserMapper | 16 | `(+)` outer join, `NVL`, `DECODE`, `MERGE INTO`, `LISTAGG`, `CUBE`/`ROLLUP`, `ROWNUM`, window functions |
+| ProductMapper | 14 | `CONNECT BY`/`START WITH`, `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LEVEL`, sequence `NEXTVAL` |
+| OrderMapper | 14 | `MEDIAN`, `ROWNUM` pagination, `(+)` outer join, `EXTRACT` interval, window functions |
 
 ## Prerequisites
 
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- AWS credentials configured (`aws configure`) with **Bedrock access only**
+- AWS credentials with Bedrock access (`aws configure`)
 
-> **Note:** PostgreSQL (target DB) is NOT required for this example. All pipeline steps except Test work without a database. During setup, skip the DB connection prompt (`n`). Only Bedrock API access is needed.
+> PostgreSQL (target DB) is NOT required. All steps except Test work without a database.
 
 ## Run
 
 ```bash
+# 1. Setup (install deps + configure)
 cd example
-./setup.sh    # 1회: 의존성 설치 + 자동 설정 (프롬프트 없음)
-./run.sh      # 이후: 오케스트레이터 실행
+./setup.sh
+
+# 2. Launch Claude Code
+export OMA_OUTPUT_DIR=$(pwd)/output
+cd .. && claude
+
+# 3. Inside Claude Code session, type:
+#    '변환 시작' or /oma:start
 ```
 
-> `setup.sh` uses default values automatically. For manual configuration, use `./setup.sh --interactive`.
+## Pipeline Flow
 
-### Orchestrator (메인)
-
-`run.sh`가 Strands Agent 기반 REPL(21 tools)을 실행합니다. 자연어로 명령합니다:
-
-| 명령 예시 | 동작 |
-|---------|------|
-| `파이프라인 현황 알려줘` | 설정 + 단계별 진행률 표시 |
-| `전체 수행` | Analyze → Transform → Review → Validate → Merge 순차 실행 |
-| `분석 수행` | Analyze 단계만 실행 |
-| `변환 수행` | Transform 단계만 실행 |
-| `샘플 변환 3개` | 3개 대표 SQL만 변환 (전체 reset 없음) |
-| `리뷰 수행` | Review — 다관점 리뷰 (Syntax + Equivalence + Facilitator) |
-| `검증 수행` | Validate — 기능 동치 검증 |
-| `병합 수행` | Merge — 최종 mapper XML 재조립 |
-| `테스트 수행` | Test — EXPLAIN + Execute + Oracle-PG Compare |
-| `selectUserList 재변환` | 특정 SQL 검색 → reset → 재변환 |
-| `test fail 분류하고 보고서 만들어` | 실패 분류 + 보고서 생성 |
-| `parameter 카테고리 전부 SKIP` | 인프라 실패 일괄 SKIP |
-| `종료` | Exit (`q`/`quit`/`exit`) |
-
-> Test step requires DB connection (PG/MySQL). Without DB, test is skipped.
-> With Oracle DB, TC auto-generation + Oracle-PG result comparison enabled.
-
-### CLI (보조)
-
-Claude Code / Kiro CLI에서도 `AGENT.md`를 참조해 동일 tool을 Bash로 호출 가능합니다.
-
-### Pipeline
+Inside the Claude Code session, OMA runs as CC subagents. Each step pauses for approval:
 
 ```
-Analyze → Transform → Review → Validate → Merge → Test
-                        ↓ FAIL
-                  Re-transform (max 3 rounds)
-
-Test: TC Gen → EXPLAIN (all) → Execute (SELECT) → Compare (if Oracle) → Agent fix
+Analyze → Transform → Review → Validate → Merge → Test → Report
+                         ↓ FAIL (specific feedback)
+                   Re-transform (max 3 rounds)
 ```
 
-### Reports
-
-각 단계 종료 시 `output/reports/oma_report.html` 자동 재생성 — 브라우저에서 7개 탭 확인.
-
-## What's included
-
-3 MyBatis mapper XMLs (42 SQL statements) covering major Oracle conversion patterns:
-
-| Mapper | SQL | Key Oracle Features |
-|--------|-----|---------------------|
-| UserMapper | 15 | `(+)` outer join, `NVL`, `DECODE`, `MERGE INTO`, `LISTAGG`, `CUBE`/`ROLLUP`, `ROWNUM`, window functions |
-| ProductMapper | 14 | `CONNECT BY`/`START WITH`, `SYS_CONNECT_BY_PATH`, `CONNECT_BY_ISLEAF`, `LEVEL`, sequence `NEXTVAL` |
-| OrderMapper | 13 | `MEDIAN`, `ROWNUM` pagination, `(+)` outer join, `EXTRACT` interval, window functions |
+- **Analyze** — Scans mapper XMLs, extracts SQL, generates conversion strategy
+- **Transform** — Oracle SQL to PostgreSQL conversion
+- **Review** — Multi-perspective review (Syntax + Equivalence + Facilitator)
+- **Validate** — Functional equivalence verification
+- **Merge** — Reassembles final mapper XMLs with converted SQL
+- **Test** — EXPLAIN + Execute + Compare (requires target DB)
 
 ## Output
 
-After running, check `example/output/`:
-- `example/output/xmls/transform/` — converted PostgreSQL mapper XMLs
-- `example/output/xmls/merge/` — final reassembled mapper XMLs
-- `example/output/reports/oma_report.html` — 통합 HTML 보고서 (7 tabs)
-- `example/output/test/test_cases.json` — auto-generated test parameters
-- `example/output/strategy/` — learned conversion patterns
+After pipeline completes, check `example/output/`:
+
+| Path | Contents |
+|------|----------|
+| `xmls/merge/` | Final reassembled PostgreSQL mapper XMLs |
+| `reports/oma_report.html` | Integrated HTML report (7 tabs) |
+| `strategy/` | Learned conversion patterns |

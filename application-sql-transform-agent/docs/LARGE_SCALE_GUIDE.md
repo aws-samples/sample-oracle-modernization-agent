@@ -1,324 +1,194 @@
 # Large-Scale Processing Guide
 
-**대규모 프로젝트 운영 가이드**
+**대규모 프로젝트 운영 가이드 (수백~수천 SQL)**
 
-OMA로 수백~수천 개 SQL을 처리할 때의 권장 설정과 실행 전략.
+OMA로 대규모 MyBatis Mapper 변환을 수행할 때의 권장 전략과 운영 팁.
 
 ---
 
 ## 목차
 
-1. [규모별 권장 설정](#규모별-권장-설정)
-2. [단계별 실행 전략](#단계별-실행-전략)
-3. [Prompt Caching과 비용 최적화](#prompt-caching과-비용-최적화)
-4. [중단과 재개](#중단과-재개)
-5. [모니터링](#모니터링)
-6. [문제 해결](#문제-해결)
+1. [규모 판단 기준](#규모-판단-기준)
+2. [샘플 변환 전략](#샘플-변환-전략)
+3. [배치 Dispatch 운영](#배치-dispatch-운영)
+4. [체크포인트와 중단/재개](#체크포인트와-중단재개)
+5. [Claude Code 세션 관리](#claude-code-세션-관리)
+6. [DB 백업](#db-백업)
+7. [문제 해결](#문제-해결)
 
 ---
 
-## 규모별 권장 설정
+## 규모 판단 기준
 
-### Worker 수 결정 기준
+| 규모 | SQL 수 | 예상 소요 | 권장 전략 |
+|------|--------|-----------|-----------|
+| 소규모 | ~50 | 1 세션 | 전체 변환 한 번에 진행 |
+| 중규모 | 50~300 | 2~5 세션 | 샘플 10건 → 전략 보정 → 전체 |
+| 대규모 | 300~1000+ | 다수 세션 | 샘플 15건 → 전략 확정 → 배치별 진행 + 세션 분할 |
 
-Worker 수는 **AWS Bedrock 동시 호출 한도**에 맞춰야 한다. Account/모델별 기본 한도는 보통 2~10이며, Service Quotas에서 확인 가능.
-
-| 규모 | SQL 수 | `--workers` | 이유 |
-|------|--------|-------------|------|
-| 소규모 | ~50 | 4 | Bedrock 기본 한도 내 안전 운영 |
-| 중규모 | 50~300 | 8 (기본값) | 대부분의 Account 한도에서 동작 |
-| 대규모 | 300~1000+ | 4~6 | Throttling 방지를 위해 오히려 줄임 |
-
-**대규모에서 worker를 줄이는 이유**: Review 단계에서 각 worker가 내부적으로 Syntax + Equivalence 2개의 병렬 API 호출을 추가로 생성한다. `--workers 8`이면 최대 16개 동시 API 호출이 발생하여 `ThrottlingException`이 날 수 있다.
-
-```bash
-# 권장: 대규모 프로젝트
-python3 src/run_sql_transform.py --workers 6
-python3 src/run_sql_review.py --workers 4    # Review는 내부 병렬 때문에 더 줄임
-python3 src/run_sql_validate.py --workers 6
-python3 src/run_sql_test.py --workers 6
-```
-
-### Bedrock 한도 확인 방법
-
-```bash
-aws service-quotas get-service-quota \
-  --service-code bedrock \
-  --quota-code L-XXXXXXXX \
-  --region us-east-1
-```
-
-또는 AWS Console > Service Quotas > Amazon Bedrock > `Invoke model calls per minute` 확인.
+> **핵심**: 규모가 커질수록 **샘플 검증 → 전략 보정** 단계가 중요하다.
+> 잘못된 전략으로 1000건을 돌리면 재변환 비용이 막대하다.
 
 ---
 
-## 단계별 실행 전략
+## 샘플 변환 전략
 
-### Orchestrator vs 개별 실행
+### 목적
 
-| 방식 | 사용 시점 | 명령어 |
-|------|----------|--------|
-| **Orchestrator** | 소~중규모, 처음 실행 | `python3 src/run_orchestrator.py` |
-| **개별 단계** | 대규모, 세밀한 제어 필요 | 아래 참조 |
+대규모 프로젝트에서는 전체 변환 전에 대표 SQL을 먼저 변환하여:
+- 전략 파일(`output/strategy/transform_strategy.md`)의 완성도 검증
+- Tier 1 룰의 누락/오류 조기 발견
+- 예상 PASS율 추정
 
-대규모(300+ SQL)에서는 **샘플 변환으로 검증 후 전체 실행**을 권장한다:
+### 실행 방법
 
-```bash
-# 1. Setup (1회)
-python3 src/run_setup.py
+Analyze 완료 후 체크포인트에서 "샘플 N건" 선택:
 
-# 2-a. Sample Transform — 전략 품질 사전 검증 (5~10개)
-python3 src/run_sql_transform.py --sample 10 --workers 4
-# 결과 확인 후 문제 없으면 전체 실행
-
-# 2-b. Transform — 가장 오래 걸림, worker 조절 중요
-python3 src/run_sql_transform.py --workers 6
-
-# 3. Review — 내부 병렬(Syntax+Equiv) 고려하여 worker 절반
-python3 src/run_sql_review.py --workers 4 --max-rounds 3
-
-# 4. Validate
-python3 src/run_sql_validate.py --workers 6
-
-# 5. Test — PostgreSQL 접속 필요
-python3 src/run_sql_test.py --workers 6
-
-# 6. Merge — 순차, 빠름
-python3 src/run_sql_merge.py
+```
+체크포인트 응답: "샘플 15건으로 먼저 해보자"
 ```
 
-### 단계별 예상 소요 (300 SQL 기준, workers=6)
+오케스트레이터가 sql_type별 분산 + mapper round-robin으로 대표 SQL을 선정한다.
+샘플 결과가 만족스러우면 전체 변환으로 진행.
 
-| 단계 | 예상 시간 | 병목 |
-|------|----------|------|
-| Transform | 15~30분 | API 호출 (SQL당 ~5초) |
-| Review | 10~20분 | 2x API 호출 (Syntax + Equiv 병렬) |
-| Validate | 10~15분 | API 호출 |
-| Test Phase 1 | 5~10분 | Java 순차 실행 |
-| Test Phase 2 | 실패 수 비례 | Agent 수정 |
-| Merge | ~1분 | 순차 파일 I/O |
+### 샘플 결과 활용
 
-> 실제 시간은 SQL 복잡도, Bedrock 응답 시간, 네트워크에 따라 크게 달라진다.
+- PASS율 80%+ → 전략 파일 미조정, 전체 진행
+- PASS율 60~80% → FAIL 패턴 분석 후 전략 파일 보강, 재샘플
+- PASS율 60% 미만 → Tier 1 룰 자체 검토 필요 (프로젝트 특수 패턴 다수)
 
 ---
 
-## Prompt Caching과 비용 최적화
+## 배치 Dispatch 운영
 
-### 캐시 유효 시간: 5분
+### 병렬 dispatch 제한
 
-Bedrock Prompt Caching은 **마지막 호출로부터 5분** 동안 유효하다. 이것이 대규모 처리의 핵심 비용 요소:
+파이프라인 스킬에 정의된 불변 원칙:
+- **동시 dispatch 최대 5개** (subagent 5개 병렬)
+- 대기 배치가 더 있으면 5개 단위로 순차 dispatch
 
-- Worker가 연속으로 API를 호출하면 캐시 히트 → **90%+ 비용 절감**
-- 5분 이상 간격이 벌어지면 캐시 미스 → **비용 5~10배 증가**
+### 배치 크기 제어
 
-### 캐시 효율을 높이는 방법
+`oma db pending --step <step> --max-batch <N>` 로 배치당 SQL 수 제한:
+- 기본값: 15 (mapper 1개 기본, 15건 초과 시 분할)
+- 대규모 프로젝트에서는 기본값 유지 권장
 
-1. **단계 사이에 긴 대기 금지**: Transform 끝나면 바로 Review 시작
-2. **Worker 수가 너무 적으면 비효율**: Worker 1개이면 API 호출 간격이 길어져 캐시 미스 증가
-3. **Worker 수가 너무 많아도 비효율**: Throttling으로 재시도 대기 → 캐시 만료 가능
-4. **최적 균형**: Throttling 없이 연속 호출이 유지되는 worker 수 (보통 4~8)
+### 실패 재시도
 
-### 비용 시뮬레이션
+실패한 SQL만 선택적으로 재dispatch:
 
+```bash
+oma db pending --step transform --only "mapper_a.xml:selectUser,mapper_b.xml:insertOrder"
 ```
-300 SQL × 4단계(Transform/Review/Validate/Test) = ~1,200 API 호출
 
-캐시 히트 시: ~$3~5
-캐시 미스 시: ~$30~50
+전체를 reset하지 않고 실패 건만 골라서 재시도할 수 있다.
 
-→ 단계 간 빈틈 없이 실행하는 것이 10배 차이를 만든다
+---
+
+## 체크포인트와 중단/재개
+
+### 상태는 DB가 SSOT
+
+모든 파이프라인 진행 상태는 `output/oma_control.db`에 기록된다.
+세션이 중단되어도 상태가 유실되지 않는다.
+
+### 재개 방법
+
+새 세션에서:
+
+```bash
+uv run oma status --json
+```
+
+이 명령으로 현재 위치를 파악하고, 해당 단계의 체크포인트부터 재개한다.
+
+### 단계별 재개 예시
+
+| 상황 | 확인 방법 | 재개 |
+|------|-----------|------|
+| Transform 중 중단 | `status`에 transformed=N 잔여 | "변환 계속" |
+| Review 2라운드 중 중단 | `status`에 reviewed=N + feedback 존재 | "리뷰 계속" |
+| Test 실패 수정 중 | `status`에 tested=N | "테스트 계속" |
+| Merge까지 완료 | all merged | "테스트 진행" |
+
+### 부분 reset
+
+특정 단계만 초기화하고 재수행:
+
+```bash
+oma db reset --step review --only "mapper_a.xml:selectUser"
 ```
 
 ---
 
-## 중단과 재개
+## Claude Code 세션 관리
 
-### 자동 재개 메커니즘
+### 긴 세션 대응
 
-모든 단계는 SQLite DB 플래그 기반으로 동작하므로, **중단 후 같은 명령어를 다시 실행하면 미완료분만 이어서 처리**한다.
+대규모 변환은 단일 세션으로 완료되지 않을 수 있다:
 
-```
-transformed='N' → Transform 대상
-reviewed='N'    → Review 대상
-validated='N'   → Validate 대상
-tested='N'      → Test 대상
-```
+- **컨텍스트 한도 접근 시**: `/clear` 로 컨텍스트 리셋 후 "변환 계속" (DB 상태 유지)
+- **작업 분할**: Transform 완료 후 세션 종료 → 새 세션에서 Review부터 시작
+- **진행 확인**: 매 세션 시작 시 `oma status`로 현 위치 파악
 
-```bash
-# 중단 후 재실행 — 이미 완료된 건 스킵
-python3 src/run_sql_transform.py --workers 6
-# "✅ 200/300 already done, processing remaining 100..."
-```
+### 권장 세션 단위
 
-### 특정 단계 초기화
+| 단계 | 세션 1회 처리 권장량 |
+|------|---------------------|
+| Analyze | 전체 (1회로 충분) |
+| Transform | 100~150 SQL |
+| Review | Transform과 동일 범위 |
+| Validate → Merge → Test | 나머지 한 세션에 |
 
-```bash
-# Transform 전체 재실행
-python3 src/run_sql_transform.py --reset --workers 6
+### 세션 간 인수인계
 
-# Review만 초기화
-python3 src/run_sql_review.py --reset
-
-# Test만 초기화
-python3 src/run_sql_test.py --reset
-```
-
-### 주의: 파이프라인 순서 의존성
-
-Review를 리셋하면 Validate/Test도 다시 해야 한다. Transform을 리셋하면 이후 전체 재실행.
-
-```
-Transform → Review → Validate → Test → Merge
-리셋하면 ──────────→ 이후 단계 모두 재실행 필요
-```
+별도 인수인계 문서 불필요 — `oma status --json`이 모든 상태를 포함.
+새 세션에서 "변환 시작" 또는 "상태 확인" 하면 자동으로 현 위치 파악.
 
 ---
 
-## 모니터링
+## DB 백업
 
-### 실시간 진행률
+### 자동 백업 없음
 
-각 단계는 progress log 파일에 실시간 기록하며, stderr로 tail 출력:
-
-```
-[  5%] [UserMapper] selectUserList - 🔄 변환중
-[ 12%] [UserMapper] selectUserList - ✅ 완료
-[ 15%] [OrderMapper] selectOrder - 🔄 변환중
-```
-
-### 별도 터미널에서 모니터링
+현재 OMA CLI는 자동 백업을 수행하지 않는다.
+대규모 프로젝트에서는 단계 전환점마다 수동 백업을 권장:
 
 ```bash
-# Transform 진행 상황
-tail -f output/logs/transform_progress.log
-
-# Review 진행 상황
-tail -f output/logs/review_progress.log
-
-# Mapper별 상세 로그
-tail -f output/logs/transform/UserMapper.log
+cp output/oma_control.db output/oma_control.db.bak_$(date +%Y%m%d_%H%M)
 ```
 
-### DB 직접 조회
+### 권장 백업 시점
 
-```bash
-sqlite3 output/oma_control.db    # 또는 $OMA_OUTPUT_DIR/oma_control.db
-
--- 전체 현황
-SELECT
-  COUNT(*) as total,
-  SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as transformed,
-  SUM(CASE WHEN reviewed='Y' THEN 1 ELSE 0 END) as reviewed,
-  SUM(CASE WHEN validated='Y' THEN 1 ELSE 0 END) as validated,
-  SUM(CASE WHEN tested='Y' THEN 1 ELSE 0 END) as tested
-FROM transform_target_list;
-
--- Mapper별 진행률
-SELECT mapper_file,
-  COUNT(*) as total,
-  SUM(CASE WHEN transformed='Y' THEN 1 ELSE 0 END) as done
-FROM transform_target_list
-GROUP BY mapper_file;
-
--- 실패 목록
-SELECT mapper_file, sql_id, review_result
-FROM transform_target_list
-WHERE reviewed='F';
-```
+- Analyze 완료 직후
+- Transform 전체 완료 직후
+- Review 3라운드 종료 후
+- Test 전체 완료 후 (최종 상태)
 
 ---
 
 ## 문제 해결
 
-### 1. ThrottlingException (Bedrock 동시성 초과)
+### Transform이 느린 경우
 
-**증상**: 로그에 `ThrottlingException` 또는 `Too many requests` 에러.
+- 원인: mapper당 SQL 수가 많아 배치 분할이 많음
+- 대응: `--max-batch 10` 으로 배치를 더 작게 분할 (subagent 작업량 감소)
 
-**대응**:
-```bash
-# Worker 수 줄이기
-python3 src/run_sql_transform.py --workers 4
+### Review FAIL이 반복되는 패턴
 
-# Review는 더 줄이기 (내부 2x 병렬)
-python3 src/run_sql_review.py --workers 3
-```
+- 원인: Tier 1 룰에 누락된 프로젝트 특수 패턴
+- 대응:
+  1. `oma db feedback-patterns --json` 으로 실패 사유 수집
+  2. oma-strategy-refiner subagent가 자동 보강 (3라운드 초과 시)
+  3. 필요 시 `output/strategy/transform_strategy.md` 수동 편집
 
-재실행하면 실패한 SQL만 자동으로 이어서 처리.
+### 세션 복구 불가
 
-### 2. SQLite Database Locked
+- 원인: DB 파일 손상 (극히 드묾)
+- 대응: 백업에서 복구 후 `oma status`로 상태 확인
 
-**증상**: `sqlite3.OperationalError: database is locked`
+### Test 실패율이 높은 경우
 
-**원인**: 8개 worker가 동시에 SQLite에 쓰기 시도. 기본 retry (5회, 최대 2.5초 대기)로 대부분 해결되지만, 극단적 동시성에서 발생 가능.
-
-**대응**:
-- Worker 수 줄이기 (`--workers 4`)
-- 다른 프로세스가 DB를 점유하고 있지 않은지 확인
-- `lsof output/oma_control.db`로 점유 프로세스 확인
-
-### 3. 특정 Mapper에서 반복 실패
-
-**증상**: 같은 Mapper가 계속 에러.
-
-**확인**:
-```bash
-# Mapper별 상세 로그
-cat output/logs/transform/ProblemMapper.log
-
-# DB에서 실패 SQL 확인
-sqlite3 output/oma_control.db \
-  "SELECT sql_id, review_result FROM transform_target_list WHERE mapper_file='ProblemMapper.xml' AND reviewed='F'"
-```
-
-**대응**: Orchestrator로 개별 SQL 재처리:
-```
-⚛️  > ProblemMapper.xml의 selectComplexQuery 재변환해줘
-```
-
-### 4. Prompt Caching 미작동 (비용 급증)
-
-**확인**: AWS CloudWatch에서 Bedrock 호출별 `CacheReadInputTokens` 메트릭 확인. 0이면 캐시 미스.
-
-**원인**:
-- 모델이 Prompt Caching 미지원 (Sonnet 4.6, Opus 4.6 등)
-- System prompt가 변경됨 (strategy 파일 업데이트 후 캐시 무효화)
-- API 호출 간격이 5분 초과
-
-**대응**:
-- `OMA_MODEL_ID` 확인 — 반드시 캐싱 지원 모델 사용
-- Worker가 최소 2개 이상으로 연속 호출 유지
-
-### 5. Test Phase 1 타임아웃
-
-**증상**: Java bulk test가 600초 제한에 걸림.
-
-**원인**: 대규모 SQL을 순차 실행하는 Phase 1의 한계.
-
-**대응**:
-- PostgreSQL 연결 상태 확인 (느린 쿼리 없는지)
-- Phase 1이 타임아웃되더라도 Phase 2에서 실패 건을 Agent가 개별 수정
-
----
-
-## 대규모 프로젝트 체크리스트
-
-```
-실행 전:
-  □ AWS Bedrock 동시성 한도 확인 (Service Quotas)
-  □ OMA_MODEL_ID가 Prompt Caching 지원 모델인지 확인
-  □ PostgreSQL 타겟 DB 접속 가능 확인 (Test 단계용)
-  □ 디스크 여유 공간 확인 (output/ 디렉토리)
-  □ input/ 경로에 Mapper XML 배치 확인
-
-실행 중:
-  □ 단계별 개별 실행 (--workers 조절)
-  □ Review는 worker를 Transform의 절반으로
-  □ progress log 또는 DB 쿼리로 진행률 확인
-  □ 단계 간 빈틈 없이 연속 실행 (캐시 유효 5분)
-
-실행 후:
-  □ DB에서 최종 현황 확인 (전체 Y 여부)
-  □ output/merge/ 에 최종 XML 확인
-  □ reviewed='F' 인 SQL은 수동 검토
-  □ output/logs/fix_history/ 에서 수정 이력 확인
-```
+- Target DB에 필요한 테이블/함수가 누락되었을 수 있음
+- `oma test-exec --phase 0` (EXPLAIN만)으로 먼저 syntax 검증
+- schema 관련 실패는 인프라 문제 — DB 환경 점검 필요

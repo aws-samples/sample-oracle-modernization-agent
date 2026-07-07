@@ -139,6 +139,16 @@
    │ lookup (convert_sql, validate)
    │
    └─── transform/validate agents query for type-aware conversions
+
+┌──────────────────────────────────┐
+│          diff_record             │
+│  (Review diff 캐시)              │
+│                                  │
+│  PK: id                          │
+│  FK: (mapper_file, sql_id)       │
+│      diff_content                │
+│      created_at                  │
+└──────────────────────────────────┘
 ```
 
 ## 테이블 분류 (3 종류)
@@ -154,6 +164,7 @@
 | `extract_record` | 추출된 원본 Oracle SQL (UNIQUE UPSERT) | 1 per SQL |
 | `source_xml_list` | 발견된 Mapper XML 파일 목록 | 1 per XML |
 | `target_metadata` | Target DB 컬럼 타입 캐시 | 1 per column |
+| `diff_record` | Review diff 캐시 (원본↔변환 비교) | 1 per SQL |
 | `properties` | key/value 설정 | 1 per key |
 
 ### 3. History Log (append-only audit)

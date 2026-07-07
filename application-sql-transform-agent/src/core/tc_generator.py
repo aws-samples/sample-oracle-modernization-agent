@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from utils.project_paths import (
-    DB_PATH, OUTPUT_DIR, TRANSFORM_DIR, LITE_MODEL_ID,
+    DB_PATH, OUTPUT_DIR, TRANSFORM_DIR,
     get_target_dbms,
 )
 
@@ -34,6 +34,14 @@ class TestCase:
 
 # ── Oracle helpers ──
 
+_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z0-9_$#]+$')
+
+
+def _valid_identifier(name: str) -> bool:
+    """Check if name is a safe Oracle identifier (no special chars / injection risk)."""
+    return bool(name) and _SAFE_IDENTIFIER_RE.match(name) is not None
+
+
 def _oracle_available() -> bool:
     for k in ('ORACLE_HOST', 'ORACLE_USER', 'ORACLE_SID'):
         if not os.environ.get(k):
@@ -41,24 +49,28 @@ def _oracle_available() -> bool:
     return True
 
 
-def _oracle_conn_str() -> str:
+def _oracle_connect_cmd() -> str:
+    """Build CONNECT command for sqlplus /nolog mode (credentials via stdin)."""
     u = os.environ.get('ORACLE_USER', '')
     p = os.environ.get('ORACLE_PASSWORD', '')
     h = os.environ.get('ORACLE_HOST', '')
     port = os.environ.get('ORACLE_PORT', '1521')
     sid = os.environ.get('ORACLE_SID', '')
     if os.environ.get('ORACLE_CONN_TYPE') == 'sid':
-        return f"{u}/{p}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
-    return f"{u}/{p}@{h}:{port}/{sid}"
+        conn = f"(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={h})(PORT={port}))(CONNECT_DATA=(SID={sid})))"
+    else:
+        conn = f"{h}:{port}/{sid}"
+    return f"CONNECT {u}/{p}@{conn}\n"
 
 
 def _run_oracle_sql(sql: str, timeout: int = 30) -> str:
-    """Execute SQL via sqlplus CLI. Returns stdout."""
+    """Execute SQL via sqlplus CLI. Credentials passed via stdin (not CLI args)."""
     header = "SET PAGESIZE 0 FEEDBACK OFF HEADING OFF LINESIZE 32767 TRIMOUT ON TRIMSPOOL ON\n"
+    script = _oracle_connect_cmd() + header + sql + "\nEXIT;\n"
     try:
         result = subprocess.run(
-            ['sqlplus', '-S', _oracle_conn_str()],
-            input=header + sql + "\nEXIT;\n",
+            ['sqlplus', '-S', '/nolog'],
+            input=script,
             capture_output=True, text=True, timeout=timeout,
         )
         return result.stdout
@@ -86,6 +98,8 @@ def _get_sample_data(tables: set[str]) -> dict[str, list[dict]]:
     schema = _oracle_schema()
     samples = {}
     for tbl in tables:
+        if not _valid_identifier(schema) or not _valid_identifier(tbl):
+            continue
         sql = f"SELECT * FROM {schema}.{tbl} SAMPLE(1) WHERE ROWNUM <= 3;\n"
         out = _run_oracle_sql(sql, 15)
         if out and 'ORA-' not in out:
@@ -163,6 +177,8 @@ def _get_fk_samples() -> dict[str, list[str]]:
     fk_vals = {}
     for parts in _parse_pipe(out, 3):
         col, ref_tbl, ref_col = parts[0].lower(), parts[1], parts[2]
+        if not (_valid_identifier(schema) and _valid_identifier(ref_tbl) and _valid_identifier(ref_col)):
+            continue
         sample_sql = f"SELECT DISTINCT {ref_col} FROM {schema}.{ref_tbl} WHERE {ref_col} IS NOT NULL AND ROWNUM<=3;\n"
         sample_out = _run_oracle_sql(sample_sql, 10)
         vals = [l.strip() for l in sample_out.split('\n') if l.strip() and 'ORA-' not in l][:3]
@@ -334,44 +350,12 @@ def _value_from_cast(cast_type: str) -> str:
 
 def _llm_generate_tc(sql_body: str, param_names: list[str],
                       metadata: dict) -> dict[str, str] | None:
-    """Use Sonnet 4.6 to generate test parameters based on SQL context."""
-    try:
-        from strands import Agent
-        from strands.models.bedrock import BedrockModel
-    except ImportError:
-        return None
+    """LLM TC generation removed in CC-subagent architecture.
 
-    if not param_names:
-        return None
-
-    meta_hint = ""
-    for p in param_names[:10]:
-        if p.lower() in metadata:
-            meta_hint += f"  {p}: {metadata[p.lower()]}\n"
-
-    meta_section = f"Column types:\n{meta_hint}\n" if meta_hint else ""
-    prompt = (
-        f"Generate realistic test parameter values for this SQL query.\n\n"
-        f"SQL:\n{sql_body[:2000]}\n\n"
-        f"Parameters: {', '.join(param_names[:20])}\n"
-        f"{meta_section}"
-        f"Output ONLY a JSON object mapping parameter names to test values.\n"
-        f'Example: {{"userId": "USR001", "status": "ACTIVE", "startDate": "20250101"}}\n'
-        f"Use realistic values that would return rows. No explanation."
-    )
-
-    try:
-        model = BedrockModel(model_id=LITE_MODEL_ID, max_tokens=500)
-        agent = Agent(model=model, callback_handler=None)
-        result = str(agent(prompt))
-
-        # Parse JSON from response
-        brace_start = result.find('{')
-        brace_end = result.rfind('}')
-        if brace_start >= 0 and brace_end > brace_start:
-            return json.loads(result[brace_start:brace_end + 1])
-    except Exception:
-        pass
+    Sources 1-6 (Oracle dict, metadata inference, etc.) cover most cases;
+    SQLs that still fail due to missing params are handled by the
+    test-fixer subagent in Phase 2.
+    """
     return None
 
 
